@@ -44,3 +44,4 @@ ios/Config/Local.xcconfig
 
 # Test artifacts that may contain coordinates
 test-artifacts/private/
+test-artifacts/e2e-*/

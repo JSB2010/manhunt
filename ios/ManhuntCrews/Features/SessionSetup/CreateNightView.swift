@@ -54,6 +54,7 @@ struct CreateNightView: View {
                         Text("I'll tell my crew that my phone's route, our roster and catch photos are recorded, released to the other crew as scheduled pings during play, and shown to both operators after each round.")
                             .font(.callout)
                     }
+                    .accessibilityIdentifier("create.ack")
                 } header: {
                     Text("Disclosure")
                 }
@@ -64,9 +65,19 @@ struct CreateNightView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button { create() } label: { if busy { ProgressView() } else { Text("Create").bold() } }
                         .disabled(!acknowledged || busy || title.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .accessibilityIdentifier("create.submit")
                 }
             }
             .task {
+                #if DEBUG
+                // UI-test hook (DEBUG only): shortest legal timings for automated two-phone runs.
+                if ProcessInfo.processInfo.arguments.contains("-uiTestShortRules") {
+                    rules.headStartSeconds = 60
+                    rules.pingIntervalSeconds = 60
+                    rules.totalRounds = 2
+                    title = "UI test night"
+                }
+                #endif
                 placeSelf()
                 groups = (try? await model.api.groups().groups) ?? []
             }

@@ -13,6 +13,12 @@ import { registerMeRoutes } from './routes/me.js';
 import { registerSessionRoutes } from './routes/sessions.js';
 import { registerSocialRoutes } from './routes/social.js';
 
+declare module 'fastify' {
+  interface FastifyInstance {
+    registeredRoutes: { method: string; url: string }[];
+  }
+}
+
 export interface Services {
   game: GameService;
   social: SocialService;
@@ -30,7 +36,6 @@ export interface ApiOptions {
 export async function buildApiApp(deps: Deps, opts: ApiOptions): Promise<FastifyInstance> {
   const app = Fastify({
     loggerInstance: deps.log,
-    disableRequestLogging: false,
     trustProxy: true,
     bodyLimit: 1_000_000,
     genReqId: (req) => {
@@ -38,6 +43,11 @@ export async function buildApiApp(deps: Deps, opts: ApiOptions): Promise<Fastify
       return typeof h === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(h) ? h : randomUUID();
     },
   });
+  const registered: { method: string; url: string }[] = [];
+  app.addHook('onRoute', (r) => {
+    for (const m of [r.method].flat()) if (m !== 'HEAD') registered.push({ method: m, url: r.url });
+  });
+  app.decorate('registeredRoutes', registered);
   const services: Services = { game: new GameService(deps), social: new SocialService(deps), data: new DataService(deps) };
   const limiter = new RateLimiter();
 

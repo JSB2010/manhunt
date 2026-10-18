@@ -42,6 +42,7 @@ struct LobbyView: View {
 
                     if view.session.isHost && otherTeamMissing {
                         BigButton(title: "Invite the other operator", systemImage: "person.crop.circle.badge.plus", tint: Theme.hiding) { showInvite = true }
+                            .accessibilityIdentifier("lobby.invite")
                     }
 
                     if !myConsent {
@@ -49,6 +50,7 @@ struct LobbyView: View {
                             Label("Before playing", systemImage: "hand.raised.fill").font(.headline)
                             Text("Review how tracking, pings, route sharing and photos work. Nothing is recorded until you accept and a round starts.").font(.callout)
                             BigButton(title: "Review tracking disclosure", systemImage: "doc.text.magnifyingglass") { showConsent = true }
+                                .accessibilityIdentifier("lobby.consent")
                         }
                     } else {
                         PreflightCard()
@@ -56,11 +58,13 @@ struct LobbyView: View {
                             toggleReady()
                         }
                         .disabled(otherTeamMissing)
+                        .accessibilityIdentifier("lobby.ready")
                     }
 
                     if view.session.isHost {
                         BigButton(title: "Start round \(round.index)", systemImage: "flag.checkered", tint: Theme.seeking, busy: busy) { start(ack: false) }
                             .disabled(!bothReady)
+                            .accessibilityIdentifier("lobby.start")
                         if !bothReady { Text("Both operators must tap Ready. Rounds never start automatically.").font(.footnote).foregroundStyle(.secondary) }
                     } else if bothReady {
                         Label("Waiting for the host to start the round…", systemImage: "hourglass").font(.callout)
@@ -221,8 +225,11 @@ struct ConsentSheet: View {
                 }
                 Section {
                     Toggle("I agree to route recording during rounds and post-round route sharing with the other operator.", isOn: $a)
+                        .accessibilityIdentifier("consent.t1")
                     Toggle("My crew knows our operator phone's location, the roster and photos are recorded and shown after rounds.", isOn: $b)
+                        .accessibilityIdentifier("consent.t2")
                     Toggle("I understand GPS and notifications can be delayed; missing fixes are shown as missing.", isOn: $c)
+                        .accessibilityIdentifier("consent.t3")
                 }
                 Section {
                     BigButton(title: "Accept & continue", systemImage: "checkmark.shield", busy: busy) {
@@ -232,6 +239,7 @@ struct ConsentSheet: View {
                         }
                     }
                     .disabled(!(a && b && c))
+                    .accessibilityIdentifier("consent.accept")
                 } footer: {
                     Text("You can withdraw consent at any time; an active round is then aborted and tracking stops.")
                 }
@@ -259,6 +267,7 @@ struct InviteSheet: View {
                     if let invite {
                         VStack(spacing: 8) {
                             Text(invite.code).font(.system(size: 44, weight: .heavy, design: .monospaced)).kerning(4).textSelection(.enabled)
+                                .accessibilityIdentifier("invite.code")
                             Text("Expires \(Fmt.time(invite.expiresAt)) · single use").font(.footnote).foregroundStyle(.secondary)
                             ShareLink(item: URL(string: invite.deepLink)!, message: Text("Join my Manhunt Crews night as the other crew's operator. Code: \(invite.code)")) {
                                 Label("Share invite link", systemImage: "square.and.arrow.up")
@@ -284,7 +293,7 @@ struct InviteSheet: View {
                 }
             }
             .navigationTitle("Invite operator")
-            .toolbar { Button("Done") { dismiss() } }
+            .toolbar { Button("Done") { dismiss() }.accessibilityIdentifier("invite.done") }
             .task {
                 if invite == nil { generate(target: nil) }
                 friends = (try? await model.api.friends().friends) ?? []
@@ -322,6 +331,7 @@ struct StartWarningsSheet: View {
                 }
                 if blocking.isEmpty {
                     Button("Start anyway", role: .destructive) { dismiss(); onStartAnyway() }
+                        .accessibilityIdentifier("warnings.startAnyway")
                 }
             }
             .navigationTitle("Can't start cleanly")

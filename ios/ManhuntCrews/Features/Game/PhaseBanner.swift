@@ -12,6 +12,7 @@ struct PhaseBanner: View {
             VStack(spacing: 4) {
                 HStack {
                     Text(title).font(.headline.weight(.heavy)).foregroundStyle(accent)
+                        .accessibilityIdentifier("game.phase")
                     Spacer()
                     Text("Round \(round.index)/\(view.session.totalRounds)").font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
                 }

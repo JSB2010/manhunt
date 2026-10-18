@@ -1,0 +1,467 @@
+openapi: 3.1.0
+info:
+  title: Manhunt Crews API
+  version: 0.1.0
+  description: |
+    Public API for the Manhunt Crews iOS app (Cloud Run, Fastify).
+
+    * Every route except `/healthz` and `/v1/time` requires `Authorization: Bearer <Firebase ID token>`.
+    * Every JSON object response includes `serverTime` (ISO-8601 UTC); every response carries `X-Server-Time`.
+      Clients derive all clocks from server time, never the phone clock.
+    * State-changing calls accept `Idempotency-Key` (8–80 chars `[A-Za-z0-9-]`); replays return the stored
+      response with `Idempotent-Replay: true`.
+    * Request bodies are strict: unknown keys are rejected (`VALIDATION_FAILED`). Team and role are always
+      derived server-side from session membership — never accepted from the client.
+    * Live game state is NOT served by a polling endpoint: clients subscribe to their own Firestore document
+      `sessions/{sessionId}/views/{uid}` (schema `SessionView`), which `GET /v1/sessions/{id}` also returns.
+    * Private worker routes (`/internal/*`) live on a separate, IAM-only Cloud Run service and are not part of
+      this API.
+
+    Source of truth for request validation: `backend/src/schemas/api.ts`. Contract test:
+    `backend/tests/unit/openapi.contract.test.ts` asserts every registered route is documented here.
+servers:
+  - url: http://127.0.0.1:8787
+    description: Local development (Firebase emulators)
+security:
+  - firebaseIdToken: []
+
+components:
+  securitySchemes:
+    firebaseIdToken:
+      type: http
+      scheme: bearer
+      bearerFormat: Firebase ID token (JWT)
+  parameters:
+    SessionId: { name: id, in: path, required: true, schema: { type: string } }
+    RoundId: { name: rid, in: path, required: true, schema: { type: string } }
+    ClaimId: { name: cid, in: path, required: true, schema: { type: string } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: false, schema: { type: string, pattern: '^[A-Za-z0-9-]{8,80}$' } }
+  responses:
+    Error:
+      description: Typed error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Ok:
+      description: OK
+      content:
+        application/json:
+          schema: { type: object, properties: { ok: { type: boolean }, serverTime: { type: string, format: date-time } } }
+  schemas:
+    Error:
+      type: object
+      required: [error, requestId, serverTime]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [GAME_NOT_READY, STALE_PHASE, GPS_UNAVAILABLE, PERMISSION_REQUIRED, ALREADY_CLAIMED, CAPTURE_EXPIRED, LOCATION_STALE,
+                     OPERATOR_NOT_AUTHORIZED, GAME_CLOSED, RATE_LIMITED, RETRYABLE_TEMPORARY, UNAUTHENTICATED, NOT_FOUND, VALIDATION_FAILED,
+                     CONFLICT, FORBIDDEN, INVITE_INVALID, CONSENT_REQUIRED, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA]
+            message: { type: string }
+            details: { type: [object, 'null'], description: 'e.g. {warnings:[...], blocking:[...]} for GPS_UNAVAILABLE/PERMISSION_REQUIRED' }
+        requestId: { type: string }
+        serverTime: { type: string, format: date-time }
+    TeamKey: { type: string, enum: [A, B] }
+    Rules:
+      type: object
+      additionalProperties: false
+      properties:
+        headStartSeconds: { type: integer, minimum: 0, maximum: 3600, default: 600 }
+        pingIntervalSeconds: { type: integer, minimum: 60, maximum: 3600, default: 600 }
+        visiblePingHistoryCount: { type: [integer, 'null'], minimum: 1, maximum: 50, default: 1, description: null = all }
+        totalRounds: { type: integer, minimum: 1, maximum: 20, default: 4 }
+        initialHidingTeam: { $ref: '#/components/schemas/TeamKey' }
+        alternateRoles: { type: boolean, default: true }
+        maxChaseSeconds: { type: [integer, 'null'], minimum: 300, maximum: 21600, default: null }
+        confirmationTimeoutSeconds: { type: integer, minimum: 30, maximum: 600, default: 120 }
+        manualPausesEnabled: { type: boolean, default: true }
+        maxPingGpsAgeSeconds: { type: integer, minimum: 10, maximum: 300, default: 60 }
+        maxPingAccuracyMeters: { type: integer, minimum: 5, maximum: 200, default: 50 }
+    PersonRef:
+      type: object
+      required: [personId, displayName]
+      properties: { personId: { type: string }, displayName: { type: string } }
+    RosterEntry:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties: { personId: { type: string }, displayName: { type: string, maxLength: 60 } }
+    TeamInput:
+      type: object
+      additionalProperties: false
+      required: [name, roster]
+      properties:
+        name: { type: string, maxLength: 60 }
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        roster: { type: array, maxItems: 30, items: { $ref: '#/components/schemas/RosterEntry' } }
+    Health:
+      type: object
+      additionalProperties: false
+      required: [permission, preciseLocation, trackingActive, backgroundSessionActive, lowPowerMode, batteryLevel, networkReachable, appVersion, queuedSamples, lastFixAgeSeconds, lastFixAccuracyMeters]
+      properties:
+        permission: { type: string, enum: [NOT_DETERMINED, DENIED, RESTRICTED, WHEN_IN_USE, ALWAYS] }
+        preciseLocation: { type: boolean }
+        trackingActive: { type: boolean }
+        backgroundSessionActive: { type: boolean }
+        lowPowerMode: { type: boolean }
+        batteryLevel: { type: [number, 'null'] }
+        networkReachable: { type: boolean }
+        appVersion: { type: [string, 'null'] }
+        queuedSamples: { type: integer }
+        lastFixAgeSeconds: { type: [number, 'null'], description: Age only — never coordinates }
+        lastFixAccuracyMeters: { type: [number, 'null'] }
+    Sample:
+      type: object
+      additionalProperties: false
+      required: [pointId, recordedAt, latitude, longitude, horizontalAccuracyMeters]
+      properties:
+        pointId: { type: string, format: uuid, description: Device-generated; idempotency key per sample }
+        recordedAt: { type: string, format: date-time, description: Device GPS timestamp; corrected server-side by measured clock skew }
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        horizontalAccuracyMeters: { type: number, minimum: 0 }
+        speedMetersPerSecond: { type: [number, 'null'] }
+        courseDegrees: { type: [number, 'null'] }
+        altitudeMeters: { type: [number, 'null'] }
+    Clock:
+      type: object
+      description: elapsed = accumulatedMs + (serverNow - runningSince) when running; frozen when runningSince is null
+      properties: { accumulatedMs: { type: number }, runningSince: { type: [string, 'null'], format: date-time } }
+    Pin:
+      type: object
+      description: A RELEASED hider ping. The only coordinates that ever appear in a view.
+      properties:
+        index: { type: integer }
+        scheduledAt: { type: string, format: date-time }
+        releasedAt: { type: string, format: date-time }
+        observedAt: { type: [string, 'null'], format: date-time }
+        latitude: { type: number }
+        longitude: { type: number }
+        accuracyMeters: { type: [number, 'null'] }
+        ageSeconds: { type: [integer, 'null'], description: scheduledAt − observedAt }
+        delayed: { type: boolean }
+    RoundResult:
+      type: object
+      description: Coordinate-free outcome. No winner field exists by design.
+      properties:
+        roundId: { type: string }
+        roundIndex: { type: integer }
+        hidingTeam: { $ref: '#/components/schemas/TeamKey' }
+        seekingTeam: { $ref: '#/components/schemas/TeamKey' }
+        hidingRosterSnapshot: { type: array, items: { $ref: '#/components/schemas/PersonRef' } }
+        seekingRosterSnapshot: { type: array, items: { $ref: '#/components/schemas/PersonRef' } }
+        outcome: { type: string, enum: [CAUGHT, TIMED_OUT, ABORTED] }
+        headStartSeconds: { type: integer }
+        observedChaseSeconds: { type: integer }
+        isRightCensored: { type: boolean, description: true when TIMED_OUT (survival ≥ observed) }
+        officialFoundAt: { type: [number, 'null'], description: epoch ms of server claim submission }
+        confirmedAt: { type: [number, 'null'] }
+        totalPauseSeconds: { type: integer }
+        roundElapsedSeconds: { type: integer }
+        pingSlots: { type: integer }
+        pingsReleased: { type: integer }
+        pingsMissing: { type: integer }
+        pingsDelayed: { type: integer }
+        hidingDistanceTotalMeters: { type: [number, 'null'] }
+        hidingDistanceChaseMeters: { type: [number, 'null'] }
+        seekingDistanceChaseMeters: { type: [number, 'null'] }
+        gpsCoverageFractionHider: { type: [number, 'null'] }
+        gpsCoverageFractionSeeker: { type: [number, 'null'] }
+        routeQualityHider: { type: string, enum: [GOOD, ESTIMATED, INSUFFICIENT, DELETED] }
+        routeQualitySeeker: { type: string, enum: [GOOD, ESTIMATED, INSUFFICIENT, DELETED] }
+        rulesFingerprint: { type: string }
+        resolvedByDispute: { type: boolean }
+    RoundView:
+      type: object
+      description: Role-scoped round state. Seeker receives released pins only; hider receives captureRequest only.
+      properties:
+        id: { type: string }
+        index: { type: integer }
+        state: { type: string, enum: [READY, HEAD_START, CHASE, CAPTURE_PENDING, PAUSED, COMPLETED, TIMED_OUT, ABORTED] }
+        pausedFromState: { type: [string, 'null'] }
+        myRole: { type: [string, 'null'], enum: [HIDING, SEEKING, null] }
+        hidingTeam: { $ref: '#/components/schemas/TeamKey' }
+        seekingTeam: { $ref: '#/components/schemas/TeamKey' }
+        rules: { $ref: '#/components/schemas/Rules' }
+        ready: { type: object, properties: { A: { type: boolean }, B: { type: boolean } } }
+        roundStartAt: { type: [string, 'null'], format: date-time }
+        headStartEndsAt: { type: [string, 'null'], format: date-time }
+        chaseStartAt: { type: [string, 'null'], format: date-time }
+        headStartClock: { $ref: '#/components/schemas/Clock' }
+        chaseClock: { oneOf: [{ $ref: '#/components/schemas/Clock' }, { type: 'null' }] }
+        nextPingAt: { type: [string, 'null'], format: date-time }
+        nextPingIndex: { type: integer }
+        timeCapAt: { type: [string, 'null'], format: date-time }
+        pins: { type: array, items: { $ref: '#/components/schemas/Pin' } }
+        pingLog: { type: array, items: { type: object, properties: { index: { type: integer }, scheduledAt: { type: string }, releasedAt: { type: string }, status: { type: string, enum: [RELEASED, NO_FRESH_FIX] }, ageSeconds: { type: [integer, 'null'] }, accuracyMeters: { type: [number, 'null'] }, delayed: { type: boolean } } } }
+        pause: { type: [object, 'null'] }
+        pendingPauseRequest: { type: [object, 'null'] }
+        myClaim: { type: [object, 'null'], description: seeker only }
+        captureRequest: { type: [object, 'null'], description: 'hider only: {claimId, submittedAt, expiresAt, chaseSecondsAtClaim, photoPath}' }
+        lastClaimOutcome: { type: [object, 'null'] }
+        myHealth: { type: [object, 'null'] }
+        opponentHealth: { type: object, description: 'Coarse integrity only: {state, lastHeartbeatAt (30 s buckets), issues}', properties: { state: { type: string, enum: [ACTIVE, STALE, NO_SIGNAL, STOPPED, PERMISSION_ISSUE, UNKNOWN] } } }
+        result: { oneOf: [{ $ref: '#/components/schemas/RoundResult' }, { type: 'null' }] }
+        endedAt: { type: [string, 'null'], format: date-time }
+        phaseGeneration: { type: integer }
+    SessionView:
+      type: object
+      description: Same document as Firestore `sessions/{sessionId}/views/{uid}`.
+      properties:
+        schemaVersion: { type: integer, const: 1 }
+        uid: { type: string }
+        sessionId: { type: string }
+        renderedAt: { type: string, format: date-time }
+        stateVersion: { type: number }
+        session:
+          type: object
+          properties:
+            title: { type: string }
+            scheduledDate: { type: string, format: date }
+            status: { type: string, enum: [LOBBY, IN_ROUND, BETWEEN_ROUNDS, COMPLETED] }
+            isHost: { type: boolean }
+            myTeam: { type: [string, 'null'] }
+            totalRounds: { type: integer }
+            completedRoundCount: { type: integer }
+            rules: { $ref: '#/components/schemas/Rules' }
+            teams: { type: object }
+            revoked: { type: boolean }
+        round: { oneOf: [{ $ref: '#/components/schemas/RoundView' }, { type: 'null' }] }
+        previousRounds: { type: array, items: { type: object } }
+        nextRound: { type: [object, 'null'] }
+
+paths:
+  /healthz:
+    get: { security: [], summary: Liveness, responses: { '200': { description: OK } } }
+  /v1/time:
+    get: { security: [], summary: Server time for clock sync, responses: { '200': { description: '{serverTime}' } } }
+
+  /v1/me:
+    get: { summary: Profile, counts, pending session invites, active sessions, responses: { '200': { description: OK }, default: { $ref: '#/components/responses/Error' } } }
+    patch:
+      summary: Update display name, unique handle, preferences (no self-granted permissions)
+      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { displayName: { type: string }, handle: { type: string, pattern: '^[a-z0-9_.]{3,24}$' }, preferences: { type: object } } } } } }
+      responses: { '200': { description: OK }, default: { $ref: '#/components/responses/Error' } }
+    delete: { summary: Delete account, own tracks/photos, social graph and auth user, responses: { '200': { description: '{status}' } } }
+  /v1/devices/push-token:
+    post:
+      summary: Register FCM token (APNs via FCM) for this device
+      requestBody: { content: { application/json: { schema: { type: object, required: [deviceId, fcmToken, apnsEnvironment], properties: { deviceId: { type: string }, fcmToken: { type: string }, apnsEnvironment: { type: string, enum: [development, production] }, appVersion: { type: [string, 'null'] } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
+
+  /v1/friends/requests:
+    get: { summary: Pending incoming/outgoing friend requests, responses: { '200': { description: OK } } }
+    post:
+      summary: Send a friend request by handle or invite token
+      requestBody: { content: { application/json: { schema: { type: object, properties: { handle: { type: string }, inviteToken: { type: string } } } } } }
+      responses: { '200': { description: '{status, requestId}' } }
+  /v1/friends/requests/{id}/respond:
+    post:
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [accept], properties: { accept: { type: boolean } } } } } }
+      responses: { '200': { description: '{status}' } }
+  /v1/friends:
+    get: { summary: Friends and blocked accounts (public profile subset only), responses: { '200': { description: OK } } }
+  /v1/friends/{uid}:
+    delete: { parameters: [{ name: uid, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /v1/friends/{uid}/block:
+    post: { parameters: [{ name: uid, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /v1/blocks/{uid}:
+    delete: { parameters: [{ name: uid, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /v1/friends/invite-token/rotate:
+    post: { summary: Rotate personal friend-invite link, responses: { '200': { description: '{friendInviteLink}' } } }
+
+  /v1/people:
+    get:
+      summary: Saved people visible to me (created by me, linked to me, in my groups)
+      parameters: [{ name: q, in: query, schema: { type: string } }]
+      responses: { '200': { description: '{people}' } }
+    post:
+      summary: Create a guest person; returns possibleDuplicates instead of creating unless confirmNew
+      requestBody: { content: { application/json: { schema: { type: object, required: [displayName], properties: { displayName: { type: string }, aliases: { type: array, items: { type: string } }, confirmNew: { type: boolean } } } } } }
+      responses: { '200': { description: '{created, person, possibleDuplicates}' } }
+  /v1/people/{id}:
+    patch:
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { displayName: { type: string }, aliases: { type: array, items: { type: string } } } } } } }
+      responses: { '200': { description: OK } }
+  /v1/people/{id}/merge:
+    post:
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [intoPersonId], properties: { intoPersonId: { type: string } } } } } }
+      responses: { '200': { description: OK } }
+  /v1/people/{id}/link-requests:
+    post: { summary: Ask the organizer to link this guest person to my account, parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /v1/people/link-requests:
+    get: { summary: Link requests awaiting my approval as organizer, responses: { '200': { description: OK } } }
+  /v1/people/link-requests/{id}/respond:
+    post:
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [approve], properties: { approve: { type: boolean } } } } } }
+      responses: { '200': { description: OK } }
+
+  /v1/groups:
+    get: { summary: Reusable groups I belong to, responses: { '200': { description: OK } } }
+    post:
+      requestBody: { content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string }, personIds: { type: array, items: { type: string } }, memberUids: { type: array, items: { type: string } }, editorUids: { type: array, items: { type: string } } } } } } }
+      responses: { '200': { description: '{id}' } }
+  /v1/groups/{id}:
+    patch: { parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+    delete: { parameters: [{ name: id, in: path, required: true, schema: { type: string } }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+
+  /v1/sessions:
+    get:
+      summary: Paginated, searchable history of nights I'm a member of
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, maximum: 50 } }
+        - { name: q, in: query, schema: { type: string }, description: Crew, person, title or date }
+        - { name: before, in: query, schema: { type: integer }, description: createdAt cursor (epoch ms) }
+      responses: { '200': { description: '{items, nextBefore}' } }
+    post:
+      summary: Create a two-crew multi-round night (host operates myTeam); round 1 is created in READY
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [title, scheduledDate, myTeam, teams]
+              properties:
+                title: { type: string }
+                scheduledDate: { type: string, format: date }
+                myTeam: { $ref: '#/components/schemas/TeamKey' }
+                teams: { type: object, properties: { A: { $ref: '#/components/schemas/TeamInput' }, B: { $ref: '#/components/schemas/TeamInput' } } }
+                rules: { $ref: '#/components/schemas/Rules' }
+                groupId: { type: [string, 'null'] }
+      responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK }, default: { $ref: '#/components/responses/Error' } }
+  /v1/sessions/{id}:
+    get:
+      summary: My sanitized view of the night (identical to the Firestore view document)
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK }, '404': { $ref: '#/components/responses/Error' } }
+    delete: { summary: Organizer deletes the whole night (Firestore subtree + GCS objects), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
+  /v1/sessions/{id}/invites:
+    post:
+      summary: Host creates an expiring single-use code for the open crew (optionally targeted to a friend)
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { targetUid: { type: string } } } } } }
+      responses: { '200': { description: '{inviteId, code, teamKey, expiresAt, deepLink}' } }
+  /v1/invites/preview:
+    post:
+      requestBody: { content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string } } } } } }
+      responses: { '200': { description: Session summary for the invite }, '410': { $ref: '#/components/responses/Error' } }
+  /v1/invites/redeem:
+    post:
+      summary: Join as the second operator. Prevents duplicate roles and any third operator.
+      requestBody: { content: { application/json: { schema: { type: object, properties: { code: { type: string }, inviteId: { type: string } } } } } }
+      responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK }, '410': { $ref: '#/components/responses/Error' } }
+  /v1/sessions/{id}/setup:
+    patch:
+      summary: Host edits title/rules/crews before a round starts; resets readiness
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
+  /v1/sessions/{id}/consent:
+    post:
+      summary: Accept (or withdraw) tracking + post-round route sharing disclosure. Withdrawal aborts an active round.
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [accepted, consentVersion, routeSharingAfterRound, guestDisclosureAcknowledged], properties: { accepted: { type: boolean }, consentVersion: { type: string }, routeSharingAfterRound: { type: boolean }, guestDisclosureAcknowledged: { type: boolean } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
+  /v1/sessions/{id}/ready:
+    post:
+      summary: Operator ready/unready with device preflight health (no coordinates)
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [ready, preflight], properties: { ready: { type: boolean }, preflight: { $ref: '#/components/schemas/Health' } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
+  /v1/sessions/{id}/next-round:
+    post:
+      summary: Host creates the next round with alternated roles (override recorded). Never auto-starts.
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { hidingTeam: { $ref: '#/components/schemas/TeamKey' }, overrideReason: { type: [string, 'null'] } } } } } }
+      responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK } }
+  /v1/sessions/{id}/complete:
+    post: { summary: Host ends the night, parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+  /v1/sessions/{id}/keep-photos:
+    post: { summary: Operator opts in to keeping confirmed photos past 30 days (both must opt in), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
+  /v1/sessions/{id}/my-data:
+    delete: { summary: Delete my operator tracks, released pins of me, and photos I took from this night, parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: '{pointsDeleted, photosDeleted}' } } }
+  /v1/sessions/{id}/revoke:
+    post: { summary: Organizer revokes the night (incident response) — deny all access, invalidate invites, parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
+
+  /v1/sessions/{id}/rounds/{rid}/start:
+    post:
+      summary: Host starts the round (server time). Returns GPS_UNAVAILABLE with warnings unless acknowledged; PERMISSION_REQUIRED is blocking.
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { acknowledgeWarnings: { type: boolean } } } } } }
+      responses: { '200': { description: '{ok, warnings}' }, '412': { $ref: '#/components/responses/Error' } }
+  /v1/sessions/{id}/rounds/{rid}/pause:
+    post:
+      summary: SAFETY pause (immediate, either operator) or MANUAL pause request/confirmation (both operators)
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [kind], properties: { kind: { type: string, enum: [MANUAL, SAFETY] }, reason: { type: [string, 'null'] } } } } } }
+      responses: { '200': { description: '{state, pendingRequest}' } }
+  /v1/sessions/{id}/rounds/{rid}/resume:
+    post: { summary: Resume vote; the pause ends when both operators have voted, parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: '{state}' } } }
+  /v1/sessions/{id}/rounds/{rid}/abort:
+    post:
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string }, safety: { type: boolean } } } } } }
+      responses: { '200': { description: '{state}' } }
+  /v1/sessions/{id}/rounds/{rid}/location-batches:
+    post:
+      summary: Private, idempotent GPS samples from the caller (role derived server-side). Empty batches are heartbeats.
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, required: [batchId, sentAt, samples, health], properties: { batchId: { type: string, format: uuid }, sentAt: { type: string, format: date-time }, samples: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Sample' } }, health: { $ref: '#/components/schemas/Health' } } } } } }
+      responses: { '200': { description: '{accepted, duplicates, rejected[], clockSkewMs}' }, default: { $ref: '#/components/responses/Error' } }
+  /v1/sessions/{id}/rounds/{rid}/my-track:
+    get: { summary: The caller's OWN samples for this round (self-only), parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: '{points}' } } }
+  /v1/sessions/{id}/rounds/{rid}/captures/init:
+    post: { summary: Seeking operator obtains a short-lived upload ticket (CHASE only), parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: '{claimId, uploadPath, maxBytes, expiresAt}' } } }
+  /v1/sessions/{id}/rounds/{rid}/captures/{cid}/photo:
+    put:
+      summary: Upload the JPEG (≤8 MB). EXIF/GPS/comment segments are stripped before private storage.
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/ClaimId' }]
+      requestBody: { content: { image/jpeg: { schema: { type: string, format: binary } } } }
+      responses: { '200': { description: '{stored, bytes, sha256}' }, '415': { $ref: '#/components/responses/Error' } }
+    get:
+      summary: Authorized photo read (operators of this round; hider while pending). Private, no-store.
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/ClaimId' }]
+      responses: { '200': { content: { image/jpeg: { schema: { type: string, format: binary } } }, description: JPEG } }
+  /v1/sessions/{id}/rounds/{rid}/captures/complete:
+    post:
+      summary: Submit the claim. Server time becomes the official capture time; clock and pings freeze.
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [claimId], properties: { claimId: { type: string } } } } } }
+      responses: { '200': { description: '{claimId, status, submittedAt}' }, '409': { $ref: '#/components/responses/Error' } }
+  /v1/sessions/{id}/rounds/{rid}/captures/{cid}/decision:
+    post:
+      summary: Hiding operator confirms (round completes at submission time) or rejects (round resumes)
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/ClaimId' }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [CONFIRM, REJECT] }, reason: { type: [string, 'null'] } } } } } }
+      responses: { '200': { description: '{claimId, status, roundState, result}' }, '410': { $ref: '#/components/responses/Error' } }
+  /v1/sessions/{id}/rounds/{rid}/captures/{cid}/dispute:
+    post:
+      summary: After the round, both operators jointly resolve a rejected/expired claim
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/ClaimId' }]
+      requestBody: { content: { application/json: { schema: { type: object, required: [resolution], properties: { resolution: { type: string, enum: [ACCEPT_AS_CATCH, KEEP_REJECTED] } } } } } }
+      responses: { '200': { description: '{resolved, resolution}' } }
+  /v1/sessions/{id}/rounds/{rid}/summary:
+    get: { summary: Post-round recap (only after the round ends; both operators), parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: OK }, '409': { $ref: '#/components/responses/Error' } } }
+  /v1/sessions/{id}/rounds/{rid}/routes:
+    get:
+      summary: Both crews' simplified routes — only after completion and with both operators' route-sharing consent
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { name: format, in: query, schema: { type: string, enum: [json, geojson] } }]
+      responses: { '200': { description: Routes (JSON or application/geo+json) }, '409': { $ref: '#/components/responses/Error' }, '412': { $ref: '#/components/responses/Error' } }
+  /v1/sessions/{id}/analytics:
+    get: { summary: Night scorecard with censoring and comparability flags, parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
+  /v1/analytics/people/{personId}:
+    get: { summary: Crew-attributed statistics for a person across nights I played, parameters: [{ name: personId, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /v1/export/sessions/{file}:
+    get:
+      summary: Redacted, GPS-free export. file = "<sessionId>.csv" or "<sessionId>.json"
+      parameters: [{ name: file, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9_-]+\.(csv|json)$' } }]
+      responses: { '200': { description: CSV or JSON attachment } }

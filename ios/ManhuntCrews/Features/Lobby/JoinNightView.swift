@@ -20,7 +20,8 @@ struct JoinNightView: View {
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
                             .font(.title2.monospaced())
-                        Button("Look up") { lookup() }.disabled(code.count < 6 || busy)
+                            .accessibilityIdentifier("join.code")
+                        Button("Look up") { lookup() }.disabled(code.count < 6 || busy).accessibilityIdentifier("join.lookup")
                     } header: {
                         Text("Invite code")
                     } footer: {
@@ -43,6 +44,7 @@ struct JoinNightView: View {
                 if preview != nil || inviteId != nil {
                     Section {
                         BigButton(title: "Join as operator", systemImage: "person.badge.plus", busy: busy) { join() }
+                            .accessibilityIdentifier("join.submit")
                     } footer: {
                         Text("Next you'll review the tracking disclosure before any location is recorded.")
                     }

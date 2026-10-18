@@ -1,0 +1,23 @@
+name: backend
+on:
+  push:
+    paths: ['backend/**', 'firestore.rules', 'firestore.indexes.json', 'storage.rules', 'firebase.json', 'shared/**', '.github/workflows/backend.yml']
+  pull_request:
+    paths: ['backend/**', 'firestore.rules', 'firestore.indexes.json', 'storage.rules', 'firebase.json', 'shared/**']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: npm, cache-dependency-path: backend/package-lock.json }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Unit tests (domain, privacy invariant, OpenAPI contract)
+        run: npm run test:unit
+      - name: Emulator integration + security tests (Auth, Firestore rules, Storage)
+        run: npx firebase-tools@15 --project demo-manhunt --config ../firebase.json emulators:exec --only auth,firestore,storage "npx vitest run tests/integration tests/security"

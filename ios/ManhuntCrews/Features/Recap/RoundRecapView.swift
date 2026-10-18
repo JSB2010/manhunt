@@ -97,6 +97,7 @@ struct RoundRecapView: View {
             switch r.outcome {
             case "CAUGHT":
                 Text("Caught after \(Fmt.clock(Double(r.observedChaseSeconds)))").font(.largeTitle.weight(.heavy)).monospacedDigit()
+                    .accessibilityIdentifier("recap.outcome")
                 Text("Official time = server submission of the confirmed photo\(r.resolvedByDispute ? " (resolved jointly after the round)" : "").").font(.footnote).foregroundStyle(.secondary)
             case "TIMED_OUT":
                 Text("Not caught: survived ≥ \(Fmt.clock(Double(r.observedChaseSeconds)))").font(.title.weight(.heavy))

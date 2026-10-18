@@ -34,6 +34,7 @@ struct CaptureFlowView: View {
                         #if DEBUG && targetEnvironment(simulator)
                         Button("Use simulator test photo (DEBUG only)") { use(SimulatorTestPhoto.make()) }
                             .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("capture.simPhoto")
                         #endif
                     }
                 case .preview, .uploading, .failed:
@@ -52,12 +53,13 @@ struct CaptureFlowView: View {
                         Button("Retake") { step = .camera; showCamera = true; ticket = nil; uploaded = false }
                             .buttonStyle(.bordered).disabled(isUploading)
                         BigButton(title: step == .preview ? "Submit catch" : "Retry submit", systemImage: "paperplane.fill", tint: Theme.seeking, busy: isUploading) { submit() }
+                            .accessibilityIdentifier("capture.submit")
                     }
                 case .done:
                     Image(systemName: "checkmark.seal.fill").font(.system(size: 72)).foregroundStyle(Theme.ok)
                     Text("Catch submitted").font(.title.bold())
                     Text("The chase clock froze at the server's submission time. The hiding crew must confirm.").multilineTextAlignment(.center)
-                    Button("Back to map") { dismiss() }.buttonStyle(.borderedProminent)
+                    Button("Back to map") { dismiss() }.buttonStyle(.borderedProminent).accessibilityIdentifier("capture.backToMap")
                 }
             }
             .padding()

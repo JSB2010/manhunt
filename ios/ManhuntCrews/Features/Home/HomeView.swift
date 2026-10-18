@@ -55,7 +55,9 @@ struct HomeView: View {
 
                     HStack(spacing: 12) {
                         BigButton(title: "Create night", systemImage: "plus.circle.fill") { showCreate = true }
+                            .accessibilityIdentifier("home.create")
                         BigButton(title: "Join night", systemImage: "qrcode", tint: Theme.hiding) { showJoin = true }
+                            .accessibilityIdentifier("home.join")
                     }
 
                     VStack(spacing: 0) {

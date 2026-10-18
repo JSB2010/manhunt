@@ -13,6 +13,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		4D480000000000000000003A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4D4800000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4D4800000000000000000008;
+			remoteInfo = ManhuntCrews;
+		};
 		4D4800000000000000000019 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 4D4800000000000000000001 /* Project object */;
@@ -25,6 +32,7 @@
 /* Begin PBXFileReference section */
 		4D4800000000000000000004 /* ManhuntCrews.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ManhuntCrews.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D4800000000000000000005 /* ManhuntCrewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ManhuntCrewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D4800000000000000000030 /* ManhuntCrewsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ManhuntCrewsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D4800000000000000000024 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
 		4D4800000000000000000025 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		4D4800000000000000000026 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
@@ -56,6 +64,11 @@
 			path = ManhuntCrewsTests;
 			sourceTree = "<group>";
 		};
+		4D4800000000000000000031 /* ManhuntCrewsUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ManhuntCrewsUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,6 +89,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4D4800000000000000000034 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -85,6 +105,7 @@
 				4D4800000000000000000023 /* Config */,
 				4D4800000000000000000006 /* ManhuntCrews */,
 				4D4800000000000000000007 /* ManhuntCrewsTests */,
+				4D4800000000000000000031 /* ManhuntCrewsUITests */,
 				4D4800000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -94,6 +115,7 @@
 			children = (
 				4D4800000000000000000004 /* ManhuntCrews.app */,
 				4D4800000000000000000005 /* ManhuntCrewsTests.xctest */,
+				4D4800000000000000000030 /* ManhuntCrewsUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -157,6 +179,27 @@
 			productReference = 4D4800000000000000000005 /* ManhuntCrewsTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		4D4800000000000000000032 /* ManhuntCrewsUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4D4800000000000000000036 /* Build configuration list for PBXNativeTarget "ManhuntCrewsUITests" */;
+			buildPhases = (
+				4D4800000000000000000033 /* Sources */,
+				4D4800000000000000000034 /* Frameworks */,
+				4D4800000000000000000035 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4D4800000000000000000039 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4D4800000000000000000031 /* ManhuntCrewsUITests */,
+			);
+			name = ManhuntCrewsUITests;
+			productName = ManhuntCrewsUITests;
+			productReference = 4D4800000000000000000030 /* ManhuntCrewsUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -171,6 +214,10 @@
 						CreatedOnToolsVersion = 27.0;
 					};
 					4D4800000000000000000009 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 4D4800000000000000000008;
+					};
+					4D4800000000000000000032 = {
 						CreatedOnToolsVersion = 27.0;
 						TestTargetID = 4D4800000000000000000008;
 					};
@@ -195,6 +242,7 @@
 			targets = (
 				4D4800000000000000000008 /* ManhuntCrews */,
 				4D4800000000000000000009 /* ManhuntCrewsTests */,
+				4D4800000000000000000032 /* ManhuntCrewsUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -208,6 +256,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		4D480000000000000000000F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4D4800000000000000000035 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -231,6 +286,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4D4800000000000000000033 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -238,6 +300,11 @@
 			isa = PBXTargetDependency;
 			target = 4D4800000000000000000008 /* ManhuntCrews */;
 			targetProxy = 4D4800000000000000000019 /* PBXContainerItemProxy */;
+		};
+		4D4800000000000000000039 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4D4800000000000000000008 /* ManhuntCrews */;
+			targetProxy = 4D480000000000000000003A /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -400,6 +467,42 @@
 			};
 			name = Release;
 		};
+		4D4800000000000000000037 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4800000000000000000025 /* Debug.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(MH_DEVELOPMENT_TEAM)";
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MH_BUNDLE_ID).uitests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = ManhuntCrews;
+			};
+			name = Debug;
+		};
+		4D4800000000000000000038 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4800000000000000000026 /* Release.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(MH_DEVELOPMENT_TEAM)";
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MH_BUNDLE_ID).uitests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = ManhuntCrews;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -426,6 +529,15 @@
 			buildConfigurations = (
 				4D4800000000000000000017 /* Debug */,
 				4D4800000000000000000018 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4D4800000000000000000036 /* Build configuration list for PBXNativeTarget "ManhuntCrewsUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D4800000000000000000037 /* Debug */,
+				4D4800000000000000000038 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

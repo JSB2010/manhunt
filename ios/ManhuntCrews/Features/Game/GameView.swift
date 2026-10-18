@@ -145,6 +145,7 @@ struct GameView: View {
                     showCapture = true
                 }
                 .disabled(round.state != .CHASE)
+                .accessibilityIdentifier("game.photoCatch")
             } else if role == .HIDING {
                 HStack {
                     Image(systemName: "dot.radiowaves.up.forward").symbolEffect(.pulse, isActive: model.location.mode == .tracking)
@@ -240,6 +241,7 @@ struct PingStatusRow: View {
                 if let pin = round.pins.last {
                     Text("Last hider ping \(Fmt.ago(pin.scheduledAt, now: now)) (GPS sample age \(pin.ageSeconds.map { "\($0)s" } ?? "—"), ±\(Int(pin.accuracyMeters ?? 0)) m\(pin.delayed ? ", released late" : ""))")
                         .font(.footnote.weight(.semibold))
+                        .accessibilityIdentifier("game.lastPing")
                 }
                 if let last = round.pingLog.last, last.isMissing {
                     Label("Ping #\(last.index) unavailable — no fresh GPS fix from the hiding crew", systemImage: "location.slash")

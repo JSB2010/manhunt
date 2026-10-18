@@ -38,6 +38,16 @@
                ReferencedContainer = "container:ManhuntCrews.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "4D4800000000000000000032"
+               BuildableName = "ManhuntCrewsUITests.xctest"
+               BlueprintName = "ManhuntCrewsUITests"
+               ReferencedContainer = "container:ManhuntCrews.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

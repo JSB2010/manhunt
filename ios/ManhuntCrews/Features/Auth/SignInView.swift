@@ -52,12 +52,14 @@ struct SignInView: View {
                                 .textFieldStyle(.roundedBorder)
                         }
                         TextField("Email", text: $email)
+                            .accessibilityIdentifier("signin.email")
                             .keyboardType(.emailAddress)
                             .textContentType(.username)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder)
                         SecureField("Password (8+ characters)", text: $password)
+                            .accessibilityIdentifier("signin.password")
                             .textContentType(mode == .signUp ? .newPassword : .password)
                             .textFieldStyle(.roundedBorder)
                     }
@@ -75,6 +77,7 @@ struct SignInView: View {
                         }
                     }
                     .disabled(email.isEmpty || password.isEmpty)
+                    .accessibilityIdentifier("signin.submit")
 
                     if mode == .signIn {
                         Button("Forgot password?") {

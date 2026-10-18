@@ -924,6 +924,9 @@ export class GameService {
       const claim = await txGet<CaptureClaim>(tx, this.p.claim(sid, rid, cid));
       if (!session || !round || !claim) fail('NOT_FOUND', 'Not found');
       const members = await txMembers(tx, this.d.db, sid);
+      // All reads before any write (Firestore transaction rule).
+      const otherCurrent = session!.currentRoundId && session!.currentRoundId !== rid ? await txGet<RoundDoc>(tx, this.p.round(sid, session!.currentRoundId)) : null;
+      const otherClaim = otherCurrent?.activeClaimId ? await txGet<CaptureClaim>(tx, this.p.claim(sid, otherCurrent.id, otherCurrent.activeClaimId)) : null;
       const team = this.requireOperator(session!, members, uid);
       const r = proposeDisputeResolution(round!, claim!, uid, team, resolution, now);
       tx.set(this.p.claim(sid, rid, cid), r.claim);
@@ -940,8 +943,7 @@ export class GameService {
           s.updatedAt = now;
           tx.set(this.p.session(sid), s);
         }
-        const current = s.currentRoundId === rid ? r.round : await txGet<RoundDoc>(tx, this.p.round(sid, s.currentRoundId!));
-        writeViews(tx, this.d.db, s, current, members, null, now);
+        writeViews(tx, this.d.db, s, otherCurrent ?? r.round, members, otherCurrent ? otherClaim : null, now);
       }
       return { resolved: r.resolved, resolution: r.claim.dispute?.resolution ?? null };
     });

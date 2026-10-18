@@ -51,6 +51,7 @@ struct HiderConfirmView: View {
                     BigButton(title: "Confirm catch", systemImage: "checkmark.seal.fill", tint: Theme.ok, busy: busy) {
                         perform($busy, $error) { try await model.api.decide(sessionId, roundId, claimId: request.claimId, confirm: true, reason: nil) }
                     }
+                    .accessibilityIdentifier("confirm.confirm")
                     BigButton(title: "Reject", systemImage: "xmark.circle.fill", tint: Theme.danger) { showReject = true }
                         .disabled(busy)
                 }

@@ -1,0 +1,8 @@
+{
+  "_comment": "EMULATOR-ONLY demo accounts for local two-phone testing. These exist only in the local Firebase Auth emulator (demo-manhunt). The seed script refuses to run against a real project. Never reuse these passwords anywhere.",
+  "accounts": [
+    { "email": "morgan@demo.manhunt.test", "password": "emulator-only-morgan-7Q2", "displayName": "Morgan", "handle": "morgan" },
+    { "email": "taylor@demo.manhunt.test", "password": "emulator-only-taylor-4K9", "displayName": "Taylor", "handle": "taylor" },
+    { "email": "casey@demo.manhunt.test", "password": "emulator-only-casey-8M3", "displayName": "Casey", "handle": "casey" }
+  ]
+}
