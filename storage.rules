@@ -1,0 +1,11 @@
+rules_version = '2';
+
+// Photos and route archives are private. Clients never access the bucket
+// directly; the API authorizes and proxies every photo read and upload.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

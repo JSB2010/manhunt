@@ -129,6 +129,7 @@ export function createRound(params: {
     abortedReason: null,
     abortedByUid: null,
     active: false,
+    summaryReady: null,
     nextWakeAt: null,
     lastTickAt: null,
     createdAt: now,
@@ -357,6 +358,7 @@ export function applyTimeCap(round: RoundDoc, at: number, now: number): Transiti
   r.state = 'TIMED_OUT';
   r.endedAt = at;
   r.active = false;
+  r.summaryReady = false;
   r.phaseGeneration++;
   r.result = buildBaseResult(r, 'TIMED_OUT', at, null, now);
   r.updatedAt = now;
@@ -427,6 +429,7 @@ export function decideClaim(
     r.pausedFromState = null;
     r.endedAt = now;
     r.active = false;
+    r.summaryReady = false;
     r.phaseGeneration++;
     r.lastClaimOutcome = { claimId: claim.claimId, status: 'CONFIRMED', at: now, reason: null };
     r.result = buildBaseResult(r, 'CAUGHT', submittedAt, { claimId: claim.claimId, chaseMs, confirmedAt: now }, now);
@@ -591,6 +594,7 @@ export function abortRound(round: RoundDoc, uid: string | null, reason: string, 
   r.pausedFromState = null;
   r.endedAt = now;
   r.active = false;
+  r.summaryReady = false;
   r.abortedReason = reason;
   r.abortedByUid = uid;
   r.activeClaimId = null;

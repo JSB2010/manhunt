@@ -276,6 +276,8 @@ export interface RoundDoc {
   abortedByUid: string | null;
   /** denormalized flag for collection-group watchdog queries */
   active: boolean;
+  /** null while unfinished; false once finished until the recap is computed; true after */
+  summaryReady: boolean | null;
   nextWakeAt: number | null;
   lastTickAt: number | null;
   createdAt: number;

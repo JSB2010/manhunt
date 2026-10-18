@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// Manhunt Crews — Firestore security rules.
+//
+// The ONLY client-readable data is the per-user sanitized read model
+// sessions/{sessionId}/views/{uid}, rendered server-side. Raw GPS points,
+// rounds, pings, captures, summaries, routes, members, invites and profiles are
+// server-only (Admin SDK bypasses rules). All client writes are denied: every
+// state change goes through the authenticated API.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function activeMember(sessionId) {
+      let m = /databases/$(database)/documents/sessions/$(sessionId)/members/$(request.auth.uid);
+      return exists(m) && get(m).data.active == true;
+    }
+
+    match /sessions/{sessionId}/views/{uid} {
+      allow get: if signedIn()
+                 && request.auth.uid == uid
+                 && activeMember(sessionId);
+      // No list queries (cannot enumerate other users' views), no writes.
+      allow list, create, update, delete: if false;
+    }
+
+    // Deny everything else explicitly.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
