@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>MHApiBaseURL</key>
+	<string>$(MH_API_BASE_URL)</string>
+	<key>MHUseEmulators</key>
+	<string>$(MH_USE_EMULATORS)</string>
+	<key>MHDevHost</key>
+	<string>$(MH_DEV_HOST)</string>
+	<key>MHFirebaseProjectId</key>
+	<string>$(MH_FIREBASE_PROJECT_ID)</string>
+	<key>MHEnableAppleSignIn</key>
+	<string>$(MH_ENABLE_APPLE_SIGN_IN)</string>
+	<key>MHEnablePush</key>
+	<string>$(MH_ENABLE_PUSH)</string>
+	<key>MHBuildFlavor</key>
+	<string>$(MH_BUILD_FLAVOR)</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>During a round you start, Manhunt Crews records your crew phone's GPS route — including while the screen is locked — to release scheduled location pings to the other crew and to show both routes and distances after the round. Tracking stops when the round ends.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Manhunt Crews only tracks during a round you explicitly start. Your exact route stays hidden from the other crew while playing; they receive scheduled pings only. Both routes are shown to the two operators after the round.</string>
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>RoundTracking</key>
+		<string>Precise location is needed during a round so scheduled pings and route distances are accurate. Approximate locations are never released as precise pings.</string>
+	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>The seeking crew takes an in-app photo to claim a catch. The hiding crew's operator reviews it to confirm or reject. Photos may include bystanders; location metadata is removed.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Development builds connect to the Manhunt Crews server running on your local network.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>remote-notification</string>
+	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.manhuntcrews.links</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>manhuntcrews</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<false/>
+	<key>UIStatusBarStyle</key>
+	<string>UIStatusBarStyleDefault</string>
+</dict>
+</plist>

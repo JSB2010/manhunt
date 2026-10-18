@@ -1,0 +1,12 @@
+// Shared build settings for Manhunt Crews.
+// Override any of these in Config/Local.xcconfig (git-ignored), e.g. your
+// Apple Development Team ID and a unique bundle identifier.
+
+MH_BUNDLE_ID = com.manhuntcrews.dev
+MH_DEVELOPMENT_TEAM =
+// Free Personal Team builds cannot use Push or Sign in with Apple entitlements.
+MH_ENTITLEMENTS = ManhuntCrews/ManhuntCrews.entitlements
+MH_FIREBASE_PROJECT_ID = demo-manhunt
+MH_ENABLE_APPLE_SIGN_IN = NO
+MH_ENABLE_PUSH = NO
+MH_DEV_HOST = 127.0.0.1

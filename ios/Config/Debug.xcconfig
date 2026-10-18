@@ -1,0 +1,9 @@
+#include "Shared.xcconfig"
+
+// Debug talks to the local stack (scripts/dev.sh): Firebase emulators + local API.
+// On a physical iPhone set MH_DEV_HOST to your Mac's LAN IP in Local.xcconfig.
+MH_USE_EMULATORS = YES
+MH_API_BASE_URL = http:/$()/$(MH_DEV_HOST):8787
+MH_BUILD_FLAVOR = debug
+
+#include? "Local.xcconfig"

@@ -1,0 +1,10 @@
+#include "Shared.xcconfig"
+
+// Release never uses emulators. Provide the deployed API URL and a
+// GoogleService-Info.plist (git-ignored) for your Firebase project.
+MH_USE_EMULATORS = NO
+MH_API_BASE_URL = https:/$()/api.invalid
+MH_BUILD_FLAVOR = release
+MH_ENTITLEMENTS = ManhuntCrews/ManhuntCrews-Distribution.entitlements
+
+#include? "Local.xcconfig"

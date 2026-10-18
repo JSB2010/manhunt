@@ -1,0 +1,465 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		4D4800000000000000000020 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 4D480000000000000000001D /* FirebaseAuth */; };
+		4D4800000000000000000021 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 4D480000000000000000001E /* FirebaseFirestore */; };
+		4D4800000000000000000022 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 4D480000000000000000001F /* FirebaseMessaging */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		4D4800000000000000000019 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4D4800000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4D4800000000000000000008;
+			remoteInfo = ManhuntCrews;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		4D4800000000000000000004 /* ManhuntCrews.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ManhuntCrews.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D4800000000000000000005 /* ManhuntCrewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ManhuntCrewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D4800000000000000000024 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
+		4D4800000000000000000025 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		4D4800000000000000000026 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		4D480000000000000000001B /* Exceptions for "ManhuntCrews" folder in "ManhuntCrews" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				ManhuntCrews.entitlements,
+				"ManhuntCrews-Distribution.entitlements",
+			);
+			target = 4D4800000000000000000008 /* ManhuntCrews */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		4D4800000000000000000006 /* ManhuntCrews */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4D480000000000000000001B /* Exceptions for "ManhuntCrews" folder in "ManhuntCrews" target */,
+			);
+			path = ManhuntCrews;
+			sourceTree = "<group>";
+		};
+		4D4800000000000000000007 /* ManhuntCrewsTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ManhuntCrewsTests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		4D480000000000000000000B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4D4800000000000000000020 /* FirebaseAuth in Frameworks */,
+				4D4800000000000000000021 /* FirebaseFirestore in Frameworks */,
+				4D4800000000000000000022 /* FirebaseMessaging in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4D480000000000000000000E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		4D4800000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				4D4800000000000000000023 /* Config */,
+				4D4800000000000000000006 /* ManhuntCrews */,
+				4D4800000000000000000007 /* ManhuntCrewsTests */,
+				4D4800000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		4D4800000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4D4800000000000000000004 /* ManhuntCrews.app */,
+				4D4800000000000000000005 /* ManhuntCrewsTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4D4800000000000000000023 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				4D4800000000000000000024 /* Shared.xcconfig */,
+				4D4800000000000000000025 /* Debug.xcconfig */,
+				4D4800000000000000000026 /* Release.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		4D4800000000000000000008 /* ManhuntCrews */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4D4800000000000000000013 /* Build configuration list for PBXNativeTarget "ManhuntCrews" */;
+			buildPhases = (
+				4D480000000000000000000A /* Sources */,
+				4D480000000000000000000B /* Frameworks */,
+				4D480000000000000000000C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				4D4800000000000000000006 /* ManhuntCrews */,
+			);
+			name = ManhuntCrews;
+			packageProductDependencies = (
+				4D480000000000000000001D /* FirebaseAuth */,
+				4D480000000000000000001E /* FirebaseFirestore */,
+				4D480000000000000000001F /* FirebaseMessaging */,
+			);
+			productName = ManhuntCrews;
+			productReference = 4D4800000000000000000004 /* ManhuntCrews.app */;
+			productType = "com.apple.product-type.application";
+		};
+		4D4800000000000000000009 /* ManhuntCrewsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4D4800000000000000000016 /* Build configuration list for PBXNativeTarget "ManhuntCrewsTests" */;
+			buildPhases = (
+				4D480000000000000000000D /* Sources */,
+				4D480000000000000000000E /* Frameworks */,
+				4D480000000000000000000F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4D480000000000000000001A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				4D4800000000000000000007 /* ManhuntCrewsTests */,
+			);
+			name = ManhuntCrewsTests;
+			productName = ManhuntCrewsTests;
+			productReference = 4D4800000000000000000005 /* ManhuntCrewsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4D4800000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					4D4800000000000000000008 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					4D4800000000000000000009 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 4D4800000000000000000008;
+					};
+				};
+			};
+			buildConfigurationList = 4D4800000000000000000010 /* Build configuration list for PBXProject "ManhuntCrews" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 4D4800000000000000000002;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				4D480000000000000000001C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 4D4800000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				4D4800000000000000000008 /* ManhuntCrews */,
+				4D4800000000000000000009 /* ManhuntCrewsTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4D480000000000000000000C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4D480000000000000000000F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4D480000000000000000000A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4D480000000000000000000D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4D480000000000000000001A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4D4800000000000000000008 /* ManhuntCrews */;
+			targetProxy = 4D4800000000000000000019 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		4D4800000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4800000000000000000025 /* Debug.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		4D4800000000000000000012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4800000000000000000026 /* Release.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		4D4800000000000000000014 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4800000000000000000025 /* Debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "$(MH_ENTITLEMENTS)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(MH_DEVELOPMENT_TEAM)";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ManhuntCrews/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Manhunt Crews";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "location-services gps";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MH_BUNDLE_ID)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		4D4800000000000000000015 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4800000000000000000026 /* Release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "$(MH_ENTITLEMENTS)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(MH_DEVELOPMENT_TEAM)";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ManhuntCrews/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Manhunt Crews";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "location-services gps";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MH_BUNDLE_ID)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		4D4800000000000000000017 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4800000000000000000025 /* Debug.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(MH_DEVELOPMENT_TEAM)";
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MH_BUNDLE_ID).tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ManhuntCrews.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ManhuntCrews";
+			};
+			name = Debug;
+		};
+		4D4800000000000000000018 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D4800000000000000000026 /* Release.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "$(MH_DEVELOPMENT_TEAM)";
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MH_BUNDLE_ID).tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ManhuntCrews.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ManhuntCrews";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4D4800000000000000000010 /* Build configuration list for PBXProject "ManhuntCrews" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D4800000000000000000011 /* Debug */,
+				4D4800000000000000000012 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4D4800000000000000000013 /* Build configuration list for PBXNativeTarget "ManhuntCrews" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D4800000000000000000014 /* Debug */,
+				4D4800000000000000000015 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4D4800000000000000000016 /* Build configuration list for PBXNativeTarget "ManhuntCrewsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4D4800000000000000000017 /* Debug */,
+				4D4800000000000000000018 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		4D480000000000000000001C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.19.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4D480000000000000000001D /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D480000000000000000001C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		4D480000000000000000001E /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D480000000000000000001C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		4D480000000000000000001F /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4D480000000000000000001C /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 4D4800000000000000000001 /* Project object */;
+}

@@ -37,7 +37,7 @@ ios/build/
 ios/DerivedData/
 xcuserdata/
 *.xcuserstate
-ios/ManhuntCrews/Config/Local.xcconfig
+ios/Config/Local.xcconfig
 
 # macOS
 .DS_Store
