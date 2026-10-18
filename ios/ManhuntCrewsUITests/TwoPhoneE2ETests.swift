@@ -29,9 +29,10 @@ final class TwoPhoneE2ETests: XCTestCase {
         signIn(app)
 
         tap(app.buttons["home.create"])
-        let ack = app.switches["create.ack"]
+        let ack = app.buttons["create.ack"]
         scrollTo(ack, in: app)
-        ack.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        XCTAssertTrue(ack.waitForExistence(timeout: 5))
+        check(ack)
         tap(app.buttons["create.submit"])
 
         tap(app.buttons["lobby.invite"], timeout: 30)
@@ -45,7 +46,7 @@ final class TwoPhoneE2ETests: XCTestCase {
         let ready = app.buttons["lobby.ready"]
         waitUntil(ready, enabled: true, timeout: 300) // seeker operator must have joined
         ready.tap()
-        allowSystemAlerts()
+        allowSystemAlerts(app)
         let start = app.buttons["lobby.start"]
         scrollTo(start, in: app)
         waitUntil(start, enabled: true, timeout: 300) // both ready
@@ -98,7 +99,7 @@ final class TwoPhoneE2ETests: XCTestCase {
         let ready = app.buttons["lobby.ready"]
         waitUntil(ready, enabled: true, timeout: 60)
         ready.tap()
-        allowSystemAlerts()
+        allowSystemAlerts(app)
         snapshot("seeker-lobby-ready")
 
         let phase = app.staticTexts["game.phase"]
@@ -142,6 +143,7 @@ final class TwoPhoneE2ETests: XCTestCase {
     }
 
     private func launch() -> XCUIApplication {
+        installAlertMonitor()
         let app = XCUIApplication()
         app.launchArguments = ["-uiTestShortRules"]
         app.launch()
@@ -165,32 +167,53 @@ final class TwoPhoneE2ETests: XCTestCase {
     private func acceptConsent(_ app: XCUIApplication) {
         tap(app.buttons["lobby.consent"], timeout: 30)
         for id in ["consent.t1", "consent.t2", "consent.t3"] {
-            let t = app.switches[id]
-            XCTAssertTrue(t.waitForExistence(timeout: 10))
+            let t = app.buttons[id]
+            // Form rows load lazily: scroll first, then assert.
             scrollTo(t, in: app)
-            t.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+            XCTAssertTrue(t.waitForExistence(timeout: 5), "missing \(id)")
+            check(t)
         }
         let accept = app.buttons["consent.accept"]
         scrollTo(accept, in: app)
+        for id in ["consent.t1", "consent.t2", "consent.t3"] where app.buttons[id].exists { check(app.buttons[id]) }
         waitUntil(accept, enabled: true, timeout: 10)
         accept.tap()
     }
 
-    /// iOS offers to save the typed password (system AutoFill sheet); decline it.
+    /// iOS offers to save the typed password; the sheet is exposed in the app's own
+    /// hierarchy. (Querying SpringBoard directly wedges XCTest on iOS 27 simulators.)
     private func dismissSavePasswordPrompt(_ app: XCUIApplication) {
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for _ in 0..<3 {
-            for candidate in [app.buttons["Not Now"], springboard.buttons["Not Now"]] where candidate.waitForExistence(timeout: 2) {
-                candidate.tap()
+        RunLoop.current.run(until: Date().addingTimeInterval(2.5))
+        let notNow = app.buttons["Not Now"]
+        if notNow.exists { notNow.tap() }
+    }
+
+    /// System permission alerts (notifications, location) are handled by an interruption
+    /// monitor; it fires on the next interaction with the app.
+    private func installAlertMonitor() {
+        addUIInterruptionMonitor(withDescription: "System permission alerts") { alert in
+            for label in ["Allow While Using App", "Allow", "OK"] where alert.buttons[label].exists {
+                alert.buttons[label].tap()
+                return true
             }
+            return false
         }
     }
 
-    private func allowSystemAlerts() {
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for label in ["Allow", "Allow While Using App", "OK"] {
-            let b = springboard.buttons[label]
-            if b.waitForExistence(timeout: 3) { b.tap() }
+    /// Tap a CheckRow until it reports "Checked" (a scroll gesture can toggle it back).
+    private func check(_ e: XCUIElement) {
+        for _ in 0..<3 where (e.value as? String) != "Checked" {
+            e.tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        }
+        XCTAssertEqual(e.value as? String, "Checked")
+    }
+
+    private func allowSystemAlerts(_ app: XCUIApplication) {
+        // Nudge the app so pending interruption monitors (location, then notifications) can run.
+        for _ in 0..<2 {
+            RunLoop.current.run(until: Date().addingTimeInterval(2))
+            app.swipeDown(velocity: .slow)
         }
     }
 
@@ -200,11 +223,16 @@ final class TwoPhoneE2ETests: XCTestCase {
         e.tap()
     }
 
+    /// Scroll until the element sits comfortably inside the screen (not under the
+    /// home-indicator gesture zone or the navigation bar), using short drags.
     private func scrollTo(_ e: XCUIElement, in app: XCUIApplication) {
-        var tries = 0
-        while (!e.exists || !e.isHittable) && tries < 12 {
-            app.swipeUp()
-            tries += 1
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<15 {
+            if e.exists && e.isHittable && e.frame.maxY < window.maxY - 120 && e.frame.minY > window.minY + 90 { return }
+            let up = !e.exists || e.frame.maxY >= window.maxY - 120
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: up ? 0.7 : 0.35))
+            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: up ? 0.4 : 0.65))
+            from.press(forDuration: 0.05, thenDragTo: to)
         }
     }
 

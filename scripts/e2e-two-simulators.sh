@@ -38,6 +38,13 @@ for U in "$HOST_UDID" "$SEEKER_UDID"; do
 done
 xcrun simctl bootstatus "$HOST_UDID" -b >/dev/null
 xcrun simctl bootstatus "$SEEKER_UDID" -b >/dev/null
+# Keychain survives uninstall on simulators; reset it so no stale Firebase session is restored.
+for U in "$HOST_UDID" "$SEEKER_UDID"; do
+  xcrun simctl keychain "$U" reset 2>/dev/null || true
+  xcrun simctl privacy "$U" grant location "$BUNDLE_ID" 2>/dev/null || true
+done
+xcrun simctl bootstatus "$HOST_UDID" -b >/dev/null
+xcrun simctl bootstatus "$SEEKER_UDID" -b >/dev/null
 
 echo "▶ Starting simulated GPS routes (hider walks ~1.6 m/s, seeker drives ~12 m/s)…"
 xcrun simctl location "$HOST_UDID" start --speed=1.6 --interval=1 \

@@ -179,3 +179,26 @@ extension String {
         return map[self] ?? self.replacingOccurrences(of: "_", with: " ").capitalized
     }
 }
+
+/// Explicit checkbox row for disclosures/consent: a button that VoiceOver announces
+/// as selected/unselected (more legible than a switch for an agreement).
+struct CheckRow: View {
+    let text: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isOn ? "checkmark.square.fill" : "square")
+                    .font(.title3)
+                    .foregroundStyle(isOn ? Color.accentColor : .secondary)
+                Text(text).font(.callout).foregroundStyle(.primary).multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+        .accessibilityValue(isOn ? "Checked" : "Not checked")
+    }
+}

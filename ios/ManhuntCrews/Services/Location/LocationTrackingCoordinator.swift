@@ -290,7 +290,8 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
             lastUploadError = res.rejected.isEmpty ? nil : "\(res.rejected.count) samples rejected"
         } catch let e as APIError {
             switch e.code {
-            case "GAME_CLOSED", "NOT_FOUND", "OPERATOR_NOT_AUTHORIZED", "VALIDATION_FAILED":
+            case "GAME_CLOSED", "NOT_FOUND", "OPERATOR_NOT_AUTHORIZED":
+                // The round no longer accepts samples from this phone.
                 await queue.discardAll()
                 lastUploadError = e.localizedDescription
             default:

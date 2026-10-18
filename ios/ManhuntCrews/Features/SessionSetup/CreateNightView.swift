@@ -50,11 +50,8 @@ struct CreateNightView: View {
                 RosterEditor(title: "\(nameB) roster", roster: $rosterB, excluded: Set(rosterA.compactMap(\.personId)), groupPeople: groupPeople)
                 RulesEditor(rules: $rules, teamNames: (nameA, nameB))
                 Section {
-                    Toggle(isOn: $acknowledged) {
-                        Text("I'll tell my crew that my phone's route, our roster and catch photos are recorded, released to the other crew as scheduled pings during play, and shown to both operators after each round.")
-                            .font(.callout)
-                    }
-                    .accessibilityIdentifier("create.ack")
+                    CheckRow(text: "I'll tell my crew that my phone's route, our roster and catch photos are recorded, released to the other crew as scheduled pings during play, and shown to both operators after each round.", isOn: $acknowledged)
+                        .accessibilityIdentifier("create.ack")
                 } header: {
                     Text("Disclosure")
                 }

@@ -75,6 +75,11 @@ final class AppModel {
         do {
             me = try await api.me()
             meError = nil
+        } catch APIError.unauthenticated {
+            // The stored session is no longer valid (expired refresh token, deleted
+            // account, or a reset backend). Don't strand the user on an error screen.
+            await signOut()
+            show("Your session expired — please sign in again.")
         } catch {
             meError = error.localizedDescription
         }

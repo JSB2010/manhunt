@@ -76,12 +76,13 @@ export const HealthInput = z
     trackingActive: z.boolean(),
     backgroundSessionActive: z.boolean(),
     lowPowerMode: z.boolean(),
-    batteryLevel: z.number().min(0).max(1).nullable(),
+    // Nullable fields may also be omitted: Swift's JSONEncoder drops nil optionals.
+    batteryLevel: z.number().min(0).max(1).nullish().transform((v) => v ?? null),
     networkReachable: z.boolean(),
-    appVersion: z.string().max(32).nullable(),
+    appVersion: z.string().max(32).nullish().transform((v) => v ?? null),
     queuedSamples: z.number().int().min(0).max(1_000_000),
-    lastFixAgeSeconds: z.number().min(0).max(86_400).nullable(),
-    lastFixAccuracyMeters: z.number().min(0).max(100_000).nullable(),
+    lastFixAgeSeconds: z.number().min(0).max(86_400).nullish().transform((v) => v ?? null),
+    lastFixAccuracyMeters: z.number().min(0).max(100_000).nullish().transform((v) => v ?? null),
   })
   .strict();
 

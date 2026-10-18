@@ -40,6 +40,8 @@ struct LobbyView: View {
                         }
                     }
 
+                    if round.index > 1 { RoleSwapChecklist(myRole: round.myRole) }
+
                     if view.session.isHost && otherTeamMissing {
                         BigButton(title: "Invite the other operator", systemImage: "person.crop.circle.badge.plus", tint: Theme.hiding) { showInvite = true }
                             .accessibilityIdentifier("lobby.invite")
@@ -159,6 +161,35 @@ struct LobbyView: View {
     }
 }
 
+/// Between-rounds physical preparation (spec §3.1, screen 13). Local checklist only.
+struct RoleSwapChecklist: View {
+    let myRole: Role?
+    @State private var checked: Set<Int> = []
+
+    private var items: [String] {
+        myRole == .HIDING
+            ? ["Your crew is together on foot at the agreed start point", "Phone charged and in a pocket — tracking runs with the screen locked", "Seekers' car is out of sight", "Everyone knows the boundaries you agreed on (the app doesn't enforce any)"]
+            : ["Your crew is in the car; a passenger holds this phone", "The driver will not touch the app", "You're at the agreed waiting spot for the head start", "Phone charged / plugged in"]
+    }
+
+    var body: some View {
+        Card {
+            Label("Roles switched — get ready", systemImage: "arrow.triangle.2.circlepath").font(.headline)
+            ForEach(Array(items.enumerated()), id: \.offset) { i, item in
+                Button {
+                    if checked.contains(i) { checked.remove(i) } else { checked.insert(i) }
+                } label: {
+                    Label(item, systemImage: checked.contains(i) ? "checkmark.square.fill" : "square")
+                        .font(.callout)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
 struct PreflightCard: View {
     @Environment(AppModel.self) private var model
     var body: some View {
@@ -224,11 +255,11 @@ struct ConsentSheet: View {
                     Text("Both operators can view both routes, pings, distances and the catch photo. Raw GPS is kept up to 30 days; simplified routes until deleted. You can delete your own data anytime.")
                 }
                 Section {
-                    Toggle("I agree to route recording during rounds and post-round route sharing with the other operator.", isOn: $a)
+                    CheckRow(text: "I agree to route recording during rounds and post-round route sharing with the other operator.", isOn: $a)
                         .accessibilityIdentifier("consent.t1")
-                    Toggle("My crew knows our operator phone's location, the roster and photos are recorded and shown after rounds.", isOn: $b)
+                    CheckRow(text: "My crew knows our operator phone's location, the roster and photos are recorded and shown after rounds.", isOn: $b)
                         .accessibilityIdentifier("consent.t2")
-                    Toggle("I understand GPS and notifications can be delayed; missing fixes are shown as missing.", isOn: $c)
+                    CheckRow(text: "I understand GPS and notifications can be delayed; missing fixes are shown as missing.", isOn: $c)
                         .accessibilityIdentifier("consent.t3")
                 }
                 Section {
