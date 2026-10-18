@@ -1,0 +1,46 @@
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+
+# Firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
+emulator-data/
+
+# Credentials — never commit
+**/GoogleService-Info.plist
+*.p8
+*.p12
+*.mobileprovision
+service-account*.json
+*-sa-key.json
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl.bak
+
+# Xcode
+ios/build/
+ios/DerivedData/
+xcuserdata/
+*.xcuserstate
+ios/ManhuntCrews/Config/Local.xcconfig
+
+# macOS
+.DS_Store
+
+# Test artifacts that may contain coordinates
+test-artifacts/private/
