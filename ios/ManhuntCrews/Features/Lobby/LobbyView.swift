@@ -36,7 +36,7 @@ struct LobbyView: View {
 
                     ForEach(TeamKey.allCases) { k in
                         if let team = view.session.team(k) {
-                            CrewTile(team: team, role: k == round.hidingTeam ? .HIDING : .SEEKING, ready: round.isReady(k), opponentHealth: round.opponentHealth)
+                            CrewTile(team: team, role: k == round.hidingTeam ? .HIDING : .SEEKING, ready: round.isReady(k), opponentHealth: round.opponentHealth, inLobby: true)
                         }
                     }
 

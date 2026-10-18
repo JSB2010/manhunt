@@ -213,6 +213,7 @@ struct RoundRecapView: View {
                     .font(.callout).foregroundStyle(.secondary)
                 if live.session.isHost {
                     BigButton(title: "Set up round \(next.index)", systemImage: "arrow.triangle.2.circlepath", busy: busy) { overrideTeam = nil; createNext(live) }
+                        .accessibilityIdentifier("recap.nextRound")
                     Button("Change who hides…") { showOverride = true }.font(.callout)
                     Button("End the night now") { perform($busy, $error) { try await model.api.completeSession(sessionId) } }.font(.callout)
                 } else {

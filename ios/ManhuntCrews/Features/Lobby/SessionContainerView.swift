@@ -45,6 +45,7 @@ struct CrewTile: View {
     let role: Role?
     let ready: Bool?
     var opponentHealth: OpponentHealthView?
+    var inLobby = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -70,7 +71,7 @@ struct CrewTile: View {
                 if let ready { StatusPill(text: ready ? "Ready" : "Not ready", color: ready ? Theme.ok : .secondary, systemImage: ready ? "checkmark.circle.fill" : "circle") }
             }
             if let h = opponentHealth, team.hasOperator, !team.isMine {
-                HealthIntegrityPill(health: h)
+                HealthIntegrityPill(health: h, inLobby: inLobby)
             }
         }
         .padding()
@@ -84,19 +85,28 @@ struct CrewTile: View {
 /// Opponent integrity indicator — coarse status only, never coordinates.
 struct HealthIntegrityPill: View {
     let health: OpponentHealthView
+    /// Before a round, "not tracking" is expected — don't alarm anyone.
+    var inLobby = false
     var body: some View {
-        let (text, color, icon): (String, Color, String) = switch health.state {
-        case "ACTIVE": ("Tracking OK", Theme.ok, "dot.radiowaves.left.and.right")
-        case "STALE": ("Tracking stale", .orange, "exclamationmark.triangle")
-        case "NO_SIGNAL": ("No signal from phone", Theme.danger, "antenna.radiowaves.left.and.right.slash")
-        case "STOPPED": ("Tracking stopped", Theme.danger, "location.slash")
-        case "PERMISSION_ISSUE": ("Location permission off", Theme.danger, "location.slash")
-        default: ("Status unknown", .secondary, "questionmark.circle")
-        }
+        let (text, color, icon) = presentation
         HStack(spacing: 6) {
             StatusPill(text: text, color: color, systemImage: icon)
             if health.issues.contains("PRECISE_LOCATION_OFF") { StatusPill(text: "Approximate location", color: .orange) }
             if health.issues.contains("LOW_POWER_MODE") { StatusPill(text: "Low Power", color: .orange) }
+        }
+    }
+
+    private var presentation: (String, Color, String) {
+        if inLobby && ["STOPPED", "UNKNOWN", "STALE", "NO_SIGNAL"].contains(health.state) {
+            return ("Not tracking yet", .secondary, "location")
+        }
+        switch health.state {
+        case "ACTIVE": return ("Tracking OK", Theme.ok, "dot.radiowaves.left.and.right")
+        case "STALE": return ("Tracking stale", .orange, "exclamationmark.triangle")
+        case "NO_SIGNAL": return ("No signal from phone", Theme.danger, "antenna.radiowaves.left.and.right.slash")
+        case "STOPPED": return ("Tracking stopped", Theme.danger, "location.slash")
+        case "PERMISSION_ISSUE": return ("Location permission off", Theme.danger, "location.slash")
+        default: return ("Status unknown", .secondary, "questionmark.circle")
         }
     }
 }

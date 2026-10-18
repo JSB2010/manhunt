@@ -1,5 +1,8 @@
 import Foundation
 import FirebaseFirestore
+import os
+
+let realtimeLog = Logger(subsystem: "com.manhuntcrews", category: "realtime")
 
 /// Subscribes to the caller's own sanitized read model
 /// `sessions/{sessionId}/views/{uid}`. Firestore rules allow reading exactly
@@ -16,7 +19,9 @@ final class SessionViewListener {
     func start(sessionId: String, uid: String, onUpdate: @escaping @MainActor (Update) -> Void) {
         stop()
         let ref = Firestore.firestore().collection("sessions").document(sessionId).collection("views").document(uid)
+        realtimeLog.info("listen start session=\(sessionId, privacy: .public)")
         registration = ref.addSnapshotListener(includeMetadataChanges: true) { snapshot, error in
+            realtimeLog.info("snapshot exists=\(snapshot?.exists ?? false) cache=\(snapshot?.metadata.isFromCache ?? true) error=\(error?.localizedDescription ?? "-", privacy: .public)")
             if let error {
                 Task { @MainActor in onUpdate(Update(view: nil, fromCache: true, error: error)) }
                 return
@@ -31,12 +36,14 @@ final class SessionViewListener {
                 let view = try JSONCoding.decoder.decode(SessionViewDoc.self, from: json)
                 Task { @MainActor in onUpdate(Update(view: view, fromCache: fromCache, error: nil)) }
             } catch {
+                realtimeLog.error("view decode failed: \(String(describing: error), privacy: .public)")
                 Task { @MainActor in onUpdate(Update(view: nil, fromCache: fromCache, error: error)) }
             }
         }
     }
 
     func stop() {
+        if registration != nil { realtimeLog.info("listen stop") }
         registration?.remove()
         registration = nil
     }

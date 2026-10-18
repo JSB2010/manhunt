@@ -6,11 +6,13 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend unit (domain, privacy invariant, OpenAPI contract) | `cd backend && npm run test:unit` | ✅ 53 / 53 |
+| Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas) | `cd backend && npm run test:unit` | ✅ 55 / 55 |
 | Backend integration + security (Auth/Firestore/Storage emulators, rules) | `npm run test:integration` | ✅ 32 / 32 |
+| Real-time API E2E (live stack, wall clock, local scheduler → worker) | `npm run e2e:two-operators` | ✅ first ping seen 0.5 s after chase start; ping 1 0.7 s after its deadline; sample age 9 s; 0 unreleased coordinates in seeker view; official time = submission time |
 | Backend typecheck | `npm run typecheck` | ✅ |
-| iOS unit (XCTest, iPhone 17 simulator, iOS 27) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 13 / 13 |
+| iOS unit + listener integration (XCTest, iPhone 16 Pro simulator) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 14 / 14 (the listener test runs only when the local stack is up) |
 | iOS app build (Debug, simulator) | `xcodebuild build …` | ✅ no warnings in app sources |
+| iOS Release build for device (unsigned) | `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ |
 | Terraform | `terraform validate` (dev, prod) | ✅ |
 | Two-simulator E2E (real app ×2 + local stack) | `scripts/e2e-two-simulators.sh` | see "Two-simulator E2E" below |
 
@@ -43,7 +45,13 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 
 `scripts/e2e-two-simulators.sh` boots two simulators, starts simulated GPS routes (hider walking 1.6 m/s, seeker driving 12 m/s), and runs `TwoPhoneE2ETests.testHost` and `.testSeeker` **concurrently**. Rules: 60 s head start, 60 s pings (DEBUG `-uiTestShortRules`). The hider app is sent to the background (home button) for the entire chase to exercise background location and uploads.
 
-Results: recorded in the final implementation report for this run (screenshots exported to `test-artifacts/e2e-*/screens-*`, git-ignored).
+**Result: ✅ PASS, 3 consecutive runs.** Latest run `e2e-20261018-031653` plays **round 1 and round 2 with the role swap** (host taps "Set up round 2", both Ready, host starts; the other phone now hides with its app backgrounded; ping #0 sample age 39 s; catch confirmed). First run `e2e-20261018-030004`, host iPhone 16 Pro / seeker iPhone 16 (iOS 18.5): night created → joined by code → disclosure accepted → both Ready → host Start → hider app sent to background for the whole chase → ping #0 at chase start (GPS sample age 17 s) → ping #1 one interval later (13 s) → seeker photo catch accepted by the server → hider confirmed → both phones show "Caught after 1:07". Screenshots: `docs/evidence/e2e-seeker-round1.png`, `docs/evidence/e2e-host-round1.png`; transcript: `docs/evidence/e2e-two-simulators.md`.
+
+Notes:
+* The iOS 27 simulator runtime proved unreliable for two concurrent UI-test sessions (XCTest automation stalls, "failed to acquire background assertion"); the passing runs use the iOS 18.5 runtime (the app's deployment target is iOS 18).
+* Simulators have no usable camera, so the DEBUG-only synthetic photo is used there; the real camera path (UIImagePickerController) needs a device.
+
+Bugs this E2E found and fixed (all covered by tests now): iOS omitted nil health fields → API 400 on every Ready (schema now accepts omitted nullables); stale Firebase session stranded the app on an error screen (now signs out); uploader dropped queued GPS on validation errors (now keeps them); Firestore watch stream silently dead after a peer reset (REST reconciliation + listener restart, ADR 0010); consent switches untappable near the home indicator (accessible checkbox rows).
 
 ## Physical two-iPhone acceptance matrix (spec §15.2) — ⏳ not yet run
 

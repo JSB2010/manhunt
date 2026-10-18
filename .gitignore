@@ -34,6 +34,7 @@ service-account*.json
 
 # Xcode
 ios/build/
+ios/build-release/
 ios/DerivedData/
 xcuserdata/
 *.xcuserstate

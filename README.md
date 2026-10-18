@@ -12,12 +12,15 @@ A friends-only, two-crew Manhunt game: **one iPhone per crew**. The hiding crew'
 | Infra | `infra/terraform/` (dedicated project), `firestore.rules`, `firestore.indexes.json`, `storage.rules` |
 | Docs | `docs/` — architecture, threat model, scoring & privacy, Apple distribution, deployment, test matrix, ADRs, product spec |
 
+## Live updates
+Phones subscribe to their own sanitized Firestore view and also reconcile over REST every 10 s, restarting the listener if it goes quiet (ADR 0010). Game timing never depends on either.
+
 ## The invariant
 While a round is active, the seeking operator can access **only released, scheduled hider pins** — never the hider's live route, latest sample or upcoming position. This is enforced in the server and in Firestore/Storage rules, not by hiding UI. The host gets no special visibility. See `docs/permissions-threat-model.md`.
 
 ## Quick start (local, no cloud account needed)
 
-Requirements: Node 24+, Java 21+ (Firebase emulators), Firebase CLI, Xcode 16+ (tested with Xcode 27 / iOS 27 simulators).
+Requirements: Node 24+, Java 21+ (Firebase emulators), Firebase CLI, Xcode 16+ (built with Xcode 27; two-phone E2E verified on iOS 18.5 simulators).
 
 ```bash
 cd backend && npm ci && cd ..
@@ -33,7 +36,7 @@ cd backend && npm run seed:emulator   # emulator-only demo accounts (backend/scr
 Open `ios/ManhuntCrews.xcodeproj`, pick a simulator, Run. Sign in with a seeded account (or create one). For two phones use two simulators — or run the automated two-simulator round:
 
 ```bash
-scripts/e2e-two-simulators.sh "iPhone 17" "iPhone 18 Pro"
+scripts/e2e-two-simulators.sh "iPhone 16 Pro" "iPhone 16"
 ```
 
 Physical iPhones: see `docs/apple-distribution.md` (free Personal Team works for development; Push and Sign in with Apple need the paid program).

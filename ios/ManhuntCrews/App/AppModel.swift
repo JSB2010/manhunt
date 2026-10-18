@@ -1,6 +1,8 @@
 import Foundation
 import Observation
 import SwiftUI
+import UIKit
+import FirebaseFirestore
 
 enum DeepLink: Equatable {
     case join(code: String)
@@ -40,6 +42,8 @@ final class AppModel {
     private(set) var viewError: String?
     private let listener = SessionViewListener()
     private var lastStateVersion: Double = 0
+    private var lastSnapshotAt = Date.distantPast
+    private var reconcileTask: Task<Void, Never>?
 
     var pendingDeepLink: DeepLink?
     var toast: String?
@@ -93,11 +97,43 @@ final class AppModel {
         }
         activeSessionId = id
         viewError = nil
-        listener.start(sessionId: id, uid: uid) { [weak self] update in
-            self?.handle(update)
-        }
+        startListener(id: id, uid: uid)
         // Fetch immediately over REST too (fast first paint + server-clock sync).
         Task { await reloadSessionView() }
+        startReconcileLoop()
+    }
+
+    private func startListener(id: String, uid: String) {
+        lastSnapshotAt = Date()
+        listener.start(sessionId: id, uid: uid) { [weak self] update in
+            self?.lastSnapshotAt = Date()
+            self?.handle(update)
+        }
+    }
+
+    /// The Firestore listener is the fast path, but long-lived streams can die
+    /// silently (mobile handoffs, proxies, emulator resets) while the SDK still
+    /// believes it is connected. Reconcile over REST on a short cadence and
+    /// restart the listener (with a network reset) when it has gone quiet, so the
+    /// screen never shows a stale phase for long. Ordering by `stateVersion`
+    /// prevents a REST response from overwriting newer listener state.
+    private func startReconcileLoop() {
+        reconcileTask?.cancel()
+        reconcileTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let foreground = UIApplication.shared.applicationState == .active
+                try? await Task.sleep(nanoseconds: (foreground ? 10 : 30) * 1_000_000_000)
+                guard let self, !Task.isCancelled, let id = self.activeSessionId, let uid = self.auth.uid else { return }
+                await self.reloadSessionView()
+                if Date().timeIntervalSince(self.lastSnapshotAt) > 60 {
+                    realtimeLog.info("listener quiet for 60s — restarting stream")
+                    let db = Firestore.firestore()
+                    try? await db.disableNetwork()
+                    try? await db.enableNetwork()
+                    self.startListener(id: id, uid: uid)
+                }
+            }
+        }
     }
 
     func reloadSessionView() async {
@@ -114,6 +150,9 @@ final class AppModel {
     }
 
     func closeSession() {
+        realtimeLog.info("closeSession")
+        reconcileTask?.cancel()
+        reconcileTask = nil
         listener.stop()
         activeSessionId = nil
         sessionView = nil
@@ -133,7 +172,11 @@ final class AppModel {
     private func apply(_ v: SessionViewDoc, fromCache: Bool) {
         guard v.sessionId == activeSessionId else { return }
         // Ignore out-of-order renders (REST vs. listener).
-        if v.stateVersion < lastStateVersion { return }
+        if v.stateVersion < lastStateVersion {
+            realtimeLog.info("view dropped (older) v=\(v.stateVersion, privacy: .public) last=\(self.lastStateVersion, privacy: .public)")
+            return
+        }
+        realtimeLog.info("view applied v=\(v.stateVersion, privacy: .public) state=\(v.round?.state.rawValue ?? "-", privacy: .public) cache=\(fromCache)")
         lastStateVersion = v.stateVersion
         sessionView = v
         viewError = nil

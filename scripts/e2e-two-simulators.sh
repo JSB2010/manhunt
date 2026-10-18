@@ -9,11 +9,12 @@
 # Each simulator follows a simulated GPS route (walking vs. driving).
 #
 # Usage: scripts/e2e-two-simulators.sh [HOST_SIM_NAME] [SEEKER_SIM_NAME]
+# Defaults use iOS 18.5 simulators; the iOS 27 runtime stalls with two concurrent UI-test sessions.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
-HOST_SIM_NAME=${1:-"iPhone 17"}
-SEEKER_SIM_NAME=${2:-"iPhone 18 Pro"}
+HOST_SIM_NAME=${1:-"iPhone 16 Pro"}
+SEEKER_SIM_NAME=${2:-"iPhone 16"}
 BUNDLE_ID=${MH_BUNDLE_ID:-com.manhuntcrews.dev}
 DD="$ROOT/ios/build"
 STAMP=$(date +%Y%m%d-%H%M%S)
@@ -22,6 +23,8 @@ COORD="$OUT/coordination"
 mkdir -p "$COORD"
 
 curl -sf http://127.0.0.1:8787/healthz >/dev/null || { echo "Local API not running — start scripts/dev.sh first"; exit 1; }
+# Start from Home: end rounds/nights left over from previous (interrupted) runs.
+(cd backend && npx tsx scripts/e2e-cleanup.ts)
 
 sim_udid() { xcrun simctl list devices available -j | python3 -c "import json,sys; n=sys.argv[1]; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for v in d.values() for x in v if x['name']==n))" "$1"; }
 HOST_UDID=$(sim_udid "$HOST_SIM_NAME")

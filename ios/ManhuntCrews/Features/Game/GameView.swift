@@ -239,7 +239,7 @@ struct PingStatusRow: View {
             let now = ServerClock.shared.now()
             VStack(alignment: .leading, spacing: 4) {
                 if let pin = round.pins.last {
-                    Text("Last hider ping \(Fmt.ago(pin.scheduledAt, now: now)) (GPS sample age \(pin.ageSeconds.map { "\($0)s" } ?? "—"), ±\(Int(pin.accuracyMeters ?? 0)) m\(pin.delayed ? ", released late" : ""))")
+                    Text("Last hider ping #\(pin.index) · \(Fmt.ago(pin.scheduledAt, now: now)) (GPS sample age \(pin.ageSeconds.map { "\($0)s" } ?? "—"), ±\(Int(pin.accuracyMeters ?? 0)) m\(pin.delayed ? ", released late" : ""))")
                         .font(.footnote.weight(.semibold))
                         .accessibilityIdentifier("game.lastPing")
                 }

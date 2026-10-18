@@ -19,7 +19,14 @@ struct CaptureFlowView: View {
     @State private var uploaded = false
     @State private var showCamera = true
 
-    private var cameraAvailable: Bool { UIImagePickerController.isSourceTypeAvailable(.camera) }
+    private var cameraAvailable: Bool {
+        #if targetEnvironment(simulator)
+        // Simulators may present a camera UI whose shutter cannot capture.
+        return false
+        #else
+        return UIImagePickerController.isSourceTypeAvailable(.camera)
+        #endif
+    }
 
     var body: some View {
         NavigationStack {

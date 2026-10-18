@@ -78,6 +78,40 @@ final class TwoPhoneE2ETests: XCTestCase {
         XCTAssertTrue(outcome.label.contains("Caught after"), outcome.label)
         snapshot("host-recap")
         try write("host-done.txt", outcome.label)
+
+        // ---- Round 2: roles swap. Host's crew now SEEKS; nothing starts automatically.
+        let next = app.buttons["recap.nextRound"]
+        scrollTo(next, in: app)
+        tap(next, timeout: 30)
+        let ready2 = app.buttons["lobby.ready"]
+        XCTAssertTrue(ready2.waitForExistence(timeout: 30), "round 2 lobby")
+        snapshot("host-round2-lobby")
+        waitUntil(ready2, enabled: true, timeout: 60)
+        ready2.tap()
+        let start2 = app.buttons["lobby.start"]
+        scrollTo(start2, in: app)
+        waitUntil(start2, enabled: true, timeout: 300)
+        start2.tap()
+        if app.buttons["warnings.startAnyway"].waitForExistence(timeout: 6) { app.buttons["warnings.startAnyway"].tap() }
+        let phase2 = app.staticTexts["game.phase"]
+        XCTAssertTrue(phase2.waitForExistence(timeout: 30))
+        XCTAssertTrue(phase2.label.contains("SEEKING"), "host seeks in round 2: \(phase2.label)")
+        let ping2 = app.staticTexts["game.lastPing"]
+        XCTAssertTrue(ping2.waitForExistence(timeout: 150), "round 2 first ping")
+        XCTAssertTrue(ping2.label.contains("#0"), ping2.label)
+        snapshot("host-round2-first-ping")
+        try write("r2-first-ping.txt", ping2.label)
+        tap(app.buttons["game.photoCatch"])
+        takePhoto(app)
+        tap(app.buttons["capture.submit"], timeout: 20)
+        let back2 = app.buttons["capture.backToMap"]
+        XCTAssertTrue(back2.waitForExistence(timeout: 60))
+        try write("r2-claim-submitted.txt", "ok")
+        back2.tap()
+        let outcome2 = app.staticTexts["recap.outcome"]
+        XCTAssertTrue(outcome2.waitForExistence(timeout: 600), "round 2 should complete")
+        snapshot("host-round2-recap")
+        try write("host-r2-done.txt", outcome2.label)
     }
 
     // MARK: Seeker = Crew B operator, seeks in round 1
@@ -114,14 +148,14 @@ final class TwoPhoneE2ETests: XCTestCase {
         snapshot("seeker-first-ping")
         try write("first-ping.txt", lastPing.label)
 
+        XCTAssertTrue(lastPing.label.contains("#0"), lastPing.label)
         // Wait for the second scheduled ping (60 s interval in UI-test rules).
-        let firstLabel = lastPing.label
-        waitUntil(timeout: 120) { lastPing.label != firstLabel && lastPing.label.contains("sample age") }
+        waitUntil(timeout: 120) { lastPing.label.contains("#1") }
         snapshot("seeker-second-ping")
         try write("second-ping.txt", lastPing.label)
 
         tap(app.buttons["game.photoCatch"])
-        tap(app.buttons["capture.simPhoto"], timeout: 20)
+        takePhoto(app)
         tap(app.buttons["capture.submit"], timeout: 20)
         let back = app.buttons["capture.backToMap"]
         XCTAssertTrue(back.waitForExistence(timeout: 60), "server should accept the catch claim")
@@ -134,6 +168,28 @@ final class TwoPhoneE2ETests: XCTestCase {
         XCTAssertTrue(outcome.label.contains("Caught after"), outcome.label)
         snapshot("seeker-recap")
         try write("seeker-done.txt", outcome.label)
+
+        // ---- Round 2: this crew now HIDES. Wait for the host to set it up.
+        let ready2 = app.buttons["lobby.ready"]
+        XCTAssertTrue(ready2.waitForExistence(timeout: 300), "round 2 lobby should appear when the host sets it up")
+        waitUntil(ready2, enabled: true, timeout: 60)
+        ready2.tap()
+        snapshot("seeker-round2-ready")
+        let phase2 = app.staticTexts["game.phase"]
+        XCTAssertTrue(phase2.waitForExistence(timeout: 300), "round 2 should start")
+        XCTAssertTrue(phase2.label.contains("HIDING"), "this crew hides in round 2: \(phase2.label)")
+        snapshot("seeker-round2-hiding")
+        XCUIDevice.shared.press(.home) // hide with the phone "in a pocket"
+        _ = try waitForFile("r2-claim-submitted.txt", timeout: 900)
+        app.activate()
+        let confirm = app.buttons["confirm.confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 60))
+        snapshot("seeker-round2-confirm")
+        confirm.tap()
+        let outcome2 = app.staticTexts["recap.outcome"]
+        XCTAssertTrue(outcome2.waitForExistence(timeout: 90))
+        snapshot("seeker-round2-recap")
+        try write("seeker-r2-done.txt", outcome2.label)
     }
 
     // MARK: Helpers
@@ -209,6 +265,24 @@ final class TwoPhoneE2ETests: XCTestCase {
         XCTAssertEqual(e.value as? String, "Checked")
     }
 
+    /// Simulators either expose a simulated camera (UIImagePickerController) or none
+    /// (DEBUG-only synthetic photo button). Handle both.
+    private func takePhoto(_ app: XCUIApplication) {
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            if app.buttons["capture.simPhoto"].exists { app.buttons["capture.simPhoto"].tap(); return }
+            for id in ["PhotoCapture", "Take Picture"] where app.buttons[id].exists {
+                app.buttons[id].tap()
+                let use = app.buttons["Use Photo"]
+                XCTAssertTrue(use.waitForExistence(timeout: 15), "camera should offer Use Photo")
+                use.tap()
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        }
+        XCTFail("no camera or simulator photo option appeared")
+    }
+
     private func allowSystemAlerts(_ app: XCUIApplication) {
         // Nudge the app so pending interruption monitors (location, then notifications) can run.
         for _ in 0..<2 {
@@ -229,10 +303,9 @@ final class TwoPhoneE2ETests: XCTestCase {
         let window = app.windows.firstMatch.frame
         for _ in 0..<15 {
             if e.exists && e.isHittable && e.frame.maxY < window.maxY - 120 && e.frame.minY > window.minY + 90 { return }
+            // Plain swipes (no press-and-hold) so rows, steppers and menu pickers aren't activated.
             let up = !e.exists || e.frame.maxY >= window.maxY - 120
-            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: up ? 0.7 : 0.35))
-            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: up ? 0.4 : 0.65))
-            from.press(forDuration: 0.05, thenDragTo: to)
+            if up { app.swipeUp(velocity: .slow) } else { app.swipeDown(velocity: .slow) }
         }
     }
 
