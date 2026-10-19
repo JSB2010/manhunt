@@ -10,7 +10,8 @@ A friends-only, two-crew Manhunt game: **one iPhone per crew**. The hiding crew'
 | Backend | `backend/` — Node 24 + TypeScript + Fastify on Cloud Run (public API + private worker), Firestore, private GCS, Cloud Tasks, Cloud Scheduler, FCM. |
 | Contract | `shared/openapi.yaml` (enforced by a contract test) |
 | Infra | `infra/terraform/` (dedicated project), `firestore.rules`, `firestore.indexes.json`, `storage.rules` |
-| Docs | `docs/` — architecture, threat model, scoring & privacy, Apple distribution, deployment, test matrix, ADRs, product spec |
+| Docs | `docs/` — architecture, threat model, scoring & privacy, design system, Apple distribution, deployment, test matrix, ADRs, product spec |
+| Design | Apple HIG + native iOS 26 Liquid Glass (iOS 18 fallbacks) — `docs/design-system.md` |
 
 ## Live updates
 Phones subscribe to their own sanitized Firestore view and also reconcile over REST every 10 s, restarting the listener if it goes quiet (ADR 0010). Game timing never depends on either.
@@ -20,7 +21,7 @@ While a round is active, the seeking operator can access **only released, schedu
 
 ## Quick start (local, no cloud account needed)
 
-Requirements: Node 24+, Java 21+ (Firebase emulators), Firebase CLI, Xcode 16+ (built with Xcode 27; two-phone E2E verified on iOS 18.5 simulators).
+Requirements: Node 24+, Java 21 (Firebase emulators — JDK 24+ crashes the Storage emulator on the first upload; `scripts/emulator-start.sh` picks an installed JDK 21), Firebase CLI, Xcode 16+ (built with Xcode 27; two-phone E2E verified on iOS 18.5 simulators).
 
 ```bash
 cd backend && npm ci && cd ..
@@ -33,10 +34,12 @@ In another terminal:
 cd backend && npm run seed:emulator   # emulator-only demo accounts (backend/scripts/seed-accounts.json)
 ```
 
+Design QA: `cd backend && npx tsx scripts/ui-fixture.ts <lobby|headstart|chase|pending|paused|recap|night> [seek|hide]` puts the emulator accounts into one game state so each screen can be reviewed.
+
 Open `ios/ManhuntCrews.xcodeproj`, pick a simulator, Run. Sign in with a seeded account (or create one). For two phones use two simulators — or run the automated two-simulator round:
 
 ```bash
-scripts/e2e-two-simulators.sh "iPhone 16 Pro" "iPhone 16"
+scripts/e2e-two-simulators.sh "iPhone 16 Pro Max" "iPhone 16e"   # two iOS 18.5 simulators
 ```
 
 Physical iPhones: see `docs/apple-distribution.md` (free Personal Team works for development; Push and Sign in with Apple need the paid program).

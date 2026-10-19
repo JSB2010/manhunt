@@ -21,9 +21,11 @@ struct RosterEditor: View {
     var body: some View {
         Section {
             ForEach(roster, id: \.self) { entry in
-                HStack {
-                    Image(systemName: entry.personId == model.me?.profile.selfPersonId ? "person.crop.circle.badge.checkmark" : "person")
+                Label {
                     Text(entry.displayName)
+                } icon: {
+                    Image(systemName: entry.personId == model.me?.profile.selfPersonId ? "person.crop.circle.badge.checkmark" : "person.fill")
+                        .foregroundStyle(.secondary)
                 }
             }
             .onDelete { roster.remove(atOffsets: $0) }
@@ -31,14 +33,14 @@ struct RosterEditor: View {
                 TextField("Add a name", text: $newName)
                     .submitLabel(.done)
                     .onSubmit(add)
-                Button(action: add) { Image(systemName: "plus.circle.fill") }
+                Button(action: add) { Label("Add", systemImage: "plus.circle.fill").labelStyle(.iconOnly).font(.title3) }
                     .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || busy)
             }
-            Button("Pick saved people…") { showPicker = true }
+            Button("Choose Saved People…") { showPicker = true }
         } header: {
             Text(title)
         } footer: {
-            Text("Named crew members don't need the app. Only the operator's phone is tracked as the crew's location.")
+            Text("Named crew members don’t need the app. Only the operator’s phone is tracked as the crew’s location.")
         }
         .sheet(isPresented: $showPicker) {
             PeoplePicker(selected: Set(roster.compactMap(\.personId)), excluded: excluded, groupPeople: groupPeople) { picked in
@@ -51,7 +53,7 @@ struct RosterEditor: View {
             ForEach(duplicates) { p in
                 Button("Use saved \(p.displayName)\(p.hasAccount ? " (has account)" : "")") { append(p) }
             }
-            Button("No — create a new \(pendingName)") { create(confirm: true) }
+            Button("No — Create a New \(pendingName)") { create(confirm: true) }
             Button("Cancel", role: .cancel) {}
         }
         .errorAlert($error)
@@ -99,16 +101,17 @@ struct PeoplePicker: View {
         NavigationStack {
             List {
                 if !groupPeople.isEmpty {
-                    Section("From the selected group") { rows(groupPeople) }
+                    Section("From the Selected Group") { rows(groupPeople) }
                 }
-                Section("Saved people") { rows(people.filter { p in !groupPeople.contains(where: { $0.id == p.id }) }) }
+                Section("Saved People") { rows(people.filter { p in !groupPeople.contains(where: { $0.id == p.id }) }) }
             }
             .searchable(text: $query)
-            .navigationTitle("Pick people")
+            .navigationTitle("Choose People")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { CancelButton { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
+                    ConfirmButton(title: "Add") {
                         onDone((groupPeople + people).filter { picked.contains($0.id) }.reduce(into: [Person]()) { acc, p in if !acc.contains(p) { acc.append(p) } })
                         dismiss()
                     }
@@ -131,7 +134,7 @@ struct PeoplePicker: View {
                     if p.isSelf { Text("(you)").foregroundStyle(.secondary) }
                     if p.hasAccount && !p.isSelf { Image(systemName: "person.crop.circle.badge.checkmark").foregroundStyle(.secondary) }
                     Spacer()
-                    if picked.contains(p.id) || selected.contains(p.id) { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                    if picked.contains(p.id) || selected.contains(p.id) { Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityLabel("Selected") }
                 }
             }
             .disabled(disabled)

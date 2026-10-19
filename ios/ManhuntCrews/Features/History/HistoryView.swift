@@ -5,38 +5,84 @@ struct HistoryView: View {
     @State private var items: [SessionListItem] = []
     @State private var query = ""
     @State private var loading = false
+    @State private var loaded = false
     @State private var error: String?
 
     var body: some View {
         List {
             ForEach(items) { s in
-                NavigationLink { SessionDetailView(item: s) } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(s.title).font(.headline)
-                            Spacer()
-                            Text(s.scheduledDate).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Text("\(s.teams["A"]?.name ?? "A") vs \(s.teams["B"]?.name ?? "B") · \(s.completedRoundCount)/\(s.totalRounds) rounds")
-                            .font(.callout)
-                        Text(((s.teams["A"]?.roster ?? []) + (s.teams["B"]?.roster ?? [])).map(\.displayName).joined(separator: ", "))
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
+                NavigationLink { SessionDetailView(item: s) } label: { NightRow(item: s) }
             }
-            if items.isEmpty && !loading {
-                ContentUnavailableView("No nights yet", systemImage: "moon.stars", description: Text("Nights you host or join appear here."))
+        }
+        .overlay {
+            if loaded && items.isEmpty {
+                if query.isEmpty {
+                    ContentUnavailableView("No Nights Yet", systemImage: "moon.stars", description: Text("Nights you host or join appear here, with scorecards for every round."))
+                } else {
+                    ContentUnavailableView.search(text: query)
+                }
+            } else if !loaded {
+                ProgressView()
             }
         }
         .searchable(text: $query, prompt: "Crew, person, title or date")
         .navigationTitle("History")
         .task(id: query) {
-            loading = true
-            defer { loading = false }
+            // Debounce typing; a newer query cancels this task, which is not an error.
             try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            loading = true
+            defer { loading = false; loaded = true }
+            do {
+                items = try await model.api.sessions(query: query).items
+            } catch {
+                if !Task.isCancelled { self.error = error.localizedDescription }
+            }
+        }
+        .refreshable {
             do { items = try await model.api.sessions(query: query).items } catch { self.error = error.localizedDescription }
         }
         .errorAlert($error)
+    }
+}
+
+private struct NightRow: View {
+    let item: SessionListItem
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        // Title and date side by side; stacked at accessibility text sizes.
+        let header = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
+        VStack(alignment: .leading, spacing: 6) {
+            header {
+                Text(item.title).font(.headline)
+                Spacer(minLength: 0)
+                Text(Fmt.day(item.scheduledDate)).font(.subheadline).foregroundStyle(.secondary)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) { crews }
+                VStack(alignment: .leading, spacing: 4) { crews }
+            }
+            .font(.subheadline)
+            Text("\(item.completedRoundCount) of \(item.totalRounds) rounds\(item.status == .COMPLETED ? "" : " · in progress")")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private var crews: some View {
+        ForEach(TeamKey.allCases) { k in
+            if let t = item.teams[k.rawValue] {
+                HStack(spacing: 6) {
+                    CrewDot(key: k)
+                    Text(t.name)
+                }
+            }
+        }
     }
 }
 
@@ -54,59 +100,74 @@ struct SessionDetailView: View {
         List {
             Section {
                 if item.status != .COMPLETED {
-                    Button { model.openSession(item.id) } label: { Label("Open night", systemImage: "play.circle.fill") }
+                    Button { model.openSession(item.id) } label: { Label("Open Night", systemImage: "play.circle.fill") }
                 }
-                NavigationLink { NightSummaryView(sessionId: item.id) } label: { Label("Scorecard & export", systemImage: "trophy") }
+                NavigationLink { NightSummaryView(sessionId: item.id) } label: { Label("Scorecard & Export", systemImage: "trophy.fill") }
             }
             Section("Crews") {
                 ForEach(TeamKey.allCases) { k in
                     if let t = item.teams[k.rawValue] {
-                        VStack(alignment: .leading) {
-                            HStack { Circle().fill(Color(hex: t.color)).frame(width: 10); Text(t.name).font(.headline) }
-                            Text(t.roster.map(\.displayName).joined(separator: ", ")).font(.caption)
-                            if let op = t.operatorDisplayName { Text("Operator: \(op)").font(.caption2).foregroundStyle(.secondary) }
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 8) {
+                                CrewDot(key: k)
+                                Text(t.name).font(.headline)
+                            }
+                            if !t.roster.isEmpty {
+                                Text(t.roster.map(\.displayName).formatted(.list(type: .and)))
+                                    .font(.subheadline)
+                            }
+                            if let op = t.operatorDisplayName {
+                                Label("Operator: \(op)", systemImage: "iphone")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .padding(.vertical, 2)
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
             Section("Rounds") {
                 ForEach(view?.previousRounds ?? []) { b in
                     NavigationLink { RoundRecapView(sessionId: item.id, roundId: b.roundId) } label: {
-                        HStack {
-                            Text("Round \(b.index)").bold()
-                            Text("\(item.teams[b.hidingTeam.rawValue]?.name ?? "") hid").foregroundStyle(.secondary)
-                            Spacer()
-                            Text(b.outcome == "CAUGHT" ? Fmt.clock(Double(b.observedChaseSeconds)) : b.outcome == "TIMED_OUT" ? "≥ \(Fmt.clock(Double(b.observedChaseSeconds)))" : "aborted").monospacedDigit()
+                        LabeledContent {
+                            Text(Fmt.outcome(b.outcome, seconds: b.observedChaseSeconds)).monospacedDigit()
+                        } label: {
+                            Text("Round \(b.index)")
+                            Text("\(item.teams[b.hidingTeam.rawValue]?.name ?? "") hid")
                         }
                     }
                 }
-                if (view?.previousRounds ?? []).isEmpty { Text("No finished rounds").foregroundStyle(.secondary) }
+                if view != nil && (view?.previousRounds ?? []).isEmpty {
+                    Text("No finished rounds").foregroundStyle(.secondary)
+                }
             }
             Section {
-                Button("Delete my tracks & photos from this night", role: .destructive) { confirmMyData = true }
-                if item.isHost { Button("Delete this night for everyone", role: .destructive) { confirmDelete = true } }
+                Button("Delete My Tracks & Photos From This Night", role: .destructive) { confirmMyData = true }
+                if item.isHost { Button("Delete This Night for Everyone", role: .destructive) { confirmDelete = true } }
             } footer: {
-                Text("Deleting your data removes your operator routes, raw GPS and photos you took; crew scores remain. The organizer can't override your deletion.")
+                Text("Deleting your data removes your operator routes, raw GPS and photos you took; crew scores remain. The organizer can’t override your deletion.")
             }
         }
         .navigationTitle(item.title)
+        .navigationBarTitleDisplayMode(.inline)
         .task { view = try? await model.api.session(item.id) }
         .confirmationDialog("Delete your tracks and photos?", isPresented: $confirmMyData, titleVisibility: .visible) {
-            Button("Delete my data", role: .destructive) {
+            Button("Delete My Data", role: .destructive) {
                 perform($busy, $error) {
                     let r = try await model.api.deleteMyData(item.id)
                     model.show("Deleted \(r.pointsDeleted) GPS points and \(r.photosDeleted) photos")
                 }
             }
-        }
+        } message: { Text("Your routes, raw GPS and photos from this night are removed. This can’t be undone.") }
         .confirmationDialog("Delete the whole night?", isPresented: $confirmDelete, titleVisibility: .visible) {
-            Button("Delete night", role: .destructive) {
+            Button("Delete Night", role: .destructive) {
                 perform($busy, $error) {
                     try await model.api.deleteSession(item.id)
                     dismiss()
                 }
             }
-        } message: { Text("Removes rounds, routes, photos and exports for both operators. This can't be undone.") }
+        } message: { Text("Removes rounds, routes, photos and exports for both operators. This can’t be undone.") }
         .errorAlert($error)
     }
 }

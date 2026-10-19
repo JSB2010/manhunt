@@ -1,96 +1,108 @@
 import SwiftUI
 
+/// Play tab: resume tonight’s night, answer invitations, or start a new one.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @State private var showCreate = false
     @State private var showJoin = false
+    @State private var showSettings = false
     @State private var joinCode = ""
+    @State private var pendingInviteId: String?
     @State private var friendToken: String?
     @State private var error: String?
     @State private var busy = false
 
+    private var active: [MeResponse.ActiveSession] { model.me?.activeSessions ?? [] }
+    private var invites: [MeResponse.PendingInvite] { model.me?.pendingSessionInvites ?? [] }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if let notice = model.location.interruptedResumeNotice {
-                        Card {
-                            Label("Tracking interrupted", systemImage: "exclamationmark.triangle.fill").font(.headline).foregroundStyle(.orange)
-                            Text(notice).font(.callout)
-                            Button("OK") { model.location.dismissResumeNotice() }
+            List {
+                if let notice = model.location.interruptedResumeNotice {
+                    Section {
+                        InlineNotice(message: notice, actionTitle: "Dismiss") {
+                            model.location.dismissResumeNotice()
                         }
                     }
+                }
 
-                    if let active = model.me?.activeSessions, !active.isEmpty {
-                        Text("Resume").font(.headline)
+                if !active.isEmpty {
+                    Section("Tonight") {
                         ForEach(active) { s in
-                            Button { model.openSession(s.id) } label: {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(s.title).font(.title3.weight(.bold))
-                                        Text(s.status == "IN_ROUND" ? "Round in progress" : s.status == "LOBBY" ? "In lobby" : "Between rounds")
-                                            .foregroundStyle(s.status == "IN_ROUND" ? Theme.seeking : .secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right.circle.fill").font(.title)
-                                }
-                                .padding()
-                                .background(Theme.seeking.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.corner))
-                            }
-                            .buttonStyle(.plain)
+                            Button { model.openSession(s.id) } label: { ResumeRow(session: s) }
+                                .tint(.primary)
+                                .accessibilityHint("Opens the night")
                         }
                     }
+                }
 
-                    if let invites = model.me?.pendingSessionInvites, !invites.isEmpty {
-                        Text("Invitations").font(.headline)
+                if !invites.isEmpty {
+                    Section("Invitations") {
                         ForEach(invites) { inv in
-                            Card {
-                                Text(inv.sessionTitle).font(.headline)
-                                Text("\(inv.hostDisplayName ?? "A friend") invited you to operate \(inv.teamName)").font(.callout)
-                                Button("Review & join") { showJoin = true; joinCode = ""; pendingInviteId = inv.inviteId }
-                                    .buttonStyle(.borderedProminent)
+                            InvitationRow(invite: inv) {
+                                joinCode = ""
+                                pendingInviteId = inv.inviteId
+                                showJoin = true
                             }
                         }
                     }
+                }
 
-                    HStack(spacing: 12) {
-                        BigButton(title: "Create night", systemImage: "plus.circle.fill") { showCreate = true }
+                Section {
+                    VStack(spacing: 12) {
+                        Button { showCreate = true } label: { ActionLabel(title: "Create a Night", systemImage: "plus") }
+                            .buttonStyle(.borderedProminent)
                             .accessibilityIdentifier("home.create")
-                        BigButton(title: "Join night", systemImage: "qrcode", tint: Theme.hiding) { showJoin = true }
+                        Button { showJoin = true } label: { ActionLabel(title: "Join with a Code", systemImage: "qrcode") }
+                            .buttonStyle(.bordered)
                             .accessibilityIdentifier("home.join")
                     }
-
-                    VStack(spacing: 0) {
-                        NavigationLink { HistoryView() } label: { HomeRow(title: "History & stats", icon: "clock.arrow.circlepath") }
-                        Divider()
-                        NavigationLink { FriendsView() } label: {
-                            HomeRow(title: "Friends", icon: "person.2.fill", badge: model.me?.counts.incomingFriendRequests ?? 0)
-                        }
-                        Divider()
-                        NavigationLink { PeopleView() } label: { HomeRow(title: "People", icon: "person.text.rectangle") }
-                        Divider()
-                        NavigationLink { GroupsView() } label: { HomeRow(title: "Saved groups", icon: "person.3.sequence.fill") }
-                        Divider()
-                        NavigationLink { SettingsView() } label: { HomeRow(title: "Settings & privacy", icon: "gearshape.fill") }
-                    }
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.corner))
-
-                    Label("Exactly two tracking iPhones per night: one operator per crew. Teammates don't need the app.", systemImage: "iphone.gen3")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    .controlSize(.large)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
                 }
-                .padding()
+
+                if active.isEmpty && invites.isEmpty {
+                    Section {
+                        HowItWorksRow(symbol: "iphone.gen3.radiowaves.left.and.right", title: "Two Phones, Two Crews",
+                                      detail: "Each crew carries one tracking iPhone. Teammates don’t need the app.")
+                        HowItWorksRow(symbol: "diamond.fill", title: "Pings, Not Live Location",
+                                      detail: "Seekers only see the hiders’ position at scheduled pings — the first when the head start ends.")
+                        HowItWorksRow(symbol: "camera.fill", title: "Catch With a Photo",
+                                      detail: "Seekers snap the catch; hiders confirm it. Then crews swap roles.")
+                    } header: {
+                        Text("How It Works")
+                    }
+                }
             }
-            .navigationTitle("Hi, \(model.me?.profile.displayName ?? "")")
+            .listSectionSpacing(.compact)
+            .navigationTitle("Play")
+            .navigationSubtitleCompat(model.me.map { "Signed in as \($0.profile.displayName)" })
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showSettings = true } label: {
+                        Label("Account & Settings", systemImage: "person.crop.circle")
+                    }
+                    .accessibilityIdentifier("home.settings")
+                }
+            }
             .refreshable { await model.refreshMe() }
             .sheet(isPresented: $showCreate) { CreateNightView() }
-            .sheet(isPresented: $showJoin, onDismiss: { pendingInviteId = nil }) { JoinNightView(initialCode: joinCode, inviteId: pendingInviteId) }
-            .alert("Add friend?", isPresented: Binding(get: { friendToken != nil }, set: { if !$0 { friendToken = nil } })) {
-                Button("Send request") {
+            .sheet(isPresented: $showJoin, onDismiss: { pendingInviteId = nil }) {
+                JoinNightView(initialCode: joinCode, inviteId: pendingInviteId)
+            }
+            .sheet(isPresented: $showSettings) {
+                NavigationStack {
+                    SettingsView()
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { CloseButton { showSettings = false } } }
+                }
+            }
+            .alert("Add Friend?", isPresented: Binding(get: { friendToken != nil }, set: { if !$0 { friendToken = nil } })) {
+                Button("Send Request") {
                     let token = friendToken
                     perform($busy, $error) {
                         let r = try await model.api.sendFriendRequest(token: token)
-                        model.show(r.status == "ACCEPTED" ? "You're now friends" : "Friend request sent")
+                        model.show(r.status == "ACCEPTED" ? "You’re now friends" : "Friend request sent")
                     }
                 }
                 Button("Cancel", role: .cancel) {}
@@ -102,8 +114,6 @@ struct HomeView: View {
             .errorAlert($error)
         }
     }
-
-    @State private var pendingInviteId: String?
 
     private func handle(_ link: DeepLink?) {
         guard let link else { return }
@@ -118,21 +128,89 @@ struct HomeView: View {
     }
 }
 
-private struct HomeRow: View {
-    let title: String
-    let icon: String
-    var badge = 0
-    var body: some View {
-        HStack {
-            Image(systemName: icon).frame(width: 28).foregroundStyle(.tint)
-            Text(title).font(.body.weight(.medium))
-            Spacer()
-            if badge > 0 {
-                Text("\(badge)").font(.caption.bold()).padding(6).background(Theme.seeking, in: Circle()).foregroundStyle(.white)
-            }
-            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+private struct ResumeRow: View {
+    let session: MeResponse.ActiveSession
+
+    private var status: (String, String) {
+        switch session.status {
+        case "IN_ROUND": ("Round in progress", "record.circle")
+        case "LOBBY": ("In the lobby", "person.2.fill")
+        default: ("Between rounds", "arrow.triangle.2.circlepath")
         }
-        .padding()
-        .contentShape(Rectangle())
+    }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: status.1)
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+                .symbolRenderingMode(.hierarchical)
+                .frame(minWidth: 32)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.title).font(.headline).foregroundStyle(.primary)
+                Text(status.0).font(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.forward")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct InvitationRow: View {
+    let invite: MeResponse.PendingInvite
+    let review: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(invite.sessionTitle).font(.headline)
+                Text("\(invite.hostDisplayName ?? "A friend") invited you to operate \(invite.teamName)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Button("Review & Join", action: review)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct HowItWorksRow: View {
+    let symbol: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
+            Image(systemName: symbol)
+                .foregroundStyle(.tint)
+                .frame(minWidth: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(detail).font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension View {
+    /// Navigation subtitle on iOS 26+; earlier systems show the title alone.
+    @ViewBuilder
+    func navigationSubtitleCompat(_ subtitle: String?) -> some View {
+        if #available(iOS 26, *), let subtitle {
+            navigationSubtitle(subtitle)
+        } else {
+            self
+        }
     }
 }

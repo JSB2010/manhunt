@@ -9,6 +9,7 @@ struct LobbyView: View {
     @State private var showConsent = false
     @State private var showInvite = false
     @State private var showSetup = false
+    @State private var confirmEndNight = false
     @State private var busy = false
     @State private var error: String?
     @State private var startWarnings: [String] = []
@@ -22,85 +23,63 @@ struct LobbyView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Round \(round.index) of \(view.session.totalRounds)").font(.headline).foregroundStyle(.secondary)
-                        if let h = view.session.team(round.hidingTeam), let s = view.session.team(round.seekingTeam) {
-                            Text("\(h.name) hides · \(s.name) seeks").font(.title2.weight(.heavy))
-                        }
-                        if let o = round.roleOverride {
-                            Label("Host changed the suggested roles\(o.reason.map { ": \($0)" } ?? "")", systemImage: "arrow.left.arrow.right").font(.footnote).foregroundStyle(.orange)
-                        }
-                    }
+            List {
+                Section {
+                    RoundHeader(view: view, round: round)
+                }
 
+                Section("Crews") {
                     ForEach(TeamKey.allCases) { k in
                         if let team = view.session.team(k) {
-                            CrewTile(team: team, role: k == round.hidingTeam ? .HIDING : .SEEKING, ready: round.isReady(k), opponentHealth: round.opponentHealth, inLobby: true)
+                            CrewRow(team: team, role: k == round.hidingTeam ? .HIDING : .SEEKING, ready: round.isReady(k), opponentHealth: round.opponentHealth)
                         }
                     }
+                }
 
-                    if round.index > 1 { RoleSwapChecklist(myRole: round.myRole) }
+                if round.index > 1 { RoleSwapChecklist(myRole: round.myRole) }
 
-                    if view.session.isHost && otherTeamMissing {
-                        BigButton(title: "Invite the other operator", systemImage: "person.crop.circle.badge.plus", tint: Theme.hiding) { showInvite = true }
-                            .accessibilityIdentifier("lobby.invite")
+                if !myConsent {
+                    Section {
+                        InlineNotice(title: "Before You Play",
+                                     message: "Review how tracking, pings, route sharing and photos work. Nothing is recorded until you accept and a round starts.",
+                                     systemImage: "hand.raised.fill", tint: .accentColor)
                     }
+                } else {
+                    PreflightSection()
+                }
 
-                    if !myConsent {
-                        Card {
-                            Label("Before playing", systemImage: "hand.raised.fill").font(.headline)
-                            Text("Review how tracking, pings, route sharing and photos work. Nothing is recorded until you accept and a round starts.").font(.callout)
-                            BigButton(title: "Review tracking disclosure", systemImage: "doc.text.magnifyingglass") { showConsent = true }
-                                .accessibilityIdentifier("lobby.consent")
-                        }
-                    } else {
-                        PreflightCard()
-                        BigButton(title: amReady ? "Ready ✓ (tap to undo)" : "I'm ready", systemImage: amReady ? "checkmark.circle.fill" : "figure.run", tint: amReady ? Theme.ok : .accentColor, busy: busy) {
-                            toggleReady()
-                        }
-                        .disabled(otherTeamMissing)
-                        .accessibilityIdentifier("lobby.ready")
-                    }
+                RulesSection(rules: round.rules)
 
-                    if view.session.isHost {
-                        BigButton(title: "Start round \(round.index)", systemImage: "flag.checkered", tint: Theme.seeking, busy: busy) { start(ack: false) }
-                            .disabled(!bothReady)
-                            .accessibilityIdentifier("lobby.start")
-                        if !bothReady { Text("Both operators must tap Ready. Rounds never start automatically.").font(.footnote).foregroundStyle(.secondary) }
-                    } else if bothReady {
-                        Label("Waiting for the host to start the round…", systemImage: "hourglass").font(.callout)
-                    }
-
-                    RulesSummary(rules: round.rules)
-
+                Section {
                     if !view.previousRounds.isEmpty {
                         NavigationLink { NightSummaryView(sessionId: view.sessionId) } label: {
-                            Label("Night so far (\(view.previousRounds.count) rounds)", systemImage: "list.number")
+                            Label("Night So Far (\(view.previousRounds.count) rounds)", systemImage: "list.number")
                         }
                     }
-
-                    Label("Exactly 2 tracking iPhones: one operator per crew. Seeker: passenger only — never the driver.", systemImage: "iphone.gen3.radiowaves.left.and.right")
-                        .font(.footnote).foregroundStyle(.secondary)
+                } footer: {
+                    Text("Exactly two tracking iPhones: one operator per crew. Seekers ride as passengers — the driver never uses the app.")
                 }
-                .padding()
             }
             .navigationTitle(view.session.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { model.closeSession() } }
+                ToolbarItem(placement: .cancellationAction) { CloseButton { model.closeSession() } }
                 if view.session.isHost {
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
-                            Button("Edit setup & rules", systemImage: "slider.horizontal.3") { showSetup = true }
-                            if otherTeamMissing { Button("Invite operator", systemImage: "person.badge.plus") { showInvite = true } }
+                            Button("Edit Setup & Rules", systemImage: "slider.horizontal.3") { showSetup = true }
+                            if otherTeamMissing { Button("Invite Operator", systemImage: "person.badge.plus") { showInvite = true } }
                             if !view.previousRounds.isEmpty {
-                                Button("End night now", systemImage: "moon.zzz") { perform($busy, $error) { try await model.api.completeSession(view.sessionId) } }
+                                Divider()
+                                Button("End Night Now", systemImage: "moon.zzz", role: .destructive) { confirmEndNight = true }
                             }
-                        } label: { Image(systemName: "ellipsis.circle") }
+                        } label: {
+                            Label("Night Options", systemImage: "ellipsis")
+                        }
                     }
                 }
             }
+            .bottomActionBar { actionBar }
             .sheet(isPresented: $showConsent) { ConsentSheet(sessionId: view.sessionId) }
             .sheet(isPresented: $showInvite) { InviteSheet(sessionId: view.sessionId) }
             .sheet(isPresented: $showSetup) { EditSetupSheet(view: view, round: round) }
@@ -108,9 +87,69 @@ struct LobbyView: View {
                 StartWarningsSheet(warnings: startWarnings, blocking: blocking) { start(ack: true) }
                     .presentationDetents([.medium, .large])
             }
+            .confirmationDialog("End the night now?", isPresented: $confirmEndNight, titleVisibility: .visible) {
+                Button("End Night", role: .destructive) { perform($busy, $error) { try await model.api.completeSession(view.sessionId) } }
+            } message: {
+                Text("Played rounds are kept in history. No more rounds can be started tonight.")
+            }
             .task(id: amReady) { await lobbyHeartbeat() }
             .errorAlert($error)
         }
+    }
+
+    // MARK: Actions
+
+    @ViewBuilder private var actionBar: some View {
+        let needsInvite = view.session.isHost && otherTeamMissing
+        VStack(spacing: 10) {
+            if needsInvite {
+                Button { showInvite = true } label: { ActionLabel(title: "Invite the Other Operator", systemImage: "person.badge.plus") }
+                    .floatingButton(prominent: myConsent)
+                    .accessibilityIdentifier("lobby.invite")
+            }
+            if !myConsent {
+                Button { showConsent = true } label: { ActionLabel(title: "Review Tracking Disclosure", systemImage: "doc.text.magnifyingglass") }
+                    .floatingProminentButton()
+                    .accessibilityIdentifier("lobby.consent")
+            } else if !otherTeamMissing {
+                if let hint = statusHint {
+                    Text(hint)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                GlassGroup(spacing: 12) {
+                    HStack(spacing: 12) {
+                        readyButton
+                        if view.session.isHost {
+                            Button { start(ack: false) } label: {
+                                ActionLabel(title: "Start Round \(round.index)", systemImage: "flag.checkered", busy: busy && bothReady)
+                            }
+                            .floatingProminentButton()
+                            .disabled(!bothReady || busy)
+                            .accessibilityIdentifier("lobby.start")
+                        }
+                    }
+                }
+            }
+        }
+        .controlSize(.large)
+    }
+
+    @ViewBuilder private var readyButton: some View {
+        let button = Button { toggleReady() } label: {
+            ActionLabel(title: amReady ? "Ready" : "I’m Ready", systemImage: amReady ? "checkmark.circle.fill" : "figure.run", busy: busy && !bothReady)
+        }
+        .disabled(otherTeamMissing || busy)
+        .accessibilityIdentifier("lobby.ready")
+        .accessibilityValue(amReady ? "Ready. Double-tap to undo." : "Not ready")
+        // The guest’s only action is prominent; for the host, Start is the prominent action.
+        button.floatingButton(prominent: !amReady && !view.session.isHost)
+    }
+
+    private var statusHint: String? {
+        if !bothReady { return view.session.isHost ? "Both operators tap Ready. Rounds never start automatically." : (amReady ? "Waiting for the other operator…" : nil) }
+        return view.session.isHost ? nil : "Waiting for the host to start the round…"
     }
 
     /// Keep readiness health fresh while waiting for the host (feeds start preflight checks).
@@ -133,7 +172,7 @@ struct LobbyView: View {
             }
             let status = await model.location.requestPermission()
             guard status == .authorizedWhenInUse || status == .authorizedAlways else {
-                throw SimpleError("Location permission is required to play. Enable it in Settings → Manhunt Crews → Location (While Using).")
+                throw SimpleError("Location permission is required to play. Turn it on in Settings › Manhunt Crews › Location (While Using the App).")
             }
             if !model.location.preciseLocation { await model.location.requestTemporaryPrecise() }
             if !model.notifications.authorized { await model.notifications.requestAuthorization() }
@@ -161,75 +200,136 @@ struct LobbyView: View {
     }
 }
 
+/// "Round 2 of 4 — Foxes hide, Night Owls seek".
+private struct RoundHeader: View {
+    let view: SessionViewDoc
+    let round: RoundView
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Round \(round.index) of \(view.session.totalRounds)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if let h = view.session.team(round.hidingTeam), let s = view.session.team(round.seekingTeam) {
+                VStack(alignment: .leading, spacing: 6) { roles(h, s) }
+                    .font(.title3.weight(.semibold))
+            }
+            if let o = round.roleOverride {
+                Label("The host changed the suggested roles\(o.reason.map { ": \($0)" } ?? "")", systemImage: "arrow.left.arrow.right")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder private func roles(_ h: TeamView, _ s: TeamView) -> some View {
+        Label { Text("\(h.name) hide") } icon: { Image(systemName: Role.HIDING.symbol).foregroundStyle(Theme.crew(h.key)) }
+        Label { Text("\(s.name) seek") } icon: { Image(systemName: Role.SEEKING.symbol).foregroundStyle(Theme.crew(s.key)) }
+    }
+}
+
 /// Between-rounds physical preparation (spec §3.1, screen 13). Local checklist only.
 struct RoleSwapChecklist: View {
     let myRole: Role?
-    @State private var checked: Set<Int> = []
+    @State private var checked: Set<String> = []
 
     private var items: [String] {
         myRole == .HIDING
-            ? ["Your crew is together on foot at the agreed start point", "Phone charged and in a pocket — tracking runs with the screen locked", "Seekers' car is out of sight", "Everyone knows the boundaries you agreed on (the app doesn't enforce any)"]
-            : ["Your crew is in the car; a passenger holds this phone", "The driver will not touch the app", "You're at the agreed waiting spot for the head start", "Phone charged / plugged in"]
+            ? ["Your crew is together on foot at the agreed start point", "Phone charged and in a pocket — tracking runs with the screen locked", "The seekers’ car is out of sight", "Everyone knows the boundaries you agreed on (the app doesn’t enforce any)"]
+            : ["Your crew is in the car; a passenger holds this phone", "The driver won’t touch the app", "You’re at the agreed waiting spot for the head start", "Phone charged or plugged in"]
     }
 
     var body: some View {
-        Card {
-            Label("Roles switched — get ready", systemImage: "arrow.triangle.2.circlepath").font(.headline)
-            ForEach(Array(items.enumerated()), id: \.offset) { i, item in
-                Button {
-                    if checked.contains(i) { checked.remove(i) } else { checked.insert(i) }
-                } label: {
-                    Label(item, systemImage: checked.contains(i) ? "checkmark.square.fill" : "square")
-                        .font(.callout)
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
+        Section {
+            ForEach(items, id: \.self) { item in
+                CheckRow(text: item, isOn: Binding(get: { checked.contains(item) }, set: { if $0 { checked.insert(item) } else { checked.remove(item) } }))
             }
+        } header: {
+            Text("Roles Switched — Get Ready")
+        } footer: {
+            Text("A reminder for your crew. Nothing here is sent anywhere.")
         }
     }
 }
 
-struct PreflightCard: View {
+/// This phone’s readiness, as plain rows with a status symbol each.
+struct PreflightSection: View {
     @Environment(AppModel.self) private var model
+
     var body: some View {
         let loc = model.location
-        Card {
-            Text("This phone").font(.headline)
-            HStack {
-                StatusPill(text: loc.isAuthorized ? "Location: \(loc.authorization == .authorizedAlways ? "Always" : "While Using")" : "Location off",
-                           color: loc.isAuthorized ? Theme.ok : Theme.danger, systemImage: "location.fill")
-                StatusPill(text: loc.preciseLocation ? "Precise" : "Approximate", color: loc.preciseLocation ? Theme.ok : .orange)
-            }
-            HStack {
-                StatusPill(text: model.notifications.authorized ? "Notifications on" : "Notifications off", color: model.notifications.authorized ? Theme.ok : .secondary, systemImage: "bell")
-                StatusPill(text: loc.networkReachable ? "Online" : "No network", color: loc.networkReachable ? Theme.ok : Theme.danger, systemImage: "wifi")
-                StatusPill(text: UIImagePickerController.isSourceTypeAvailable(.camera) ? "Camera ready" : "No camera", color: .secondary, systemImage: "camera")
-            }
+        Section {
+            StatusRow(title: "Location",
+                      value: loc.isAuthorized ? (loc.authorization == .authorizedAlways ? "Always" : "While Using") : "Off",
+                      state: loc.isAuthorized ? .ok : .problem)
+            StatusRow(title: "Precise Location", value: loc.preciseLocation ? "On" : "Approximate", state: loc.preciseLocation ? .ok : .warning)
+            StatusRow(title: "Notifications", value: model.notifications.authorized ? "On" : "Off", state: model.notifications.authorized ? .ok : .neutral)
+            StatusRow(title: "Network", value: loc.networkReachable ? "Online" : "Offline", state: loc.networkReachable ? .ok : .problem)
             if let fix = loc.lastFix {
-                Text("Last GPS fix \(Fmt.ago(fix.timestamp, now: Date())) · ±\(Int(fix.horizontalAccuracy)) m").font(.caption).foregroundStyle(.secondary)
+                StatusRow(title: "Last GPS Fix", value: "\(Fmt.ago(fix.timestamp, now: Date())) · ±\(Int(fix.horizontalAccuracy)) m", state: .neutral)
             }
+        } header: {
+            Text("This Phone")
+        } footer: {
             if ProcessInfo.processInfo.isLowPowerModeEnabled {
-                Label("Low Power Mode can delay background GPS.", systemImage: "battery.25").font(.caption).foregroundStyle(.orange)
+                Label("Low Power Mode can delay background GPS.", systemImage: "battery.25percent")
             }
         }
     }
 }
 
-struct RulesSummary: View {
+/// A labeled row whose state is shown by symbol shape and colour, plus the value text.
+struct StatusRow: View {
+    enum State { case ok, warning, problem, neutral }
+    let title: String
+    let value: String
+    let state: State
+
+    var body: some View {
+        LabeledContent {
+            HStack(spacing: 6) {
+                Text(value)
+                Image(systemName: symbol).foregroundStyle(tint).accessibilityHidden(true)
+            }
+        } label: {
+            Text(title)
+        }
+    }
+
+    private var symbol: String { Self.symbol(for: state) }
+    private var tint: Color { Self.tint(for: state) }
+
+    static func symbol(for state: State) -> String {
+        switch state {
+        case .ok: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .problem: "xmark.octagon.fill"
+        case .neutral: "minus.circle"
+        }
+    }
+
+    static func tint(for state: State) -> Color {
+        switch state {
+        case .ok: Theme.ok
+        case .warning: Theme.warning
+        case .problem: Theme.danger
+        case .neutral: .secondary
+        }
+    }
+}
+
+struct RulesSection: View {
     let rules: Rules
     var body: some View {
-        Card {
-            Text("Rules this round").font(.headline)
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 6) {
-                GridRow { Text("Head start").foregroundStyle(.secondary); Text("\(rules.headStartSeconds / 60) min") }
-                GridRow { Text("First ping").foregroundStyle(.secondary); Text("when head start ends") }
-                GridRow { Text("Then every").foregroundStyle(.secondary); Text("\(rules.pingIntervalSeconds / 60) min") }
-                GridRow { Text("Visible pins").foregroundStyle(.secondary); Text(rules.visiblePingHistoryCount.map { "last \($0)" } ?? "all") }
-                GridRow { Text("Time limit").foregroundStyle(.secondary); Text(rules.maxChaseSeconds.map { "\($0 / 60) min" } ?? "none") }
-                GridRow { Text("Confirm window").foregroundStyle(.secondary); Text("\(rules.confirmationTimeoutSeconds) s") }
-            }
-            .font(.callout)
+        Section("Rules This Round") {
+            LabeledContent("Head start", value: "\(rules.headStartSeconds / 60) min")
+            LabeledContent("First ping", value: "When the head start ends")
+            LabeledContent("Then every", value: "\(rules.pingIntervalSeconds / 60) min")
+            LabeledContent("Visible pins", value: rules.visiblePingHistoryCount.map { "Last \($0)" } ?? "All")
+            LabeledContent("Time limit", value: rules.maxChaseSeconds.map { "\($0 / 60) min" } ?? "None")
+            LabeledContent("Catch confirmation", value: "\(rules.confirmationTimeoutSeconds) s")
         }
     }
 }
@@ -247,36 +347,41 @@ struct ConsentSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("During each round") {
-                    Text("Your phone records your crew's GPS route — including with the screen locked — from the moment the round starts until it ends. You'll see the system location indicator.")
-                    Text("The other crew never sees your live route or current position. If you're hiding, they get scheduled pings only (first at the end of the head start, then on the interval). If you're seeking, your car's route stays private too.")
+                Section("During Each Round") {
+                    Text("Your phone records your crew’s GPS route — including with the screen locked — from the moment the round starts until it ends. You’ll see the system location indicator.")
+                    Text("The other crew never sees your live route or current position. If you’re hiding, they get scheduled pings only (first at the end of the head start, then on the interval). If you’re seeking, your car’s route stays private too.")
                 }
-                Section("After each round") {
+                Section("After Each Round") {
                     Text("Both operators can view both routes, pings, distances and the catch photo. Raw GPS is kept up to 30 days; simplified routes until deleted. You can delete your own data anytime.")
                 }
                 Section {
                     CheckRow(text: "I agree to route recording during rounds and post-round route sharing with the other operator.", isOn: $a)
                         .accessibilityIdentifier("consent.t1")
-                    CheckRow(text: "My crew knows our operator phone's location, the roster and photos are recorded and shown after rounds.", isOn: $b)
+                    CheckRow(text: "My crew knows our operator phone’s location, the roster and photos are recorded and shown after rounds.", isOn: $b)
                         .accessibilityIdentifier("consent.t2")
                     CheckRow(text: "I understand GPS and notifications can be delayed; missing fixes are shown as missing.", isOn: $c)
                         .accessibilityIdentifier("consent.t3")
-                }
-                Section {
-                    BigButton(title: "Accept & continue", systemImage: "checkmark.shield", busy: busy) {
-                        perform($busy, $error) {
-                            try await model.api.consent(sessionId, accepted: true)
-                            dismiss()
-                        }
-                    }
-                    .disabled(!(a && b && c))
-                    .accessibilityIdentifier("consent.accept")
                 } footer: {
                     Text("You can withdraw consent at any time; an active round is then aborted and tracking stops.")
                 }
             }
-            .navigationTitle("Tracking disclosure")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Not now") { dismiss() } } }
+            .navigationTitle("Tracking Disclosure")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { CancelButton { dismiss() } } }
+            .bottomActionBar {
+                Button {
+                    perform($busy, $error) {
+                        try await model.api.consent(sessionId, accepted: true)
+                        dismiss()
+                    }
+                } label: {
+                    ActionLabel(title: "Accept & Continue", systemImage: "checkmark.shield.fill", busy: busy)
+                }
+                .floatingProminentButton()
+                .controlSize(.large)
+                .disabled(!(a && b && c) || busy)
+                .accessibilityIdentifier("consent.accept")
+            }
             .errorAlert($error)
         }
     }
@@ -296,39 +401,61 @@ struct InviteSheet: View {
             List {
                 Section {
                     if let invite {
-                        VStack(spacing: 8) {
-                            Text(invite.code).font(.system(size: 44, weight: .heavy, design: .monospaced)).kerning(4).textSelection(.enabled)
+                        VStack(spacing: 12) {
+                            Text(invite.code)
+                                .font(.system(.largeTitle, design: .monospaced, weight: .bold))
+                                .kerning(4)
+                                .minimumScaleFactor(0.6)
+                                .lineLimit(1)
+                                .textSelection(.enabled)
+                                .speechSpellsOutCharacters()
                                 .accessibilityIdentifier("invite.code")
-                            Text("Expires \(Fmt.time(invite.expiresAt)) · single use").font(.footnote).foregroundStyle(.secondary)
-                            ShareLink(item: URL(string: invite.deepLink)!, message: Text("Join my Manhunt Crews night as the other crew's operator. Code: \(invite.code)")) {
-                                Label("Share invite link", systemImage: "square.and.arrow.up")
+                            Text("Single use · expires \(Fmt.time(invite.expiresAt))")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            if let url = URL(string: invite.deepLink) {
+                                ShareLink(item: url, message: Text("Join my Manhunt Crews night as the other crew’s operator. Code: \(invite.code)")) {
+                                    ActionLabel(title: "Share Invite Link", systemImage: "square.and.arrow.up")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.large)
                             }
-                            .buttonStyle(.borderedProminent)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical)
+                        .padding(.vertical, 8)
                     } else {
-                        Button("Generate code") { generate(target: nil) }
+                        HStack { Spacer(); ProgressView("Creating a code…"); Spacer() }
                     }
-                } header: { Text("Invite code") }
+                } header: {
+                    Text("Invite Code")
+                } footer: {
+                    Text("The other operator enters this code under Play › Join with a Code.")
+                }
                 if !friends.isEmpty {
-                    Section("Or invite a friend directly") {
+                    Section("Or Invite a Friend Directly") {
                         ForEach(friends) { f in
-                            Button {
-                                generate(target: f.uid)
-                            } label: {
-                                HStack { Text(f.displayName); Spacer(); Text("@\(f.handle ?? "")").foregroundStyle(.secondary) }
+                            Button { generate(target: f.uid) } label: {
+                                LabeledContent(f.displayName, value: "@\(f.handle ?? "")")
+                                    .foregroundStyle(.primary)
                             }
                         }
                     }
                 }
             }
-            .navigationTitle("Invite operator")
-            .toolbar { Button("Done") { dismiss() }.accessibilityIdentifier("invite.done") }
+            .navigationTitle("Invite Operator")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
+                        .accessibilityIdentifier("invite.done")
+                }
+            }
             .task {
                 if invite == nil { generate(target: nil) }
                 friends = (try? await model.api.friends().friends) ?? []
             }
+            .presentationDetents([.medium, .large])
             .errorAlert($error)
         }
     }
@@ -336,7 +463,7 @@ struct InviteSheet: View {
     private func generate(target: String?) {
         perform($busy, $error) {
             invite = try await model.api.createInvite(sessionId, targetUid: target)
-            if target != nil { model.show("Invitation sent — it appears on their Home screen") }
+            if target != nil { model.show("Invitation sent — it appears on their Play tab") }
         }
     }
 }
@@ -351,22 +478,37 @@ struct StartWarningsSheet: View {
         NavigationStack {
             List {
                 if !blocking.isEmpty {
-                    Section("Must be fixed") { ForEach(blocking, id: \.self) { Label($0.warningLabel, systemImage: "xmark.octagon.fill").foregroundStyle(Theme.danger) } }
+                    Section("Must Be Fixed") {
+                        ForEach(blocking, id: \.self) { w in
+                            Label { Text(w.warningLabel) } icon: { Image(systemName: "xmark.octagon.fill").foregroundStyle(Theme.danger) }
+                        }
+                    }
                 }
                 if !warnings.isEmpty {
                     Section {
-                        ForEach(warnings, id: \.self) { Label($0.warningLabel, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-                    } header: { Text("Location health warnings") } footer: {
+                        ForEach(warnings, id: \.self) { w in
+                            Label { Text(w.warningLabel) } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warning) }
+                        }
+                    } header: {
+                        Text("Location Health Warnings")
+                    } footer: {
                         Text("Starting anyway is recorded in the round history. Pings with no fresh, accurate fix are shown as unavailable — never as a stale point.")
                     }
                 }
+            }
+            .navigationTitle("Can’t Start Cleanly")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { CloseButton { dismiss() } } }
+            .bottomActionBar {
                 if blocking.isEmpty {
-                    Button("Start anyway", role: .destructive) { dismiss(); onStartAnyway() }
-                        .accessibilityIdentifier("warnings.startAnyway")
+                    Button(role: .destructive) { dismiss(); onStartAnyway() } label: {
+                        ActionLabel(title: "Start Anyway", systemImage: "flag.checkered")
+                    }
+                    .floatingButton()
+                    .controlSize(.large)
+                    .accessibilityIdentifier("warnings.startAnyway")
                 }
             }
-            .navigationTitle("Can't start cleanly")
-            .toolbar { Button("Back") { dismiss() } }
         }
     }
 }
@@ -390,22 +532,23 @@ struct EditSetupSheet: View {
             Form {
                 Section("Night") { TextField("Title", text: $title) }
                 Section("Crews") {
-                    TextField("Crew A", text: $nameA)
-                    TextField("Crew B", text: $nameB)
+                    Label { TextField("Crew A name", text: $nameA) } icon: { CrewDot(key: .A) }
+                    Label { TextField("Crew B name", text: $nameB) } icon: { CrewDot(key: .B) }
                 }
-                RosterEditor(title: "\(nameA) roster", roster: $rosterA, excluded: Set(rosterB.compactMap(\.personId)))
-                RosterEditor(title: "\(nameB) roster", roster: $rosterB, excluded: Set(rosterA.compactMap(\.personId)))
+                RosterEditor(title: "\(nameA) Roster", roster: $rosterA, excluded: Set(rosterB.compactMap(\.personId)))
+                RosterEditor(title: "\(nameB) Roster", roster: $rosterB, excluded: Set(rosterA.compactMap(\.personId)))
                 RulesEditor(rules: $rules, lockFirstHider: !view.previousRounds.isEmpty, teamNames: (nameA, nameB))
                 Section {
+                } footer: {
                     Text("Edits apply before the round starts. Both operators must tap Ready again. Changing rules mid-night marks crew comparisons as not directly comparable.")
-                        .font(.footnote).foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("Edit setup")
+            .navigationTitle("Edit Setup")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { CancelButton { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    ConfirmButton(title: "Save", busy: busy) {
                         perform($busy, $error) {
                             try await model.api.editSetup(view.sessionId, SetupPatchBody(
                                 title: title,
@@ -414,7 +557,6 @@ struct EditSetupSheet: View {
                             dismiss()
                         }
                     }
-                    .disabled(busy)
                 }
             }
             .onAppear {

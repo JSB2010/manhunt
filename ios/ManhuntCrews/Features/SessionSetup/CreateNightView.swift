@@ -34,8 +34,8 @@ struct CreateNightView: View {
                     }
                 }
                 Section {
-                    TextField("Crew A name", text: $nameA)
-                    TextField("Crew B name", text: $nameB)
+                    Label { TextField("Crew A name", text: $nameA) } icon: { CrewDot(key: .A) }
+                    Label { TextField("Crew B name", text: $nameB) } icon: { CrewDot(key: .B) }
                     Picker("My phone operates", selection: $myTeam) {
                         Text(nameA).tag(TeamKey.A)
                         Text(nameB).tag(TeamKey.B)
@@ -44,24 +44,25 @@ struct CreateNightView: View {
                 } header: {
                     Text("Crews")
                 } footer: {
-                    Text("You'll invite the other crew's operator next. Exactly two tracking iPhones: one per crew.")
+                    Text("You’ll invite the other crew’s operator next. Exactly two tracking iPhones: one per crew.")
                 }
-                RosterEditor(title: "\(nameA) roster", roster: $rosterA, excluded: Set(rosterB.compactMap(\.personId)), groupPeople: groupPeople)
-                RosterEditor(title: "\(nameB) roster", roster: $rosterB, excluded: Set(rosterA.compactMap(\.personId)), groupPeople: groupPeople)
+                RosterEditor(title: "\(nameA) Roster", roster: $rosterA, excluded: Set(rosterB.compactMap(\.personId)), groupPeople: groupPeople)
+                RosterEditor(title: "\(nameB) Roster", roster: $rosterB, excluded: Set(rosterA.compactMap(\.personId)), groupPeople: groupPeople)
                 RulesEditor(rules: $rules, teamNames: (nameA, nameB))
                 Section {
-                    CheckRow(text: "I'll tell my crew that my phone's route, our roster and catch photos are recorded, released to the other crew as scheduled pings during play, and shown to both operators after each round.", isOn: $acknowledged)
+                    CheckRow(text: "I’ll tell my crew that my phone’s route, our roster and catch photos are recorded, released to the other crew as scheduled pings during play, and shown to both operators after each round.", isOn: $acknowledged)
                         .accessibilityIdentifier("create.ack")
                 } header: {
                     Text("Disclosure")
                 }
             }
-            .navigationTitle("Create night")
+            .navigationTitle("Create a Night")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { CancelButton { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button { create() } label: { if busy { ProgressView() } else { Text("Create").bold() } }
-                        .disabled(!acknowledged || busy || title.trimmingCharacters(in: .whitespaces).isEmpty)
+                    ConfirmButton(title: "Create", busy: busy) { create() }
+                        .disabled(!acknowledged || title.trimmingCharacters(in: .whitespaces).isEmpty)
                         .accessibilityIdentifier("create.submit")
                 }
             }

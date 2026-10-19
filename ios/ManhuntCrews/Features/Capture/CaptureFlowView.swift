@@ -18,6 +18,7 @@ struct CaptureFlowView: View {
     @State private var ticket: CaptureTicket?
     @State private var uploaded = false
     @State private var showCamera = true
+    @State private var celebrate = false
 
     private var cameraAvailable: Bool {
         #if targetEnvironment(simulator)
@@ -30,49 +31,59 @@ struct CaptureFlowView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
+            Group {
                 switch step {
                 case .camera:
                     if cameraAvailable {
-                        Color.clear.onAppear { showCamera = true }
-                        Text("Opening camera…")
+                        ProgressView("Opening camera…")
+                            .onAppear { showCamera = true }
                     } else {
-                        ContentUnavailableView("No camera", systemImage: "camera.badge.ellipsis", description: Text("This device has no camera."))
-                        #if DEBUG && targetEnvironment(simulator)
-                        Button("Use simulator test photo (DEBUG only)") { use(SimulatorTestPhoto.make()) }
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier("capture.simPhoto")
-                        #endif
+                        ContentUnavailableView {
+                            Label("No Camera", systemImage: "camera.badge.ellipsis")
+                        } description: {
+                            Text("This device has no camera.")
+                        } actions: {
+                            #if DEBUG && targetEnvironment(simulator)
+                            Button("Use Simulator Test Photo (Debug Only)") { use(SimulatorTestPhoto.make()) }
+                                .buttonStyle(.borderedProminent)
+                                .accessibilityIdentifier("capture.simPhoto")
+                            #endif
+                        }
                     }
                 case .preview, .uploading, .failed:
-                    if let image {
-                        Image(uiImage: image).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: Theme.corner)).frame(maxHeight: 420)
-                    }
-                    if case let .uploading(stage) = step {
-                        ProgressView(stage)
-                        Text("Keep the app open. If the network is slow, the catch time is set when the server accepts it.").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    }
-                    if case let .failed(msg) = step {
-                        ErrorBanner(message: msg)
-                        Text("No catch was recorded. The clock keeps running. Your photo is saved on this phone for retry.").font(.footnote).multilineTextAlignment(.center)
-                    }
-                    HStack {
-                        Button("Retake") { step = .camera; showCamera = true; ticket = nil; uploaded = false }
-                            .buttonStyle(.bordered).disabled(isUploading)
-                        BigButton(title: step == .preview ? "Submit catch" : "Retry submit", systemImage: "paperplane.fill", tint: Theme.seeking, busy: isUploading) { submit() }
-                            .accessibilityIdentifier("capture.submit")
-                    }
+                    photoStage
                 case .done:
-                    Image(systemName: "checkmark.seal.fill").font(.system(size: 72)).foregroundStyle(Theme.ok)
-                    Text("Catch submitted").font(.title.bold())
-                    Text("The chase clock froze at the server's submission time. The hiding crew must confirm.").multilineTextAlignment(.center)
-                    Button("Back to map") { dismiss() }.buttonStyle(.borderedProminent).accessibilityIdentifier("capture.backToMap")
+                    VStack(spacing: 16) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 72))
+                            .foregroundStyle(Theme.ok)
+                            .symbolEffect(.bounce, value: celebrate)
+                            .sensoryFeedback(.success, trigger: celebrate)
+                            .onAppear { celebrate = true }
+                            .accessibilityHidden(true)
+                        Text("Catch Submitted")
+                            .font(.title.bold())
+                        Text("The chase clock froze at the server’s submission time. The hiding crew must confirm.")
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.secondary)
+                        Button { dismiss() } label: { ActionLabel(title: "Back to Map", systemImage: "map.fill") }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                            .padding(.top, 8)
+                            .accessibilityIdentifier("capture.backToMap")
+                    }
+                    .padding()
+                    .frame(maxWidth: 440)
                 }
             }
-            .padding()
-            .navigationTitle("Photo catch")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle("Photo Catch")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() }.disabled(isUploading) } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    CloseButton { dismiss() }.disabled(isUploading)
+                }
+            }
             .fullScreenCover(isPresented: Binding(get: { showCamera && cameraAvailable && step == .camera }, set: { showCamera = $0 })) {
                 CameraPicker { img in
                     showCamera = false
@@ -82,6 +93,65 @@ struct CaptureFlowView: View {
             }
             .onAppear(perform: restorePending)
         }
+    }
+
+    /// The photo on a dark stage with glass controls floating over it.
+    private var photoStage: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .accessibilityLabel("Your catch photo")
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 12) {
+                if case let .uploading(stage) = step {
+                    Label { Text(stage) } icon: { ProgressView() }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .glassSurface()
+                    Text("Keep the app open. If the network is slow, the catch time is set when the server accepts it.")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .multilineTextAlignment(.center)
+                }
+                if case let .failed(msg) = step {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(msg, systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline.weight(.semibold))
+                        Text("No catch was recorded and the clock keeps running. The photo is saved on this phone so you can retry.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .glassSurface(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
+                GlassGroup(spacing: 12) {
+                    HStack(spacing: 12) {
+                        Button { step = .camera; showCamera = true; ticket = nil; uploaded = false } label: {
+                            ActionLabel(title: "Retake", systemImage: "arrow.counterclockwise", expands: false)
+                        }
+                        .floatingButton()
+                        .disabled(isUploading)
+                        Button { submit() } label: {
+                            ActionLabel(title: step == .preview ? "Submit Catch" : "Retry", systemImage: "paperplane.fill", busy: isUploading)
+                        }
+                        .floatingProminentButton()
+                        .disabled(isUploading)
+                        .accessibilityIdentifier("capture.submit")
+                    }
+                }
+                .controlSize(.large)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+        }
+        .environment(\.colorScheme, .dark)
     }
 
     private var isUploading: Bool { if case .uploading = step { return true } else { return false } }

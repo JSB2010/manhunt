@@ -13,8 +13,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
-HOST_SIM_NAME=${1:-"iPhone 16 Pro"}
-SEEKER_SIM_NAME=${2:-"iPhone 16"}
+HOST_SIM_NAME=${1:-"iPhone 16 Pro Max"}
+SEEKER_SIM_NAME=${2:-"iPhone 16e"}
 BUNDLE_ID=${MH_BUNDLE_ID:-com.manhuntcrews.dev}
 DD="$ROOT/ios/build"
 STAMP=$(date +%Y%m%d-%H%M%S)

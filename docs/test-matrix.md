@@ -7,10 +7,10 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 | Suite | Command | Result |
 |---|---|---|
 | Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas) | `cd backend && npm run test:unit` | ✅ 55 / 55 |
-| Backend integration + security (Auth/Firestore/Storage emulators, rules) | `npm run test:integration` | ✅ 32 / 32 |
+| Backend integration + security (Auth/Firestore/Storage emulators, rules) | `npm run test:integration` | ✅ 32 / 32 (re-run 2026-10-18 incl. the stale-round view regression check) |
 | Real-time API E2E (live stack, wall clock, local scheduler → worker) | `npm run e2e:two-operators` | ✅ first ping seen 0.5 s after chase start; ping 1 0.7 s after its deadline; sample age 9 s; 0 unreleased coordinates in seeker view; official time = submission time |
 | Backend typecheck | `npm run typecheck` | ✅ |
-| iOS unit + listener integration (XCTest, iPhone 16 Pro simulator) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 14 / 14 (the listener test runs only when the local stack is up) |
+| iOS unit + listener integration (XCTest) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 14 / 14 (re-run 2026-10-18 on iPhone 18 Pro / iOS 27 after the redesign; the listener test runs only when the local stack is up) |
 | iOS app build (Debug, simulator) | `xcodebuild build …` | ✅ no warnings in app sources |
 | iOS Release build for device (unsigned) | `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ |
 | Terraform | `terraform validate` (dev, prod) | ✅ |
@@ -45,13 +45,38 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 
 `scripts/e2e-two-simulators.sh` boots two simulators, starts simulated GPS routes (hider walking 1.6 m/s, seeker driving 12 m/s), and runs `TwoPhoneE2ETests.testHost` and `.testSeeker` **concurrently**. Rules: 60 s head start, 60 s pings (DEBUG `-uiTestShortRules`). The hider app is sent to the background (home button) for the entire chase to exercise background location and uploads.
 
-**Result: ✅ PASS, 3 consecutive runs.** Latest run `e2e-20261018-031653` plays **round 1 and round 2 with the role swap** (host taps "Set up round 2", both Ready, host starts; the other phone now hides with its app backgrounded; ping #0 sample age 39 s; catch confirmed). First run `e2e-20261018-030004`, host iPhone 16 Pro / seeker iPhone 16 (iOS 18.5): night created → joined by code → disclosure accepted → both Ready → host Start → hider app sent to background for the whole chase → ping #0 at chase start (GPS sample age 17 s) → ping #1 one interval later (13 s) → seeker photo catch accepted by the server → hider confirmed → both phones show "Caught after 1:07". Screenshots: `docs/evidence/e2e-seeker-round1.png`, `docs/evidence/e2e-host-round1.png`; transcript: `docs/evidence/e2e-two-simulators.md`.
+**v0.2 redesign (2026-10-18): ✅ PASS** — run `e2e-20261018-175622` on iPhone 16 Pro Max + iPhone 16e (iOS 18.5, so the non-glass fallback path) plays rounds 1 and 2 with the redesigned UI: pings #0/#1 at 17 s/14 s sample age, "Caught after 1:07"; round 2 roles swapped, ping #0 at 14 s, "Caught after 0:07" on both phones (`docs/evidence/design/e2e-ios18-fallback.jpg`). The two earlier runs that day failed: one on the stale-round view bug (fixed in the server), one on a single dropped toolbar tap under heavy machine load. The test now retries that tap only while the sheet is still idle. Test changes for the redesign: phase text is matched case-insensitively, and the scroll helper accepts buttons pinned in a bottom action bar.
+
+**v0.1 result: ✅ PASS, 3 consecutive runs.** Latest run `e2e-20261018-031653` plays **round 1 and round 2 with the role swap** (host taps "Set up round 2", both Ready, host starts; the other phone now hides with its app backgrounded; ping #0 sample age 39 s; catch confirmed). First run `e2e-20261018-030004`, host iPhone 16 Pro / seeker iPhone 16 (iOS 18.5): night created → joined by code → disclosure accepted → both Ready → host Start → hider app sent to background for the whole chase → ping #0 at chase start (GPS sample age 17 s) → ping #1 one interval later (13 s) → seeker photo catch accepted by the server → hider confirmed → both phones show "Caught after 1:07". Screenshots: `docs/evidence/e2e-seeker-round1.png`, `docs/evidence/e2e-host-round1.png`; transcript: `docs/evidence/e2e-two-simulators.md`.
 
 Notes:
 * The iOS 27 simulator runtime proved unreliable for two concurrent UI-test sessions (XCTest automation stalls, "failed to acquire background assertion"); the passing runs use the iOS 18.5 runtime (the app's deployment target is iOS 18).
 * Simulators have no usable camera, so the DEBUG-only synthetic photo is used there; the real camera path (UIImagePickerController) needs a device.
 
 Bugs this E2E found and fixed (all covered by tests now): iOS omitted nil health fields → API 400 on every Ready (schema now accepts omitted nullables); stale Firebase session stranded the app on an error screen (now signs out); uploader dropped queued GPS on validation errors (now keeps them); Firestore watch stream silently dead after a peer reset (REST reconciliation + listener restart, ADR 0010); consent switches untappable near the home indicator (accessible checkbox rows).
+
+## Design QA (v0.2 redesign, 2026-10-18)
+
+Verified on the real app against the local stack (`backend/scripts/ui-fixture.ts` sets each game state), iPhone 18 Pro simulator on iOS 27 (Liquid Glass) unless noted. Screenshots: `docs/evidence/design/`.
+
+| Check | Result |
+|---|---|
+| Sign in, Play, History, People, Friends tabs, Account & Settings sheet | ✅ light + dark |
+| Lobby (consent pending → accepted → Ready/Start bar), tracking disclosure sheet | ✅ light + dark |
+| Game: seeker chase (HUD, banners, chips, map controls below HUD, pins), safety pause overlay | ✅ light + dark |
+| Photo catch (simulator photo → submit → failure/retry state), hider confirm sheet | ✅ dark |
+| Round recap (static map preview + full-screen map, distances, pings), night summary + chart | ✅ light + dark |
+| Dynamic Type at Accessibility Extra Large (Play, History, night detail, summary) | ✅ rows grow, headers stack, labels wrap, nothing truncated |
+| iOS 18.5 fallback (materials instead of glass) | ✅ sign-in screenshot plus the full two-simulator E2E (rounds 1–2) on iOS 18.5 |
+| Color contrast | ✅ computed: every text token ≥ 4.5:1 on its background in light and dark; white labels on tints ≥ 3:1 (`docs/design-system.md`) |
+| Not covered | iPad/sidebar layout, Reduce Transparency and Increase Contrast screenshots (system-handled for glass/materials; tokens have high-contrast variants), VoiceOver walk-through on device |
+
+Found and fixed during QA:
+- Typing in History search reported the cancelled previous request as "No connection to the game server" (and a pending alert could block navigation). The same issue was fixed in the recap loader.
+- An interactive map inside the scrolling recap captured swipes, so the recap now shows a static preview with a full-screen interactive map.
+- Map controls sat under the status bar, so they are now placed via `mapScope` below the HUD.
+- Under JDK 25 the Storage emulator's rules runtime crashed the Firebase CLI on the first photo upload, so `scripts/emulator-start.sh` now prefers JDK 21.
+- **Server bug (pre-existing), found by the two-simulator E2E:** a stale worker wake-up for a finished round (round 1's 120 s catch-confirmation window) re-rendered every phone's stored view with that old round. Both phones briefly showed the round-1 recap over the round-2 lobby, and the host's Start tap was lost. `roundTx` now renders views from the session's current round. A regression check in `integration/edge-cases.test.ts` fails on the old code and passes on the new.
 
 ## Physical two-iPhone acceptance matrix (spec §15.2) — ⏳ not yet run
 

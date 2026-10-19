@@ -8,32 +8,50 @@ struct GroupsView: View {
     @State private var creating = false
     @State private var error: String?
     @State private var busy = false
+    @State private var loaded = false
 
     var body: some View {
         List {
             ForEach(groups) { g in
                 Button { editing = g } label: {
-                    VStack(alignment: .leading) {
-                        Text(g.name).font(.headline)
-                        Text(g.people.map(\.displayName).joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(g.name).font(.headline).foregroundStyle(.primary)
+                        Text(g.people.map(\.displayName).formatted(.list(type: .and))).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     }
                 }
                 .disabled(!g.canEdit)
                 .swipeActions {
-                    if g.isOwner { Button("Delete", role: .destructive) { perform($busy, $error) { try await model.api.deleteGroup(g.id); await load() } } }
+                    if g.isOwner { Button("Delete", systemImage: "trash", role: .destructive) { perform($busy, $error) { try await model.api.deleteGroup(g.id); await load() } } }
                 }
             }
-            if groups.isEmpty { ContentUnavailableView("No groups", systemImage: "person.3", description: Text("Save your usual crew pool to set up nights faster.")) }
         }
-        .navigationTitle("Saved groups")
-        .toolbar { Button { creating = true } label: { Image(systemName: "plus") } }
+        .overlay {
+            if loaded && groups.isEmpty {
+                ContentUnavailableView {
+                    Label("No Groups", systemImage: "person.3.fill")
+                } description: {
+                    Text("Save your usual crew pool to set up nights faster.")
+                } actions: {
+                    Button("New Group") { creating = true }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .navigationTitle("Groups")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { creating = true } label: { Label("New Group", systemImage: "plus") }
+            }
+        }
         .sheet(isPresented: $creating, onDismiss: { Task { await load() } }) { GroupEditor(group: nil) }
         .sheet(item: $editing, onDismiss: { Task { await load() } }) { GroupEditor(group: $0) }
         .task { await load() }
         .errorAlert($error)
     }
 
-    private func load() async { groups = (try? await model.api.groups().groups) ?? [] }
+    private func load() async {
+        groups = (try? await model.api.groups().groups) ?? []
+        loaded = true
+    }
 }
 
 struct GroupEditor: View {
@@ -61,13 +79,14 @@ struct GroupEditor: View {
                     ForEach(friends) { f in
                         Toggle(f.displayName, isOn: Binding(get: { selectedFriends.contains(f.uid) }, set: { if $0 { selectedFriends.insert(f.uid) } else { selectedFriends.remove(f.uid) } }))
                     }
-                } header: { Text("Share with friends") } footer: { Text("Shared friends can see this group's roster and use it for nights.") }
+                } header: { Text("Share With Friends") } footer: { Text("Shared friends can see this group’s roster and use it for nights.") }
             }
-            .navigationTitle(group == nil ? "New group" : "Edit group")
+            .navigationTitle(group == nil ? "New Group" : "Edit Group")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { CancelButton { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    ConfirmButton(title: "Save", busy: busy) {
                         perform($busy, $error) {
                             if let group {
                                 try await model.api.updateGroup(group.id, name: name, personIds: Array(selectedPeople), memberUids: group.isOwner ? Array(selectedFriends) : nil)
@@ -77,7 +96,7 @@ struct GroupEditor: View {
                             dismiss()
                         }
                     }
-                    .disabled(name.isEmpty || busy)
+                    .disabled(name.isEmpty)
                 }
             }
             .task {

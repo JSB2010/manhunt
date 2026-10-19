@@ -8,7 +8,13 @@ struct SessionContainerView: View {
         Group {
             if let v = model.sessionView {
                 if v.session.revoked {
-                    ContentUnavailableView("Night revoked", systemImage: "lock.slash", description: Text("The organizer revoked this night. Access to routes and photos was removed."))
+                    ContentUnavailableView {
+                        Label("Night Revoked", systemImage: "lock.slash")
+                    } description: {
+                        Text("The organizer revoked this night. Access to routes and photos was removed.")
+                    } actions: {
+                        Button("Close") { model.closeSession() }.buttonStyle(.borderedProminent)
+                    }
                 } else if let round = v.round {
                     switch round.state {
                     case .READY:
@@ -22,9 +28,13 @@ struct SessionContainerView: View {
                     ProgressView()
                 }
             } else if let err = model.viewError {
-                VStack(spacing: 12) {
-                    ContentUnavailableView("Can't load this night", systemImage: "exclamationmark.icloud", description: Text(err))
-                    Button("Retry") { Task { await model.reloadSessionView() } }
+                ContentUnavailableView {
+                    Label("Can’t Load This Night", systemImage: "exclamationmark.icloud")
+                } description: {
+                    Text(err)
+                } actions: {
+                    Button("Try Again") { Task { await model.reloadSessionView() } }
+                        .buttonStyle(.borderedProminent)
                     Button("Close") { model.closeSession() }
                 }
             } else {
@@ -33,80 +43,130 @@ struct SessionContainerView: View {
         }
         .safeAreaInset(edge: .top) {
             if model.sessionView != nil && (model.viewFromCache || model.viewError != nil) {
-                ErrorBanner(message: model.viewError ?? "Offline — showing last known state. Nothing new (pings, catches, uploads) is confirmed until reconnected.")
+                OfflineBanner(message: model.viewError ?? "Offline — showing the last known state. Nothing new is confirmed until you reconnect.")
                     .padding(.horizontal)
             }
         }
     }
 }
 
-struct CrewTile: View {
-    let team: TeamView
-    let role: Role?
-    let ready: Bool?
-    var opponentHealth: OpponentHealthView?
-    var inLobby = false
-
+/// Connection problem shown above any session screen (functional layer).
+private struct OfflineBanner: View {
+    let message: String
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Circle().fill(Color(hex: team.color)).frame(width: 14, height: 14)
-                Text(team.name).font(.title3.weight(.bold))
-                if team.isMine { StatusPill(text: "You", color: .accentColor) }
-                Spacer()
-                if let role { StatusPill(text: role.label.uppercased(), color: role == .HIDING ? Theme.hiding : Theme.seeking) }
-            }
-            if !team.roster.isEmpty {
-                Text(team.roster.map(\.displayName).joined(separator: " · ")).font(.callout).foregroundStyle(.secondary)
-            }
-            HStack(spacing: 6) {
-                if team.hasOperator {
-                    StatusPill(text: "📱 \(team.operatorDisplayName ?? "Operator")", color: .primary)
-                } else {
-                    StatusPill(text: "Waiting for operator", color: .orange, systemImage: "hourglass")
-                }
-                if team.hasOperator {
-                    StatusPill(text: team.consentGiven ? "Disclosure ✓" : "Disclosure pending", color: team.consentGiven ? Theme.ok : .orange)
-                }
-                if let ready { StatusPill(text: ready ? "Ready" : "Not ready", color: ready ? Theme.ok : .secondary, systemImage: ready ? "checkmark.circle.fill" : "circle") }
-            }
-            if let h = opponentHealth, team.hasOperator, !team.isMine {
-                HealthIntegrityPill(health: h, inLobby: inLobby)
-            }
+        Label {
+            Text(message).foregroundStyle(.primary)
+        } icon: {
+            Image(systemName: "wifi.slash").foregroundStyle(Theme.warning)
         }
-        .padding()
+        .font(.footnote.weight(.semibold))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(hex: team.color).opacity(0.10), in: RoundedRectangle(cornerRadius: Theme.corner))
-        .overlay(RoundedRectangle(cornerRadius: Theme.corner).stroke(Color(hex: team.color).opacity(team.isMine ? 0.8 : 0.25), lineWidth: team.isMine ? 2 : 1))
+        .glassSurface(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Opponent integrity indicator — coarse status only, never coordinates.
-struct HealthIntegrityPill: View {
-    let health: OpponentHealthView
-    /// Before a round, "not tracking" is expected — don't alarm anyone.
-    var inLobby = false
+/// One crew in the lobby: identity, role, roster and readiness.
+struct CrewRow: View {
+    let team: TeamView
+    let role: Role
+    let ready: Bool
+    var opponentHealth: OpponentHealthView?
+
     var body: some View {
-        let (text, color, icon) = presentation
-        HStack(spacing: 6) {
-            StatusPill(text: text, color: color, systemImage: icon)
-            if health.issues.contains("PRECISE_LOCATION_OFF") { StatusPill(text: "Approximate location", color: .orange) }
-            if health.issues.contains("LOW_POWER_MODE") { StatusPill(text: "Low Power", color: .orange) }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                CrewDot(key: team.key)
+                Text(team.name).font(.headline)
+                if team.isMine {
+                    Text("You")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(.fill.secondary, in: Capsule())
+                }
+                Spacer(minLength: 8)
+                RoleLabel(role: role, crew: team.key)
+                    .font(.subheadline.weight(.semibold))
+            }
+            if !team.roster.isEmpty {
+                Text(team.roster.map(\.displayName).formatted(.list(type: .and)))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            FlowLayout(spacing: 6) {
+                if team.hasOperator {
+                    StatusBadge(text: team.operatorDisplayName ?? "Operator", systemImage: "iphone")
+                    if team.consentGiven {
+                        StatusBadge(text: "Disclosure accepted", systemImage: "checkmark.shield.fill", tint: Theme.ok)
+                    } else {
+                        StatusBadge(text: "Disclosure pending", systemImage: "hourglass", tint: Theme.warning)
+                    }
+                    if ready {
+                        StatusBadge(text: "Ready", systemImage: "checkmark.circle.fill", tint: Theme.ok)
+                    } else {
+                        StatusBadge(text: "Not ready", systemImage: "circle")
+                    }
+                    if let h = opponentHealth, !team.isMine {
+                        let p = HealthPresentation(health: h, inLobby: true)
+                        StatusBadge(text: p.text, systemImage: p.symbol, tint: p.tint)
+                    }
+                } else {
+                    StatusBadge(text: "Waiting for operator", systemImage: "hourglass", tint: Theme.warning)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Opponent integrity — coarse status only, never coordinates.
+struct HealthPresentation {
+    let text: String
+    let symbol: String
+    let state: StatusRow.State
+
+    var tint: Color { StatusRow.tint(for: state) }
+    /// Compact form for chips ("No signal").
+    var shortText: String {
+        switch text {
+        case "No signal from phone": "no signal"
+        case "Location permission off": "location off"
+        case "Tracking stopped": "tracking stopped"
+        case "Tracking stale": "tracking stale"
+        default: text.lowercased()
         }
     }
+    var isProblem: Bool { state == .warning || state == .problem }
 
-    private var presentation: (String, Color, String) {
+    init(health: OpponentHealthView, inLobby: Bool = false) {
+        let v: (String, String, StatusRow.State)
+        // Before a round, "not tracking" is expected — don’t alarm anyone.
         if inLobby && ["STOPPED", "UNKNOWN", "STALE", "NO_SIGNAL"].contains(health.state) {
-            return ("Not tracking yet", .secondary, "location")
+            v = ("Not tracking yet", "location", .neutral)
+        } else {
+            v = switch health.state {
+            case "ACTIVE": ("Tracking OK", "dot.radiowaves.left.and.right", .ok)
+            case "STALE": ("Tracking stale", "exclamationmark.triangle.fill", .warning)
+            case "NO_SIGNAL": ("No signal from phone", "antenna.radiowaves.left.and.right.slash", .problem)
+            case "STOPPED": ("Tracking stopped", "location.slash.fill", .problem)
+            case "PERMISSION_ISSUE": ("Location permission off", "location.slash.fill", .problem)
+            default: ("Status unknown", "questionmark.circle", .neutral)
+            }
         }
-        switch health.state {
-        case "ACTIVE": return ("Tracking OK", Theme.ok, "dot.radiowaves.left.and.right")
-        case "STALE": return ("Tracking stale", .orange, "exclamationmark.triangle")
-        case "NO_SIGNAL": return ("No signal from phone", Theme.danger, "antenna.radiowaves.left.and.right.slash")
-        case "STOPPED": return ("Tracking stopped", Theme.danger, "location.slash")
-        case "PERMISSION_ISSUE": return ("Location permission off", Theme.danger, "location.slash")
-        default: return ("Status unknown", .secondary, "questionmark.circle")
-        }
+        text = v.0
+        symbol = v.1
+        state = v.2
+    }
+
+    /// Extra coarse issues reported for the opponent phone.
+    static func extraIssues(_ health: OpponentHealthView) -> [String] {
+        var out: [String] = []
+        if health.issues.contains("PRECISE_LOCATION_OFF") { out.append("Approximate location") }
+        if health.issues.contains("LOW_POWER_MODE") { out.append("Low Power Mode") }
+        return out
     }
 }

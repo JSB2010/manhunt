@@ -130,6 +130,16 @@ describe('edge cases', () => {
     expect(next.status, JSON.stringify(next.body)).toBe(200);
     expect(next.body.round.hidingTeam).toBe('A');
     expect(next.body.round.roleOverride).toEqual({ reason: 'Wolves car parked far away', suggestedHidingTeam: 'B' });
+    // A stale worker wake-up for round 1 (its claim window) must not re-render the
+    // phones' stored views with the finished round (they would flash its recap).
+    const round1 = rid;
+    h.clock.advance(2 * MIN);
+    expect((await h.tick(sid, round1)).status).toBe(200);
+    for (const u of [a, b]) {
+      const stored = (await h.deps.db.collection('sessions').doc(sid).collection('views').doc(u.uid).get()).data()!;
+      expect(stored.round.id).toBe(next.body.round.id);
+      expect(stored.round.state).toBe('READY');
+    }
     // Host edits the ping interval before starting → readiness resets, new fingerprint.
     const edit = await h.call(a, 'PATCH', `/v1/sessions/${sid}/setup`, { rules: { pingIntervalSeconds: 180 } });
     expect(edit.status, JSON.stringify(edit.body)).toBe(200);

@@ -10,99 +10,168 @@ struct SignInView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var showPrivacy = false
+    @FocusState private var focus: Field?
 
-    enum Mode: String, CaseIterable { case signIn = "Sign in", signUp = "Create account" }
+    enum Mode: String, CaseIterable { case signIn = "Sign In", signUp = "Create Account" }
+    enum Field { case name, email, password }
+
+    private var canSubmit: Bool { !email.isEmpty && !password.isEmpty && !busy }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
-                    VStack(spacing: 8) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 56, weight: .bold))
-                            .foregroundStyle(Theme.seeking)
-                        Text("Manhunt Crews").font(.largeTitle.weight(.heavy))
-                        Text("Two crews. One phone each. Scheduled pings, photo catches, honest stats.")
-                            .multilineTextAlignment(.center)
+                VStack(spacing: 28) {
+                    VStack(spacing: 12) {
+                        BrandMark()
+                        Text("Manhunt Crews")
+                            .font(.largeTitle.bold())
+                        Text("Two crews, one phone each. Scheduled pings, photo catches and honest stats.")
+                            .font(.body)
                             .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
-                    .padding(.top, 32)
+                    .padding(.top, 24)
 
-                    if model.env.appleSignInEnabled {
-                        SignInWithAppleButton(.continue) { request in
-                            model.auth.prepareAppleRequest(request)
-                        } onCompletion: { result in
-                            perform($busy, $error) { try await model.auth.completeApple(result) }
+                    VStack(spacing: 16) {
+                        if model.env.appleSignInEnabled {
+                            SignInWithAppleButton(.continue) { request in
+                                model.auth.prepareAppleRequest(request)
+                            } onCompletion: { result in
+                                perform($busy, $error) { try await model.auth.completeApple(result) }
+                            }
+                            .signInWithAppleButtonStyle(.black)
+                            .frame(height: 50)
+                            .clipShape(Capsule())
+                            Text("or use email").font(.footnote).foregroundStyle(.secondary)
                         }
-                        .signInWithAppleButtonStyle(.black)
-                        .frame(height: 52)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        Text("or use email").font(.footnote).foregroundStyle(.secondary)
-                    }
 
-                    Picker("Mode", selection: $mode) {
-                        ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        Picker("Account", selection: $mode) {
+                            ForEach(Mode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+
+                        VStack(spacing: 0) {
+                            if mode == .signUp {
+                                field {
+                                    TextField("Display name", text: $displayName)
+                                        .textContentType(.nickname)
+                                        .focused($focus, equals: .name)
+                                        .submitLabel(.next)
+                                        .onSubmit { focus = .email }
+                                }
+                                Divider().padding(.leading)
+                            }
+                            field {
+                                TextField("Email", text: $email)
+                                    .accessibilityIdentifier("signin.email")
+                                    .keyboardType(.emailAddress)
+                                    .textContentType(.username)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .focused($focus, equals: .email)
+                                    .submitLabel(.next)
+                                    .onSubmit { focus = .password }
+                            }
+                            Divider().padding(.leading)
+                            field {
+                                SecureField(mode == .signUp ? "Password (8+ characters)" : "Password", text: $password)
+                                    .accessibilityIdentifier("signin.password")
+                                    .textContentType(mode == .signUp ? .newPassword : .password)
+                                    .focused($focus, equals: .password)
+                                    .submitLabel(.go)
+                                    .onSubmit { if canSubmit { submit() } }
+                            }
+                        }
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                        Button(action: submit) {
+                            ActionLabel(title: mode.rawValue, busy: busy)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(!canSubmit)
+                        .accessibilityIdentifier("signin.submit")
+
+                        if mode == .signIn {
+                            Button("Forgot Password?") {
+                                perform($busy, $error) {
+                                    try await model.auth.sendPasswordReset(email: email)
+                                    model.show("Password reset email sent")
+                                }
+                            }
+                            .font(.subheadline)
+                            .disabled(email.isEmpty)
+                        }
                     }
-                    .pickerStyle(.segmented)
 
                     VStack(spacing: 12) {
-                        if mode == .signUp {
-                            TextField("Display name (e.g. Morgan)", text: $displayName)
-                                .textContentType(.nickname)
-                                .textFieldStyle(.roundedBorder)
+                        if model.env.useEmulators {
+                            Label("Development build using local emulators (\(model.env.devHost)). No production data.", systemImage: "hammer.fill")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
                         }
-                        TextField("Email", text: $email)
-                            .accessibilityIdentifier("signin.email")
-                            .keyboardType(.emailAddress)
-                            .textContentType(.username)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .textFieldStyle(.roundedBorder)
-                        SecureField("Password (8+ characters)", text: $password)
-                            .accessibilityIdentifier("signin.password")
-                            .textContentType(mode == .signUp ? .newPassword : .password)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    .font(.title3)
-
-                    BigButton(title: mode.rawValue, systemImage: "person.badge.key", busy: busy) {
-                        perform($busy, $error) {
-                            if mode == .signUp {
-                                guard !displayName.trimmingCharacters(in: .whitespaces).isEmpty else { throw SimpleError("Enter a display name") }
-                                guard password.count >= 8 else { throw SimpleError("Use at least 8 characters") }
-                                try await model.auth.signUp(email: email, password: password, displayName: displayName)
-                            } else {
-                                try await model.auth.signIn(email: email, password: password)
-                            }
-                        }
-                    }
-                    .disabled(email.isEmpty || password.isEmpty)
-                    .accessibilityIdentifier("signin.submit")
-
-                    if mode == .signIn {
-                        Button("Forgot password?") {
-                            perform($busy, $error) {
-                                try await model.auth.sendPasswordReset(email: email)
-                                model.show("Password reset email sent")
-                            }
-                        }
-                        .font(.footnote)
-                        .disabled(email.isEmpty)
-                    }
-
-                    if model.env.useEmulators {
-                        Label("Development build — local emulators (\(model.env.devHost)). No production data.", systemImage: "hammer")
+                        Button("How Manhunt Crews Uses Your Data") { showPrivacy = true }
                             .font(.footnote)
-                            .foregroundStyle(.orange)
                     }
-
-                    Button("Privacy summary") { showPrivacy = true }.font(.footnote)
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.bottom, 24)
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Color(.systemGroupedBackground))
+            .animation(.snappy, value: mode)
             .sheet(isPresented: $showPrivacy) { PrivacySummaryView() }
             .errorAlert($error)
         }
+    }
+
+    private func field(@ViewBuilder _ content: () -> some View) -> some View {
+        content()
+            .padding(.horizontal)
+            .frame(minHeight: 50)
+    }
+
+    private func submit() {
+        focus = nil
+        perform($busy, $error) {
+            if mode == .signUp {
+                guard !displayName.trimmingCharacters(in: .whitespaces).isEmpty else { throw SimpleError("Enter a display name.") }
+                guard password.count >= 8 else { throw SimpleError("Use at least 8 characters for your password.") }
+                try await model.auth.signUp(email: email, password: password, displayName: displayName)
+            } else {
+                try await model.auth.signIn(email: email, password: password)
+            }
+        }
+    }
+}
+
+/// The app’s mark — a hider’s dotted trail ending at a released ping — echoing the
+/// app icon. Decorative.
+private struct BrandMark: View {
+    @ScaledMetric(relativeTo: .largeTitle) private var size: CGFloat = 84
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
+                .fill(Color(.secondarySystemGroupedBackground))
+            Canvas { ctx, canvas in
+                let s = canvas.width
+                let trail = [CGPoint(x: 0.18, y: 0.76), CGPoint(x: 0.3, y: 0.76), CGPoint(x: 0.4, y: 0.68),
+                             CGPoint(x: 0.47, y: 0.58), CGPoint(x: 0.55, y: 0.5)]
+                for p in trail {
+                    ctx.fill(Path(ellipseIn: CGRect(x: p.x * s - s * 0.035, y: p.y * s - s * 0.035, width: s * 0.07, height: s * 0.07)),
+                             with: .color(Theme.crew(.A)))
+                }
+            }
+            Image(systemName: "mappin")
+                .font(.system(size: size * 0.46, weight: .bold))
+                .foregroundStyle(Theme.crew(.B))
+                .offset(x: size * 0.14, y: -size * 0.08)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
 
@@ -117,24 +186,35 @@ struct PrivacySummaryView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("What is recorded") {
-                    Text("Only the two crew operator phones are tracked, and only during a round you explicitly start (plus a short ready check). Tracking stops when the round ends.")
-                    Text("Your crew’s exact route is hidden from the other crew while playing. They only receive scheduled location pings.")
-                    Text("After each round, both operators can see both routes, pings, distances and the catch photo.")
+                Section("What Is Recorded") {
+                    Label("Only the two crew operator phones are tracked, and only during a round you explicitly start (plus a short ready check). Tracking stops when the round ends.", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                    Label("Your crew’s exact route is hidden from the other crew while playing. They only receive scheduled location pings.", systemImage: "eye.slash.fill")
+                    Label("After each round, both operators can see both routes, pings, distances and the catch photo.", systemImage: "map.fill")
                 }
-                Section("Teammates without the app") {
-                    Text("Make sure your crew knows the operator phone’s location, the crew roster and catch photos are recorded and shown to both operators after rounds.")
+                Section("Teammates Without the App") {
+                    Label("Make sure your crew knows the operator phone’s location, the crew roster and catch photos are recorded and shown to both operators after rounds.", systemImage: "person.3.fill")
                 }
-                Section("Retention and deletion") {
-                    Text("Raw GPS samples: up to 30 days. Simplified routes and stats: until the night is deleted or you delete your data. Rejected photos: 7 days; confirmed photos: 30 days unless both operators keep them.")
-                    Text("You can delete your own tracks and photos from any night, delete a night you organized, or delete your account in Settings.")
+                Section("Retention and Deletion") {
+                    Label("Raw GPS samples: up to 30 days. Simplified routes and stats: until the night is deleted or you delete your data. Rejected photos: 7 days; confirmed photos: 30 days unless both operators keep them.", systemImage: "clock.arrow.circlepath")
+                    Label("You can delete your own tracks and photos from any night, delete a night you organized, or delete your account in Settings.", systemImage: "trash")
                 }
-                Section("Honesty about GPS") {
-                    Text("iOS may delay or pause background location, and a force-quit stops tracking. Missing fixes are shown as missing, never invented. Notifications can be late; the app’s clock comes from the server.")
+                Section("Honesty About GPS") {
+                    Label("iOS may delay or pause background location, and a force-quit stops tracking. Missing fixes are shown as missing, never invented. Notifications can be late; the app’s clock comes from the server.", systemImage: "location.slash.fill")
                 }
             }
+            .labelStyle(PrivacyLabelStyle())
             .navigationTitle("Privacy")
-            .toolbar { Button("Done") { dismiss() } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { CloseButton { dismiss() } } }
+        }
+    }
+}
+
+/// List label with a tinted leading symbol aligned to the first line of text.
+private struct PrivacyLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
+            configuration.icon.foregroundStyle(.tint).frame(minWidth: 24)
+            configuration.title
         }
     }
 }

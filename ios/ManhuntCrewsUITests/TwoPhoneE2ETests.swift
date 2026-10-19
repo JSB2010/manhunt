@@ -33,7 +33,13 @@ final class TwoPhoneE2ETests: XCTestCase {
         scrollTo(ack, in: app)
         XCTAssertTrue(ack.waitForExistence(timeout: 5))
         check(ack)
-        tap(app.buttons["create.submit"])
+        let submit = app.buttons["create.submit"]
+        tap(submit)
+        // Under heavy load a tap on the sheet's toolbar can be dropped. Retry only while the
+        // form is still up and idle (a busy Create shows a spinner, not this button).
+        for _ in 0..<2 where !app.buttons["lobby.invite"].waitForExistence(timeout: 10) && submit.exists && submit.isEnabled {
+            submit.tap()
+        }
 
         tap(app.buttons["lobby.invite"], timeout: 30)
         let code = app.staticTexts["invite.code"]
@@ -59,7 +65,7 @@ final class TwoPhoneE2ETests: XCTestCase {
 
         let phase = app.staticTexts["game.phase"]
         XCTAssertTrue(phase.waitForExistence(timeout: 30))
-        XCTAssertTrue(phase.label.contains("HEAD START"), phase.label)
+        XCTAssertTrue(phase.label.localizedCaseInsensitiveContains("head start"), phase.label)
         snapshot("host-head-start")
 
         // Lock-screen proxy: background the hider app for the whole chase. Background
@@ -95,7 +101,7 @@ final class TwoPhoneE2ETests: XCTestCase {
         if app.buttons["warnings.startAnyway"].waitForExistence(timeout: 6) { app.buttons["warnings.startAnyway"].tap() }
         let phase2 = app.staticTexts["game.phase"]
         XCTAssertTrue(phase2.waitForExistence(timeout: 30))
-        XCTAssertTrue(phase2.label.contains("SEEKING"), "host seeks in round 2: \(phase2.label)")
+        XCTAssertTrue(phase2.label.localizedCaseInsensitiveContains("seeking"), "host seeks in round 2: \(phase2.label)")
         let ping2 = app.staticTexts["game.lastPing"]
         XCTAssertTrue(ping2.waitForExistence(timeout: 150), "round 2 first ping")
         XCTAssertTrue(ping2.label.contains("#0"), ping2.label)
@@ -144,7 +150,7 @@ final class TwoPhoneE2ETests: XCTestCase {
 
         let lastPing = app.staticTexts["game.lastPing"]
         XCTAssertTrue(lastPing.waitForExistence(timeout: 150), "first ping should release when the head start ends")
-        XCTAssertTrue(phase.label.contains("CHASE"), phase.label)
+        XCTAssertTrue(phase.label.localizedCaseInsensitiveContains("chase"), phase.label)
         snapshot("seeker-first-ping")
         try write("first-ping.txt", lastPing.label)
 
@@ -177,7 +183,7 @@ final class TwoPhoneE2ETests: XCTestCase {
         snapshot("seeker-round2-ready")
         let phase2 = app.staticTexts["game.phase"]
         XCTAssertTrue(phase2.waitForExistence(timeout: 300), "round 2 should start")
-        XCTAssertTrue(phase2.label.contains("HIDING"), "this crew hides in round 2: \(phase2.label)")
+        XCTAssertTrue(phase2.label.localizedCaseInsensitiveContains("hiding"), "this crew hides in round 2: \(phase2.label)")
         snapshot("seeker-round2-hiding")
         XCUIDevice.shared.press(.home) // hide with the phone "in a pocket"
         _ = try waitForFile("r2-claim-submitted.txt", timeout: 900)
@@ -297,14 +303,15 @@ final class TwoPhoneE2ETests: XCTestCase {
         e.tap()
     }
 
-    /// Scroll until the element sits comfortably inside the screen (not under the
-    /// home-indicator gesture zone or the navigation bar), using short drags.
+    /// Scroll until the element sits comfortably inside the screen (clear of the
+    /// home-indicator gesture zone and the navigation bar), using short drags.
+    /// Buttons pinned in a bottom action bar already sit above the home indicator.
     private func scrollTo(_ e: XCUIElement, in app: XCUIApplication) {
         let window = app.windows.firstMatch.frame
         for _ in 0..<15 {
-            if e.exists && e.isHittable && e.frame.maxY < window.maxY - 120 && e.frame.minY > window.minY + 90 { return }
+            if e.exists && e.isHittable && e.frame.maxY < window.maxY - 44 && e.frame.minY > window.minY + 90 { return }
             // Plain swipes (no press-and-hold) so rows, steppers and menu pickers aren't activated.
-            let up = !e.exists || e.frame.maxY >= window.maxY - 120
+            let up = !e.exists || e.frame.maxY >= window.maxY - 44
             if up { app.swipeUp(velocity: .slow) } else { app.swipeDown(velocity: .slow) }
         }
     }

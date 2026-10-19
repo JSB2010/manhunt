@@ -171,6 +171,11 @@ export class GameService {
       if (!round) fail('NOT_FOUND', 'Round not found');
       const members = await txMembers(tx, db, sid);
       const claim = round!.activeClaimId ? await txGet<CaptureClaim>(tx, this.p.claim(sid, roundId!, round!.activeClaimId)) : null;
+      // A transaction on an earlier round (e.g. a stale worker wake-up for its
+      // claim window) must still render views from the session's current round.
+      const currentId = session!.currentRoundId;
+      const current = currentId && currentId !== roundId ? await txGet<RoundDoc>(tx, this.p.round(sid, currentId)) : null;
+      const currentClaim = current?.activeClaimId ? await txGet<CaptureClaim>(tx, this.p.claim(sid, current.id, current.activeClaimId)) : null;
       const ctx: TxCtx = { tx, session: session!, round: round!, members, claim, now };
       const o = await fn(ctx);
 
@@ -194,8 +199,12 @@ export class GameService {
       if (o.claim) tx.set(this.p.claim(sid, nextRound.id, o.claim.claimId), o.claim);
       if (o.members) for (const m of Object.values(o.members)) tx.set(this.p.member(sid, m.uid), m);
       writeEvents(tx, db, sid, o.events ?? []);
-      const viewClaim = nextClaim && nextRound.activeClaimId === nextClaim.claimId ? nextClaim : null;
-      writeViews(tx, db, nextSession, nextRound, nextMembers, viewClaim, now);
+      if (current && nextSession.currentRoundId === current.id) {
+        writeViews(tx, db, nextSession, current, nextMembers, currentClaim, now);
+      } else {
+        const viewClaim = nextClaim && nextRound.activeClaimId === nextClaim.claimId ? nextClaim : null;
+        writeViews(tx, db, nextSession, nextRound, nextMembers, viewClaim, now);
+      }
       return { o, nextRound, roundChanged: !!o.round, wasFinished: isFinishedState(round!.state) };
     });
     await this.afterCommit(sid, out.nextRound, out.o.notifications ?? [], out.roundChanged && !out.wasFinished);

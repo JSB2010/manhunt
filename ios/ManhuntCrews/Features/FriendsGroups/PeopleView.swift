@@ -1,5 +1,29 @@
 import SwiftUI
 
+/// People tab: saved people and reusable groups, switched with a segmented control.
+struct PeopleAndGroupsView: View {
+    enum Segment: String, CaseIterable { case people = "People", groups = "Groups" }
+    @State private var segment: Segment = .people
+
+    var body: some View {
+        Group {
+            switch segment {
+            case .people: PeopleView()
+            case .groups: GroupsView()
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Picker("Show", selection: $segment) {
+                    ForEach(Segment.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+        }
+    }
+}
+
 /// Saved people (guests and account holders) with stable identities.
 struct PeopleView: View {
     @Environment(AppModel.self) private var model
@@ -15,12 +39,22 @@ struct PeopleView: View {
         List {
             Section {
                 HStack {
-                    TextField("New person's name", text: $newName)
-                    Button("Add") { create(confirm: false) }.disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || busy)
+                    TextField("New person’s name", text: $newName)
+                        .textContentType(.name)
+                        .submitLabel(.done)
+                        .onSubmit { if !newName.trimmingCharacters(in: .whitespaces).isEmpty { create(confirm: false) } }
+                    Button("Add") { create(confirm: false) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || busy)
                 }
-            } footer: { Text("People don't need accounts. Use the same saved person across nights so stats follow them even when crews change.") }
+            } header: {
+                Text("Add a Person")
+            } footer: {
+                Text("People don’t need accounts. Use the same saved person across nights so stats follow them even when crews change.")
+            }
             if !links.isEmpty {
-                Section("Account link requests") {
+                Section("Account Link Requests") {
                     ForEach(links) { l in
                         VStack(alignment: .leading) {
                             Text("\(l.requester?.displayName ?? "Someone") says they are \(l.person?.displayName ?? "this person")")
@@ -28,16 +62,17 @@ struct PeopleView: View {
                                 Button("Approve") { respond(l.requestId, true) }.buttonStyle(.borderedProminent)
                                 Button("Decline") { respond(l.requestId, false) }.buttonStyle(.bordered)
                             }
+                            .controlSize(.small)
                         }
                     }
                 }
             }
-            Section("Saved people") {
+            Section("Saved People") {
                 ForEach(people) { p in
                     NavigationLink { PersonDetailView(person: p, allPeople: people) } label: {
                         HStack {
                             Text(p.displayName)
-                            if p.isSelf { Text("(you)").foregroundStyle(.secondary) }
+                            if p.isSelf { Text("You").font(.caption.weight(.semibold)).padding(.horizontal, 7).padding(.vertical, 2).background(.fill.secondary, in: Capsule()) }
                             Spacer()
                             if p.hasAccount { Image(systemName: "person.crop.circle.badge.checkmark").foregroundStyle(.secondary).accessibilityLabel("Has account") }
                         }
@@ -45,7 +80,7 @@ struct PeopleView: View {
                 }
             }
         }
-        .searchable(text: $query)
+        .searchable(text: $query, prompt: "Search saved people")
         .navigationTitle("People")
         .task(id: query) { await load() }
         .refreshable { await load() }
@@ -89,13 +124,13 @@ struct PersonDetailView: View {
             if person.canEdit {
                 Section("Name") {
                     TextField("Name", text: $name)
-                    Button("Save name") { perform($busy, $error) { _ = try await model.api.renamePerson(person.id, name: name); model.show("Saved — past nights keep the names used then") } }
+                    Button("Save Name") { perform($busy, $error) { _ = try await model.api.renamePerson(person.id, name: name); model.show("Saved — past nights keep the names used then") } }
                         .disabled(name == person.displayName || name.isEmpty)
-                    if !person.hasAccount { Button("Merge into another saved person…") { showMerge = true } }
+                    if !person.hasAccount { Button("Merge Into Another Saved Person…") { showMerge = true } }
                 }
             } else if !person.hasAccount {
                 Section {
-                    Button("This is me — request account link") {
+                    Button("This Is Me — Request Account Link") {
                         perform($busy, $error) { try await model.api.requestPersonLink(person.id); model.show("Request sent to the organizer who saved this person") }
                     }
                 } footer: { Text("The organizer who created this person must confirm. Names alone never link accounts.") }
@@ -109,9 +144,9 @@ struct PersonDetailView: View {
                     LabeledContent("Crew time to find (avg)", value: a.crewSeekCapture.averageSeconds.map { Fmt.clock(Double($0)) } ?? "—")
                     LabeledContent("Paired nights", value: "\(a.pairedNights.stronger) stronger · \(a.pairedNights.weaker) weaker · \(a.pairedNights.provisional + a.pairedNights.insufficient) provisional")
                     if let op = a.operatorRounds { LabeledContent("Rounds as phone operator", value: "\(op)") }
-                } header: { Text("Crew stats (team-level)") } footer: { Text(a.sampleNote) }
+                } header: { Text("Crew Stats (Team Level)") } footer: { Text(a.sampleNote) }
                 if !a.compositions.isEmpty {
-                    Section("Crew compositions") {
+                    Section("Crew Compositions") {
                         ForEach(a.compositions) { c in
                             VStack(alignment: .leading) {
                                 Text(c.members.map(\.displayName).joined(separator: ", ")).font(.callout)
@@ -121,7 +156,7 @@ struct PersonDetailView: View {
                     }
                 }
                 if !a.coPlayers.isEmpty {
-                    Section("Played with") { ForEach(a.coPlayers) { c in LabeledContent(c.displayName, value: "\(c.sessionsTogether) nights") } }
+                    Section("Played With") { ForEach(a.coPlayers) { c in LabeledContent(c.displayName, value: "\(c.sessionsTogether) nights") } }
                 }
             } else {
                 ProgressView()

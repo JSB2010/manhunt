@@ -12,28 +12,31 @@ struct ProfileSetupView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Display name", text: $name).textContentType(.nickname)
-                    TextField("Handle (letters, numbers, _ .)", text: $handle)
+                    TextField("Display name", text: $name)
+                        .textContentType(.nickname)
+                    TextField("Handle", text: $handle, prompt: Text("letters, numbers, _ or ."))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 } footer: {
-                    Text("Friends find you by handle. Your location is never discoverable — friendship doesn't grant location access.")
+                    Text("Friends find you by handle. Your location is never discoverable — friendship doesn’t grant location access.")
                 }
                 Section {
-                    Button {
-                        perform($busy, $error) {
-                            model.me = try await model.api.patchMe(displayName: name.isEmpty ? nil : name, handle: handle.lowercased())
-                        }
-                    } label: {
-                        if busy { ProgressView() } else { Text("Continue").frame(maxWidth: .infinity) }
-                    }
-                    .disabled(handle.count < 3)
-                }
-                Section {
-                    Button("Sign out", role: .destructive) { Task { await model.signOut() } }
+                    Button("Sign Out", role: .destructive) { Task { await model.signOut() } }
                 }
             }
-            .navigationTitle("Set up your profile")
+            .navigationTitle("Set Up Your Profile")
+            .bottomActionBar {
+                Button {
+                    perform($busy, $error) {
+                        model.me = try await model.api.patchMe(displayName: name.isEmpty ? nil : name, handle: handle.lowercased())
+                    }
+                } label: {
+                    ActionLabel(title: "Continue", busy: busy)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(handle.count < 3 || busy)
+            }
             .onAppear {
                 name = model.me?.profile.displayName ?? ""
                 if handle.isEmpty { handle = name.lowercased().filter { $0.isLetter || $0.isNumber } }
