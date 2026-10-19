@@ -7,9 +7,9 @@ A friends-only, two-crew Manhunt game: **one iPhone per crew**. The hiding crew'
 | | |
 |---|---|
 | iOS app | `ios/` — SwiftUI, MapKit, Core Location (background), AVFoundation camera, Firebase Auth/Firestore/Messaging. iOS 18+. |
-| Backend | `backend/` — Node 24 + TypeScript + Fastify on Cloud Run (public API + private worker), Firestore, private GCS, Cloud Tasks, Cloud Scheduler, FCM. |
+| Backend | `backend/` — Node 24 + TypeScript + Fastify on **Cloud Functions for Firebase** (`api`, task-queue `tick`, scheduled `watchdog` + `retention`), Firestore, Firebase Auth, private Cloud Storage, FCM. Deploys with one `firebase deploy`. |
 | Contract | `shared/openapi.yaml` (enforced by a contract test) |
-| Infra | `infra/terraform/` (dedicated project), `firestore.rules`, `firestore.indexes.json`, `storage.rules` |
+| Infra | `firebase.json`, `firestore.rules`, `firestore.indexes.json` (incl. TTL), `storage.rules`, one-time `scripts/setup-gcp-project.sh` |
 | Docs | `docs/` — architecture, threat model, scoring & privacy, design system, Apple distribution, deployment, test matrix, ADRs, product spec |
 | Design | Apple HIG + native iOS 26 Liquid Glass (iOS 18 fallbacks) — `docs/design-system.md` |
 
@@ -56,16 +56,17 @@ xcodebuild test -project ios/ManhuntCrews.xcodeproj -scheme ManhuntCrews -destin
 
 Results and the physical-device acceptance checklist: `docs/test-matrix.md`.
 
-## Deploying (requires your approval and a dedicated GCP project)
-Nothing in this repo deploys automatically. `docs/deployment.md` walks through Terraform (`infra/terraform/environments/dev`), `scripts/deploy-backend.sh` (refuses non-Manhunt project ids and asks for confirmation) and Firebase rules/indexes.
+## Deploying (requires your approval and a dedicated Firebase project on Blaze)
+Nothing in this repo deploys automatically. `docs/deployment.md` walks through the one-time `scripts/setup-gcp-project.sh` (service account, IAM, private bucket, alerts) and `scripts/deploy-backend.sh`, which runs a single `firebase deploy --only functions,firestore,storage`. Both scripts refuse non-Manhunt project ids and ask you to type the id. To try the deployable functions locally: `cd backend && npm run serve:functions` (Functions + Cloud Tasks emulators; stop `dev.sh` first).
 
 ## Repository map
 ```
 backend/src/domain      pure game core (state machine, clock, ping selection, geo, scoring, views)
 backend/src/services    Firestore transactions, finalization, social, deletion/retention, schedulers, storage, push
-backend/src/api         public Fastify API      backend/src/worker  private worker
+backend/src/api         public Fastify API      backend/src/functions  Cloud Functions entry (api, tick, watchdog, retention)
+backend/src/worker      tick payload + local-only worker for dev.sh/tests
 backend/tests           unit / integration / security (emulators)
 ios/ManhuntCrews        App, Features/*, Services/{API,Auth,Location,OfflineQueue,Realtime,Clock,Notifications}, Models
 ios/ManhuntCrewsTests   unit tests          ios/ManhuntCrewsUITests  two-simulator E2E
-scripts/                dev.sh, emulator-start.sh, e2e-two-simulators.sh, deploy-backend.sh, setup-firebase.md
+scripts/                dev.sh, emulator-start.sh, e2e-two-simulators.sh, setup-gcp-project.sh, deploy-backend.sh, setup-firebase.md
 ```

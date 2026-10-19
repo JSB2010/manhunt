@@ -1,20 +1,20 @@
 /**
- * Runtime configuration from environment variables. No secrets are read here
- * directly — Cloud Run injects Secret Manager values as env vars, and Firebase
- * Admin uses the attached service account (Application Default Credentials).
+ * Runtime configuration from environment variables. No secrets are read here;
+ * Firebase Admin uses the function's service account (Application Default
+ * Credentials). In Cloud Functions, APP_ENV comes from the deploy-time param.
  */
 export interface Config {
   env: 'local' | 'test' | 'dev' | 'prod';
   projectId: string;
   port: number;
   bucket: string;
-  scheduler: 'cloudtasks' | 'local' | 'manual';
+  scheduler: 'taskqueue' | 'local' | 'manual';
+  /** region of the task-queue function that receives deadline wake-ups */
   tasksLocation: string;
-  tasksQueue: string;
+  tasksFunction: string;
+  /** local worker for the in-process scheduler (dev only) */
   workerUrl: string;
-  tasksInvokerServiceAccount: string;
-  workerAudience: string;
-  /** dev-only shared secret for the local worker; ignored when env=prod */
+  /** shared secret for the local worker; null when deployed (no worker HTTP app runs there) */
   devWorkerSecret: string | null;
   notifier: 'fcm' | 'log';
   inviteTtlMinutes: number;
@@ -40,28 +40,24 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
   if (env !== 'prod' && env !== 'dev' && !projectId.startsWith('demo-') && !usingEmulators) {
     throw new Error('Local/test runs must use a demo- project id or the Firebase emulators');
   }
-  const scheduler = str('SCHEDULER', env === 'prod' || env === 'dev' ? 'cloudtasks' : 'local') as Config['scheduler'];
+  const deployed = env === 'prod' || env === 'dev';
+  const scheduler = str('SCHEDULER', deployed ? 'taskqueue' : 'local') as Config['scheduler'];
   const cfg: Config = {
     env,
     projectId,
     port: Number(str('PORT', '8787')),
-    bucket: str('MEDIA_BUCKET', `${projectId}.appspot.com`),
+    bucket: str('MEDIA_BUCKET', deployed ? `${projectId}-manhunt-media` : `${projectId}.appspot.com`),
     scheduler,
     tasksLocation: str('TASKS_LOCATION', 'us-central1'),
-    tasksQueue: str('TASKS_QUEUE', 'round-deadlines'),
+    tasksFunction: str('TASKS_FUNCTION', 'tick'),
     workerUrl: str('WORKER_URL', 'http://127.0.0.1:8788'),
-    tasksInvokerServiceAccount: str('TASKS_INVOKER_SA', ''),
-    workerAudience: str('WORKER_AUDIENCE', str('WORKER_URL', 'http://127.0.0.1:8788')),
-    devWorkerSecret: env === 'prod' ? null : str('DEV_WORKER_SECRET', 'local-dev-worker-secret'),
-    notifier: str('NOTIFIER', env === 'prod' || env === 'dev' ? 'fcm' : 'log') as Config['notifier'],
+    devWorkerSecret: deployed ? null : str('DEV_WORKER_SECRET', 'local-dev-worker-secret'),
+    notifier: str('NOTIFIER', deployed ? 'fcm' : 'log') as Config['notifier'],
     inviteTtlMinutes: Number(str('INVITE_TTL_MINUTES', '60')),
     maxPhotoBytes: Number(str('MAX_PHOTO_BYTES', String(8 * 1024 * 1024))),
     usingEmulators,
     watchdogIntervalMs: Number(str('LOCAL_WATCHDOG_MS', '15000')),
     ...overrides,
   };
-  if ((cfg.env === 'prod' || cfg.env === 'dev') && cfg.scheduler === 'cloudtasks' && !cfg.tasksInvokerServiceAccount) {
-    throw new Error('TASKS_INVOKER_SA is required for Cloud Tasks scheduling');
-  }
   return cfg;
 }

@@ -1,45 +1,28 @@
 import Fastify, { type FastifyInstance } from 'fastify';
-import { OAuth2Client } from 'google-auth-library';
 import { timingSafeEqual } from 'node:crypto';
-import { z } from 'zod';
 import { AppError } from '../domain/errors.js';
 import { parse } from '../schemas/api.js';
 import { DataService } from '../services/dataService.js';
 import { GameService } from '../services/gameService.js';
 import type { Deps } from '../services/repo.js';
 import { installErrorHandling } from '../api/http.js';
+import { TickBody } from './jobs.js';
 
 export interface WorkerAuthOptions {
-  /** service accounts allowed to invoke the worker (Cloud Tasks invoker, Cloud Scheduler) */
-  allowedInvokers: string[];
-  audience: string;
-  /** dev-only shared secret; null in production */
+  /** shared secret from `Config.devWorkerSecret`; null refuses every call */
   devSecret: string | null;
-  verifyOidc?: (token: string) => Promise<{ email?: string | undefined; iss?: string | undefined } | null>;
 }
 
-const TickBody = z
-  .object({ sessionId: z.string().min(1).max(128), roundId: z.string().min(1).max(128), generation: z.number().int().optional(), eventKey: z.string().max(64).optional(), at: z.number().optional() })
-  .strict();
-
 /**
- * Private worker (Cloud Run, ingress internal + IAM `run.invoker` only for the
- * task/scheduler service accounts). Defense in depth: the app also verifies
- * the Google-signed OIDC token and its invoker email. Firebase client ID tokens
- * (issuer securetoken.google.com) are never accepted here.
+ * Local worker for the dev stack (`src/dev.ts`) and tests: the HTTP twin of
+ * the deployed `tick`, `watchdog` and `retention` functions (src/functions).
+ * It is never deployed. Bound to 127.0.0.1 and gated by a shared secret, so
+ * Firebase client ID tokens and anonymous calls are refused.
  */
 export async function buildWorkerApp(deps: Deps, auth: WorkerAuthOptions): Promise<FastifyInstance> {
   const app = Fastify({ loggerInstance: deps.log, bodyLimit: 64_000 });
   const game = new GameService(deps);
   const data = new DataService(deps);
-  const oauth = new OAuth2Client();
-  const verifyOidc =
-    auth.verifyOidc ??
-    (async (token: string) => {
-      const ticket = await oauth.verifyIdToken({ idToken: token, audience: auth.audience });
-      const p = ticket.getPayload();
-      return p ? { email: p.email, iss: p.iss } : null;
-    });
 
   app.addHook('onRequest', async (req) => {
     if (req.url === '/healthz') return;
@@ -49,18 +32,8 @@ export async function buildWorkerApp(deps: Deps, auth: WorkerAuthOptions): Promi
       const b = Buffer.from(auth.devSecret);
       if (a.length === b.length && timingSafeEqual(a, b)) return;
     }
-    const header = req.headers.authorization;
-    if (!header?.startsWith('Bearer ')) throw new AppError('UNAUTHENTICATED', 'Worker requires an OIDC token');
-    let payload: { email?: string | undefined; iss?: string | undefined } | null = null;
-    try {
-      payload = await verifyOidc(header.slice(7));
-    } catch {
-      payload = null;
-    }
-    const issuerOk = payload?.iss === 'https://accounts.google.com' || payload?.iss === 'accounts.google.com';
-    if (!payload || !issuerOk || !payload.email || !auth.allowedInvokers.includes(payload.email)) {
-      throw new AppError('FORBIDDEN', 'Caller is not an authorized worker invoker');
-    }
+    if (!req.headers.authorization) throw new AppError('UNAUTHENTICATED', 'Worker requires the local worker secret');
+    throw new AppError('FORBIDDEN', 'Caller is not an authorized worker invoker');
   });
   installErrorHandling(app, deps);
 

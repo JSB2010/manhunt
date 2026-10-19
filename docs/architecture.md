@@ -2,16 +2,17 @@
 
 ```mermaid
 flowchart TD
-  H[Hider iPhone — operator] -->|private GPS batches, Firebase ID token| API[Cloud Run — public API manhunt-api]
+  H[Hider iPhone — operator] -->|private GPS batches, Firebase ID token| API[Cloud Function api — public HTTPS]
   S[Seeker iPhone — operator] -->|private GPS + photo claims| API
   API --> DB[(Firestore — authoritative state + raw points, server-only)]
-  API --> GCS[(Private GCS bucket — photos, track archives)]
+  API --> GCS[(Private Cloud Storage bucket — photos, track archives)]
   API --> V[Firestore sessions/{sid}/views/{uid} — sanitized per-user read model]
   V -->|own view only (rules)| H
   V -->|own view only (rules)| S
-  API --> Q[Cloud Tasks — one wake-up per round/generation/event]
-  Q -->|OIDC| W[Cloud Run — private worker manhunt-worker]
-  SC[Cloud Scheduler — watchdog 1/min, retention daily] -->|OIDC| W
+  API --> Q[Task queue tick — one wake-up per round/generation/event]
+  Q -->|OIDC, backend SA only| W[Cloud Function tick — private]
+  SC[Scheduled functions watchdog 1/min, retention daily] --> DB
+  SC --> Q
   W --> DB
   W --> V
   W --> Q
@@ -23,12 +24,13 @@ flowchart TD
 | Path | What it is |
 |---|---|
 | `backend/src/domain/` | Pure, I/O-free game core: `engine.ts` (round state machine), `clock.ts` (pause-aware time math), `tick.ts` (process due deadlines), `pingSelection.ts` (§5.3 eligibility), `geo.ts` (distance/coverage/simplification), `scoring.ts` (scorecards, crew-attributed analytics), `views.ts` (**the only producer of client-readable game state**). |
-| `backend/src/services/` | Firestore transactions (`gameService.ts`), post-round finalization (`finalize.ts`), social graph (`socialService.ts`), deletion/retention/exports (`dataService.ts`), Cloud Tasks / local schedulers, GCS store with JPEG metadata stripping, FCM notifier. |
+| `backend/src/services/` | Firestore transactions (`gameService.ts`), post-round finalization (`finalize.ts`), social graph (`socialService.ts`), deletion/retention/exports (`dataService.ts`), task-queue / local schedulers, Cloud Storage store with JPEG metadata stripping, FCM notifier. |
 | `backend/src/api/` | Fastify public API: Firebase ID-token auth, per-uid rate limits, idempotency keys, typed errors, `serverTime` on every response. |
-| `backend/src/worker/` | Private worker: OIDC-verified invoker allow-list, `/internal/rounds/tick` (+ spec aliases), watchdog, retention sweep. |
+| `backend/src/functions/` | Cloud Functions for Firebase entry point (`firebase deploy`): `api` (HTTPS, public; replays requests into the Fastify app), `tick` (task queue, private, backend service account only), `watchdog` and `retention` (scheduled, private). ADR 0012. |
+| `backend/src/worker/` | The tick payload schema, and a local-only HTTP twin of the deployed worker functions (`/internal/rounds/tick` + spec aliases, watchdog, retention) for `scripts/dev.sh` and tests; secret-gated, never deployed. |
 | `firestore.rules` | Clients may `get` only `sessions/{sid}/views/{their uid}` while an active member. Everything else denied; no client writes. |
 | `ios/ManhuntCrews/` | SwiftUI app. `Services/Location` (background GPS), `Services/OfflineQueue` (encrypted queue), `Services/Realtime` (own-view listener), `Services/Clock` (server clock), `Features/*` (screens). |
-| `infra/terraform/` | Dedicated-project IaC: APIs, Firestore + TTL, private bucket, service accounts + least-privilege IAM, Cloud Tasks queue, Scheduler jobs, alerts, budget. |
+| `firebase.json` + `scripts/` | `firebase deploy` ships the functions, task queue, scheduler jobs, rules, indexes and TTL policies. `scripts/setup-gcp-project.sh` does the one-time rest: backend service account + least-privilege IAM, private media bucket, log metric, alerts, budget. |
 | `shared/openapi.yaml` | API contract; a unit test asserts it matches the registered routes. |
 
 ## Data flows
@@ -48,9 +50,9 @@ flowchart TD
 
 ## Scheduling and idempotency
 
-* After every state change the API/worker enqueues one Cloud Task for the next event, named `r-{roundId}-g{generation}-{event}` (Cloud Tasks dedups names). `phaseGeneration` increments on every pause/resume/claim transition.
+* After every state change the API/worker enqueues one task on the `tick` function's Cloud Tasks queue for the next event, with id `r-{roundId}-g{generation}-{event}` (Cloud Tasks dedups ids). `phaseGeneration` increments on every pause/resume/claim transition.
 * The worker tick is idempotent: it processes whatever is due at `now`, in order, against the transactionally read state. Stale or duplicate tasks are harmless no-ops.
-* The watchdog (Cloud Scheduler, 1/min) ticks every active round, re-enqueues the next wake-up, counts overdue deadlines (alerted), and retries any unfinished post-round finalization (`summaryReady === false`).
+* The watchdog (scheduled function, 1/min) ticks every active round, re-enqueues the next wake-up, counts overdue deadlines (alerted), and retries any unfinished post-round finalization (`summaryReady === false`).
 * Late processing never changes *which* sample is eligible (selection is by deadline), and is labelled `delayed` with the measured dispatch latency.
 
 ## Post-round
@@ -59,4 +61,6 @@ flowchart TD
 
 ## Local development
 
-`scripts/dev.sh` = Firebase emulators (Auth 9099, Firestore 8085, Storage 9199) + API (8787) + worker (8788) + in-process scheduler + 10–15 s watchdog, project `demo-manhunt`. The iOS Debug configuration points at it (`MH_DEV_HOST`).
+`scripts/dev.sh` = Firebase emulators (Auth 9099, Firestore 8085, Storage 9199) + API (8787) + worker (8788) + in-process scheduler + 10–15 s watchdog, project `demo-manhunt`. The iOS Debug configuration points at it (`MH_DEV_HOST`). It runs the same Fastify apps the functions wrap, with fast restarts.
+
+`npm run serve:functions` runs the deployable code itself in the Functions + Cloud Tasks emulators (API at `http://127.0.0.1:5001/demo-manhunt/us-central1/api`); it uses the same emulator ports, so stop `dev.sh` first. The Cloud Tasks emulator ignores `scheduleTime` and the emulator doesn't run the scheduled watchdog, so deadlines there rely on `tick`'s early-arrival wait-and-retry (ADR 0012). It is fine for short test rules; use `dev.sh` for real nights.

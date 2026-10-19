@@ -1,8 +1,0 @@
-# Copy to terraform.tfvars (git-ignored). Use a DEDICATED project, e.g. manhunt-dev-<suffix>.
-project_id      = "manhunt-dev-example"
-region          = "us-central1"
-# Fill after the first deploy (scripts/deploy-backend.sh prints it):
-worker_url      = ""
-# Optional budget alert (requires billing.budgets permissions):
-billing_account = ""
-alert_email     = ""

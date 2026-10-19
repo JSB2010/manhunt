@@ -79,7 +79,7 @@ export async function harness(): Promise<Harness> {
     deleteAuthUser: (uid) => fb.auth.deleteUser(uid).then(() => undefined),
   };
   const api = await buildApiApp(deps, { verifyIdToken: (t) => fb.auth.verifyIdToken(t) });
-  const worker = await buildWorkerApp(deps, { allowedInvokers: ['tasks-invoker@demo.iam.gserviceaccount.com'], audience: 'https://worker.test', devSecret: WORKER_SECRET });
+  const worker = await buildWorkerApp(deps, { devSecret: WORKER_SECRET });
   await api.ready();
   await worker.ready();
 

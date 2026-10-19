@@ -6,14 +6,15 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas) | `cd backend && npm run test:unit` | ✅ 55 / 55 |
-| Backend integration + security (Auth/Firestore/Storage emulators, rules) | `npm run test:integration` | ✅ 32 / 32 (re-run 2026-10-18 incl. the stale-round view regression check) |
+| Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas, Cloud Functions adapter + tick handler + task-queue scheduler) | `cd backend && npm run test:unit` | ✅ 69 / 69 (2026-10-18, after the Cloud Functions port) |
+| Backend integration + security (Auth/Firestore/Storage emulators, rules, deployed-functions surface) | `npm run test:integration` | ✅ 38 / 38 (2026-10-18, after the Cloud Functions port) |
 | Real-time API E2E (live stack, wall clock, local scheduler → worker) | `npm run e2e:two-operators` | ✅ first ping seen 0.5 s after chase start; ping 1 0.7 s after its deadline; sample age 9 s; 0 unreleased coordinates in seeker view; official time = submission time |
+| Real-time API E2E through the **deployable Cloud Functions** (Functions + Cloud Tasks emulators: `api` → task queue → `tick`) | `npm run serve:functions` (alternate ports), then `API_URL=http://127.0.0.1:<port>/demo-manhunt/us-central1/api npm run e2e:two-operators` | ✅ 2026-10-18: first ping seen 1.3 s after chase start; ping 1 0.2 s after its deadline; sample age 7 s; 0 unreleased coordinates in seeker view; photo upload (JPEG through the adapter, metadata stripped), catch, recap, round 2 role swap. The Cloud Tasks emulator ignores `scheduleTime`, so delivery timing here came from `tick`'s early-arrival wait-and-retry (ADR 0012). The first run, before that handling existed, failed at ping 0. |
 | Backend typecheck | `npm run typecheck` | ✅ |
 | iOS unit + listener integration (XCTest) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 14 / 14 (re-run 2026-10-18 on iPhone 18 Pro / iOS 27 after the redesign; the listener test runs only when the local stack is up) |
 | iOS app build (Debug, simulator) | `xcodebuild build …` | ✅ no warnings in app sources |
 | iOS Release build for device (unsigned) | `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ |
-| Terraform | `terraform validate` (dev, prod) | ✅ |
+| Setup / deploy scripts | `bash -n scripts/setup-gcp-project.sh scripts/deploy-backend.sh`; every gcloud flag checked against `--help` (gcloud 580) | ✅ syntax only; never run against a project |
 | Two-simulator E2E (real app ×2 + local stack) | `scripts/e2e-two-simulators.sh` | see "Two-simulator E2E" below |
 
 ### Spec §15.1 automated coverage
@@ -38,7 +39,7 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 | Late GPS never retro-leaks | pingSelection unit + security "late (offline) uploads" |
 | Expired / used invites rejected; direct invites need friendship | gameplay + security |
 | Deletions remove documents and objects | security: delete my data, delete night, delete account |
-| Worker not callable with client token | security worker test |
+| Worker not callable with client token | security worker test (local worker); `security/functions-surface.test.ts` (only `api` public, `tick` invokable only by the backend SA); `unit/functions.tasks.test.ts` (caller check) |
 | iOS: server-time clock rendering, cadence filter, encrypted queue + idempotent batch ids, view decoding, deep links | `ManhuntCrewsTests` |
 
 ## Two-simulator E2E

@@ -605,7 +605,7 @@ export class GameService {
   }
 
   // -------------------------------------------------------------------------
-  // Worker tick (Cloud Tasks / watchdog)
+  // Worker tick (task-queue function / watchdog)
   // -------------------------------------------------------------------------
 
   async tick(sid: string, rid: string) {
@@ -1026,7 +1026,7 @@ export class GameService {
   }
 
   // -------------------------------------------------------------------------
-  // Watchdog (Cloud Scheduler, ~1/min): repair missing wake-ups and summaries
+  // Watchdog (scheduled function, ~1/min): repair missing wake-ups and summaries
   // -------------------------------------------------------------------------
 
   async watchdog() {

@@ -16,7 +16,7 @@ export interface FirebaseHandles {
 let cached: FirebaseHandles | null = null;
 
 /**
- * Initializes Firebase Admin with Application Default Credentials (Cloud Run's
+ * Initializes Firebase Admin with Application Default Credentials (the function's
  * attached service account in production; emulators locally). Never loads a
  * JSON key file.
  */

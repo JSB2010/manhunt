@@ -34,7 +34,7 @@ const LIMITS: Record<RateBucket, { capacity: number; perMs: number }> = {
 };
 
 /**
- * Per-instance token bucket keyed by uid+bucket. Cloud Run may run several
+ * Per-instance token bucket keyed by uid+bucket. The `api` function may run several
  * instances, so effective limits scale with instance count — acceptable for a
  * friends-only app (documented in docs/permissions-threat-model.md).
  */

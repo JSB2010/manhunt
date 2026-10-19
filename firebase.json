@@ -1,4 +1,12 @@
 {
+  "functions": [
+    {
+      "source": "backend",
+      "runtime": "nodejs24",
+      "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run typecheck", "npm --prefix \"$RESOURCE_DIR\" run test:unit", "npm --prefix \"$RESOURCE_DIR\" run build"],
+      "ignore": ["node_modules", ".git", "src", "tests", "scripts", "coverage", "*.log", "tsconfig*.json", "vitest.config.ts", ".env.example"]
+    }
+  ],
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
@@ -10,6 +18,8 @@
     "auth": { "host": "0.0.0.0", "port": 9099 },
     "firestore": { "host": "0.0.0.0", "port": 8085 },
     "storage": { "host": "0.0.0.0", "port": 9199 },
+    "functions": { "host": "0.0.0.0", "port": 5001 },
+    "tasks": { "host": "127.0.0.1", "port": 9499 },
     "ui": { "enabled": true, "host": "127.0.0.1", "port": 4000 },
     "hub": { "host": "127.0.0.1", "port": 4400 },
     "logging": { "port": 4500 },

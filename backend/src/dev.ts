@@ -1,7 +1,9 @@
 /**
  * Local development runner: public API (8787) + private worker (8788) against
- * the Firebase Emulator Suite, with an in-process scheduler and a watchdog
- * that mirrors Cloud Scheduler. Refuses to run without emulators.
+ * the Firebase Emulator Suite, with an in-process scheduler standing in for the
+ * task queue and a watchdog interval standing in for the scheduled functions.
+ * Refuses to run without emulators. (`npm run serve:functions` runs the real
+ * Cloud Functions entry points in the Functions + Cloud Tasks emulators.)
  */
 import { buildApiApp } from './api/app.js';
 import { buildDeps } from './bootstrap.js';
@@ -27,7 +29,7 @@ const deps = buildDeps(cfg, log);
 const fb = firebase(cfg);
 
 const api = await buildApiApp(deps, { verifyIdToken: (t) => fb.auth.verifyIdToken(t) });
-const worker = await buildWorkerApp(deps, { allowedInvokers: [], audience: cfg.workerUrl, devSecret: cfg.devWorkerSecret });
+const worker = await buildWorkerApp(deps, { devSecret: cfg.devWorkerSecret });
 const host = process.env.API_HOST ?? '0.0.0.0';
 await api.listen({ host, port: apiPort });
 await worker.listen({ host: '127.0.0.1', port: workerPort });

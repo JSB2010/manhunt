@@ -2,8 +2,9 @@
   "name": "manhunt-crews-backend",
   "version": "0.1.0",
   "private": true,
-  "description": "Manhunt Crews public API + private worker (Fastify on Cloud Run)",
+  "description": "Manhunt Crews backend: public API + deadline worker on Cloud Functions for Firebase",
   "type": "module",
+  "main": "dist/functions/index.js",
   "engines": {
     "node": ">=22"
   },
@@ -11,8 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx watch src/dev.ts",
-    "start:api": "node dist/server.js",
-    "start:worker": "node dist/workerServer.js",
+    "serve:functions": "npm run build && firebase --project demo-manhunt --config ../firebase.json emulators:start --only auth,firestore,storage,functions,tasks",
     "test:unit": "vitest run tests/unit",
     "test:integration": "firebase --project demo-manhunt --config ../firebase.json emulators:exec --only auth,firestore,storage \"vitest run tests/integration tests/security\"",
     "test:rules": "firebase --project demo-manhunt --config ../firebase.json emulators:exec --only firestore,storage \"vitest run tests/security/firestore-rules.test.ts\"",
@@ -21,10 +21,9 @@
     "e2e:two-operators": "tsx scripts/e2e-two-operators.ts"
   },
   "dependencies": {
-    "@google-cloud/tasks": "^7.3.0",
     "fastify": "^5.12.7",
     "firebase-admin": "^14.5.0",
-    "google-auth-library": "^11.3.1",
+    "firebase-functions": "^7.4.0",
     "pino": "^10.4.0",
     "zod": "^4.6.7"
   },

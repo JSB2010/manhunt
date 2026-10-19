@@ -3,7 +3,7 @@ info:
   title: Manhunt Crews API
   version: 0.1.0
   description: |
-    Public API for the Manhunt Crews iOS app (Cloud Run, Fastify).
+    Public API for the Manhunt Crews iOS app (Fastify, served by the `api` Cloud Function).
 
     * Every route except `/healthz` and `/v1/time` requires `Authorization: Bearer <Firebase ID token>`.
     * Every JSON object response includes `serverTime` (ISO-8601 UTC); every response carries `X-Server-Time`.
@@ -14,8 +14,8 @@ info:
       derived server-side from session membership — never accepted from the client.
     * Live game state is NOT served by a polling endpoint: clients subscribe to their own Firestore document
       `sessions/{sessionId}/views/{uid}` (schema `SessionView`), which `GET /v1/sessions/{id}` also returns.
-    * Private worker routes (`/internal/*`) live on a separate, IAM-only Cloud Run service and are not part of
-      this API.
+    * Deadline processing runs in the private `tick` task-queue function and scheduled functions; it is not part
+      of this API, and `/internal/*` paths return 404 here.
 
     Source of truth for request validation: `backend/src/schemas/api.ts`. Contract test:
     `backend/tests/unit/openapi.contract.test.ts` asserts every registered route is documented here.

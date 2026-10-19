@@ -1,0 +1,16 @@
+{
+  "displayName": "Manhunt overdue ping/deadline processing",
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "watchdog found overdue deadlines",
+      "conditionThreshold": {
+        "filter": "metric.type=\"logging.googleapis.com/user/manhunt_watchdog_overdue\" AND resource.type=\"cloud_run_revision\"",
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "aggregations": [{ "alignmentPeriod": "300s", "perSeriesAligner": "ALIGN_SUM" }]
+      }
+    }
+  ]
+}

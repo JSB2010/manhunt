@@ -3,9 +3,9 @@
 // MH_BUNDLE_ID = com.yourname.manhuntcrews
 // Physical iPhone against the local stack on your Mac:
 // MH_DEV_HOST = 192.168.1.20
-// Deployed dev API (Cloud Run):
+// Deployed dev API (the `api` Cloud Function; URL printed by scripts/deploy-backend.sh):
 // MH_USE_EMULATORS = NO
-// MH_API_BASE_URL = https:/$()/manhunt-api-xxxxx-uc.a.run.app
+// MH_API_BASE_URL = https:/$()/api-xxxxxxxxxx-uc.a.run.app
 // Paid Apple Developer Program only:
 // MH_ENABLE_PUSH = YES
 // MH_ENABLE_APPLE_SIGN_IN = YES

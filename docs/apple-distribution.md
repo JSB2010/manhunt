@@ -27,7 +27,7 @@ Required from the program account holder (must meet Apple's eligibility, includi
 2. Create an **APNs Auth Key (.p8)**; upload it in Firebase Console → Project settings → Cloud Messaging (never commit it).
 3. Firebase Console → Authentication → enable **Apple** provider (Services ID/team/key as Firebase documents) and keep Email/Password enabled for the account-linking path.
 4. Download `GoogleService-Info.plist` for the iOS app into `ios/ManhuntCrews/` (git-ignored).
-5. In `Local.xcconfig` for release builds: `MH_ENABLE_PUSH = YES`, `MH_ENABLE_APPLE_SIGN_IN = YES`, `MH_ENTITLEMENTS = ManhuntCrews/ManhuntCrews-Distribution.entitlements`, `MH_USE_EMULATORS = NO`, `MH_API_BASE_URL = https:/$()/<your Cloud Run API URL>`.
+5. In `Local.xcconfig` for release builds: `MH_ENABLE_PUSH = YES`, `MH_ENABLE_APPLE_SIGN_IN = YES`, `MH_ENTITLEMENTS = ManhuntCrews/ManhuntCrews-Distribution.entitlements`, `MH_USE_EMULATORS = NO`, `MH_API_BASE_URL = https:/$()/<your api function URL>`.
 6. Product → Archive → Distribute → App Store Connect → upload. In App Store Connect create the app record, fill privacy details (precise location linked to identity, photos, user content; used for app functionality; not tracking), then add **external testers** (only the friends who operate phones). External TestFlight may require Beta App Review; builds expire after **90 days**.
 
 Sign in with Apple links to the same Firebase UID when a signed-in email user adds Apple (`AuthService.completeApple` → `user.link`).

@@ -6,6 +6,8 @@ coverage/
 .env
 .env.*
 !.env.example
+# Emulator-only Functions params (no secrets); real projects' backend/.env.<project> stay local
+!backend/.env.demo-manhunt
 
 # Firebase
 .firebase/
@@ -23,14 +25,6 @@ emulator-data/
 *.mobileprovision
 service-account*.json
 *-sa-key.json
-
-# Terraform
-**/.terraform/
-*.tfstate
-*.tfstate.*
-*.tfvars
-!*.tfvars.example
-.terraform.lock.hcl.bak
 
 # Xcode
 ios/build/

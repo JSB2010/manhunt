@@ -1,6 +1,7 @@
-import { CloudTasksClient } from '@google-cloud/tasks';
 import type { FastifyBaseLogger } from 'fastify';
+import type { TaskOptions } from 'firebase-admin/functions';
 import type { Config } from '../config.js';
+import type { TickPayload } from '../worker/jobs.js';
 
 /**
  * Server-side deadline scheduling (spec §5.4). One wake-up task per
@@ -22,36 +23,35 @@ export interface Scheduler {
 
 export const taskName = (t: WakeTask) => `r-${t.roundId}-g${t.generation}-${t.eventKey}`.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 500);
 
-export class CloudTasksScheduler implements Scheduler {
-  private client = new CloudTasksClient();
+const payload = (t: WakeTask): TickPayload => ({ sessionId: t.sessionId, roundId: t.roundId, generation: t.generation, eventKey: t.eventKey, at: t.at });
+
+/** The part of firebase-admin's `TaskQueue` this scheduler uses. */
+export interface WakeQueue {
+  enqueue(data: TickPayload, opts?: TaskOptions): Promise<void>;
+}
+
+/**
+ * Production: enqueue onto the Cloud Tasks queue that Firebase creates for the
+ * `tick` task-queue function. Cloud Tasks calls the function with an OIDC
+ * token for the backend service account at `at`.
+ */
+export class TaskQueueScheduler implements Scheduler {
   constructor(
-    private cfg: Config,
+    private queue: WakeQueue,
     private log: FastifyBaseLogger,
   ) {}
 
+  static functionPath(cfg: Config) {
+    return `locations/${cfg.tasksLocation}/functions/${cfg.tasksFunction}`;
+  }
+
   async scheduleWake(t: WakeTask): Promise<void> {
-    const parent = this.client.queuePath(this.cfg.projectId, this.cfg.tasksLocation, this.cfg.tasksQueue);
-    const body = Buffer.from(JSON.stringify({ sessionId: t.sessionId, roundId: t.roundId, generation: t.generation, eventKey: t.eventKey, at: t.at })).toString('base64');
     try {
-      await this.client.createTask({
-        parent,
-        task: {
-          // Deterministic name → Cloud Tasks deduplicates retries of the same schedule call.
-          name: `${parent}/tasks/${taskName(t)}`,
-          scheduleTime: { seconds: Math.floor(t.at / 1000), nanos: (t.at % 1000) * 1e6 },
-          httpRequest: {
-            httpMethod: 'POST',
-            url: `${this.cfg.workerUrl}/internal/rounds/tick`,
-            headers: { 'Content-Type': 'application/json' },
-            body,
-            oidcToken: { serviceAccountEmail: this.cfg.tasksInvokerServiceAccount, audience: this.cfg.workerAudience },
-          },
-        },
-      });
+      // Deterministic id → Cloud Tasks deduplicates retries of the same schedule call.
+      await this.queue.enqueue(payload(t), { id: taskName(t), scheduleTime: new Date(t.at) });
     } catch (e: unknown) {
-      const code = (e as { code?: number }).code;
-      if (code === 6 /* ALREADY_EXISTS */) return;
-      this.log.error({ err: e, roundId: t.roundId, eventKey: t.eventKey }, 'cloud task create failed; watchdog will repair');
+      if ((e as { code?: string }).code === 'functions/task-already-exists') return;
+      this.log.error({ err: e, roundId: t.roundId, eventKey: t.eventKey }, 'task enqueue failed; watchdog will repair');
     }
   }
 }
@@ -74,7 +74,7 @@ export class LocalScheduler implements Scheduler {
         const res = await fetch(`${this.cfg.workerUrl}/internal/rounds/tick`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-worker-secret': this.cfg.devWorkerSecret ?? '' },
-          body: JSON.stringify({ sessionId: t.sessionId, roundId: t.roundId, generation: t.generation, eventKey: t.eventKey, at: t.at }),
+          body: JSON.stringify(payload(t)),
         });
         if (!res.ok) this.log.warn({ status: res.status, task: name }, 'local wake failed');
       } catch (err) {

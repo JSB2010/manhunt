@@ -30,7 +30,7 @@ export interface ApiOptions {
 }
 
 /**
- * Public API (Cloud Run, public ingress). Every route except /healthz and
+ * Public API (the `api` Cloud Function, public invoker). Every route except /healthz and
  * /v1/time requires a Firebase ID token. Never exposes /internal routes.
  */
 export async function buildApiApp(deps: Deps, opts: ApiOptions): Promise<FastifyInstance> {
