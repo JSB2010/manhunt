@@ -12,10 +12,12 @@ Configuration lives in `ios/Config/*.xcconfig`; put personal values in `ios/Conf
 
 ## Phase A — free Personal Team, your own iPhones (works today)
 1. Xcode → Settings → Accounts → add your Apple ID (Personal Team).
-2. `cp ios/Config/Local.xcconfig.example ios/Config/Local.xcconfig`; set `MH_DEVELOPMENT_TEAM`, a unique `MH_BUNDLE_ID`, and `MH_DEV_HOST` = your Mac's LAN IP.
-3. Run the local stack reachable from the LAN: `API_HOST=0.0.0.0 scripts/dev.sh` (the Firebase emulators already bind 0.0.0.0). Seed demo accounts: `cd backend && npm run seed:emulator`.
-4. Open `ios/ManhuntCrews.xcodeproj`, choose your iPhone, Run. On the phone: Settings → General → VPN & Device Management → trust your developer certificate. Allow Local Network access when prompted.
-5. Repeat on the second iPhone (each operator needs one).
+2. `cp ios/Config/Local.xcconfig.example ios/Config/Local.xcconfig`, then set `MH_DEVELOPMENT_TEAM`, `MH_BUNDLE_ID` if you need a unique one, and `MH_DEV_HOST` = your Mac's LAN IP (`ipconfig getifaddr en0`). Keep the team ID here: if Xcode's Signing pane writes `DEVELOPMENT_TEAM` into `project.pbxproj`, revert that edit.
+3. Run the local stack: `scripts/dev.sh`. The API and the Firebase emulators already listen on all interfaces. Seed demo accounts with `cd backend && npm run seed:emulator`. With the macOS firewall on, click **Allow** when macOS asks whether `java` (the Firestore emulator on JDK 21) and `node` may accept incoming connections. From another device on the Wi-Fi, `http://<Mac IP>:8787/healthz` should return `{"ok":true,…}`.
+4. Choose your iPhone in Xcode and Run, or from the command line: `xcodebuild build -project ios/ManhuntCrews.xcodeproj -scheme ManhuntCrews -destination "id=<device UDID>" -allowProvisioningUpdates`, then `xcrun devicectl device install app --device <UDID> <path to ManhuntCrews.app>` (`xcrun devicectl list devices` shows the UDID). On the phone, trust the developer certificate the first time (Settings → General → VPN & Device Management) and **allow Local Network access** when prompted.
+5. Repeat on the second iPhone (each operator needs one). Rebuild after changing `MH_DEV_HOST`, because the address is compiled into Debug builds.
+
+**Same Wi-Fi only.** A phone on cellular can't reach your Mac's LAN address, so this setup is for indoor and nearby testing. For the outdoor two-phone protocol, use a deployed dev backend (`docs/deployment.md`, which needs your approval and a billing account), or put the Mac and both phones on a private mesh VPN and set `MH_DEV_HOST` to the Mac's VPN address. The VPN option is unverified here: check ATS and Local Network behavior with that address first.
 
 Limits (Apple): Personal Team profiles expire after **7 days** (rebuild/reinstall), a small device limit, and **no Push Notifications or Sign in with Apple entitlements**. The app gates both behind flags: auth uses Firebase email/password (`DEV_AUTH_PROVIDER`), and notifications fall back to local deadline nudges. Background location works (Background Modes → Location updates is in `Info.plist`; no paid entitlement needed).
 

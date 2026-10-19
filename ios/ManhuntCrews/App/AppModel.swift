@@ -42,6 +42,8 @@ final class AppModel {
     private(set) var viewError: String?
     private let listener = SessionViewListener()
     private var lastStateVersion: Double = 0
+    /// The open night was reopened automatically at launch (not by the user).
+    private var autoResumed = false
     private var lastSnapshotAt = Date.distantPast
     private var reconcileTask: Task<Void, Never>?
 
@@ -69,9 +71,9 @@ final class AppModel {
         await refreshMe()
         await notifications.refreshStatus()
         if let resumed = await location.resumeIfNeeded() {
-            openSession(resumed.sessionId)
+            openSession(resumed.sessionId, automatically: true)
         } else if activeSessionId == nil, let active = me?.activeSessions.first(where: { $0.status == "IN_ROUND" }) {
-            openSession(active.id)
+            openSession(active.id, automatically: true)
         }
     }
 
@@ -89,8 +91,9 @@ final class AppModel {
         }
     }
 
-    func openSession(_ id: String) {
+    func openSession(_ id: String, automatically: Bool = false) {
         guard let uid = auth.uid else { return }
+        autoResumed = automatically
         if activeSessionId != id {
             sessionView = nil
             lastStateVersion = 0
@@ -142,8 +145,15 @@ final class AppModel {
             let v = try await api.session(id)
             apply(v, fromCache: false)
         } catch let e as APIError where e.code == "NOT_FOUND" {
-            viewError = "This night is no longer available."
             await location.stop()
+            if autoResumed {
+                // Leftover state from another account or an ended night: nothing the user
+                // asked for, so close it quietly and stay on Play.
+                location.dismissResumeNotice()
+                closeSession()
+            } else {
+                viewError = "This night is no longer available."
+            }
         } catch {
             viewError = error.localizedDescription
         }
@@ -179,6 +189,7 @@ final class AppModel {
         realtimeLog.info("view applied v=\(v.stateVersion, privacy: .public) state=\(v.round?.state.rawValue ?? "-", privacy: .public) cache=\(fromCache)")
         lastStateVersion = v.stateVersion
         sessionView = v
+        autoResumed = false
         viewError = nil
         if !fromCache {
             Task { await reconcileTracking(v) }

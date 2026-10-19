@@ -36,6 +36,13 @@ final class AuthService {
         return nil
     }
 
+    /// The name entered at sign-up. The server can provision the profile before
+    /// this reaches the ID token, so first-run setup prefers it.
+    var displayName: String? {
+        let name = Auth.auth().currentUser?.displayName?.trimmingCharacters(in: .whitespaces)
+        return name?.isEmpty == false ? name : nil
+    }
+
     nonisolated func idToken(forceRefresh: Bool) async throws -> String {
         guard let user = Auth.auth().currentUser else { throw APIError.unauthenticated }
         return try await user.getIDToken(forcingRefresh: forceRefresh)
