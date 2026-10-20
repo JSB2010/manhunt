@@ -33,8 +33,10 @@ const str = (k: string, d?: string): string => {
 };
 
 export function loadConfig(overrides: Partial<Config> = {}): Config {
-  const env = str('APP_ENV', 'local') as Config['env'];
-  const projectId = str('GOOGLE_CLOUD_PROJECT', process.env.GCLOUD_PROJECT ?? 'demo-manhunt');
+  // Explicit overrides win over the environment, including for the safety checks below
+  // (e.g. unit tests run under `firebase deploy`, which sets GCLOUD_PROJECT to the real project).
+  const env = overrides.env ?? (str('APP_ENV', 'local') as Config['env']);
+  const projectId = overrides.projectId ?? str('GOOGLE_CLOUD_PROJECT', process.env.GCLOUD_PROJECT ?? 'demo-manhunt');
   const usingEmulators = !!process.env.FIRESTORE_EMULATOR_HOST;
   if (env === 'prod' && usingEmulators) throw new Error('Refusing to run APP_ENV=prod against emulators');
   if (env !== 'prod' && env !== 'dev' && !projectId.startsWith('demo-') && !usingEmulators) {

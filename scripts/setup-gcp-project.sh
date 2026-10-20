@@ -35,7 +35,9 @@ SA_ID=manhunt-backend
 SA="$SA_ID@$PROJECT_ID.iam.gserviceaccount.com"
 BUCKET="${MEDIA_BUCKET:-$PROJECT_ID-manhunt-media}"
 G=(gcloud --project "$PROJECT_ID" --quiet ${GCLOUD_ACCOUNT:+--account "$GCLOUD_ACCOUNT"})
-B=(gcloud --quiet ${GCLOUD_ACCOUNT:+--account "$GCLOUD_ACCOUNT"})
+B=(gcloud --project "$PROJECT_ID" --quiet ${GCLOUD_ACCOUNT:+--account "$GCLOUD_ACCOUNT"})
+# IAM is eventually consistent: a just-created service account can be "not found" for a minute.
+retry() { for i in 1 2 3 4 5 6 7 8; do "$@" && return 0; echo "  (retrying in 10 s)"; sleep 10; done; return 1; }
 
 echo "gcloud account: ${GCLOUD_ACCOUNT:-$(gcloud config get-value account 2>/dev/null)}"
 echo "About to set up $PROJECT_ID ($REGION): APIs, service account $SA, bucket gs://$BUCKET, log metric${ALERT_EMAIL:+, alerts to $ALERT_EMAIL}${BILLING_ACCOUNT:+, budget \$${BUDGET_USD:-25}/month}."
@@ -53,11 +55,11 @@ echo "→ Service account $SA"
 "${G[@]}" iam service-accounts describe "$SA" >/dev/null 2>&1 ||
   "${G[@]}" iam service-accounts create "$SA_ID" --display-name "Manhunt backend (Cloud Functions runtime)"
 for role in roles/datastore.user roles/firebaseauth.admin roles/firebasecloudmessaging.admin roles/logging.logWriter roles/monitoring.metricWriter; do
-  "${G[@]}" projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:$SA" --role "$role" --condition None >/dev/null
+  retry "${G[@]}" projects add-iam-policy-binding "$PROJECT_ID" --member "serviceAccount:$SA" --role "$role" --condition None >/dev/null
 done
 # The Admin SDK enqueues deadline tasks with an OIDC token for this account.
 # `firebase deploy` grants it enqueuer on the tick queue and invoker on tick.
-"${G[@]}" iam service-accounts add-iam-policy-binding "$SA" --member "serviceAccount:$SA" --role roles/iam.serviceAccountUser >/dev/null
+retry "${G[@]}" iam service-accounts add-iam-policy-binding "$SA" --member "serviceAccount:$SA" --role roles/iam.serviceAccountUser >/dev/null
 
 echo "→ Media bucket gs://$BUCKET"
 "${G[@]}" storage buckets describe "gs://$BUCKET" >/dev/null 2>&1 ||
@@ -68,7 +70,7 @@ LIFECYCLE=$(mktemp)
 trap 'rm -f "$LIFECYCLE"' EXIT
 echo '{"rule":[{"action":{"type":"Delete"},"condition":{"age":400}}]}' >"$LIFECYCLE"
 "${G[@]}" storage buckets update "gs://$BUCKET" --lifecycle-file "$LIFECYCLE" --public-access-prevention >/dev/null
-"${G[@]}" storage buckets add-iam-policy-binding "gs://$BUCKET" --member "serviceAccount:$SA" --role roles/storage.objectAdmin >/dev/null
+retry "${G[@]}" storage buckets add-iam-policy-binding "gs://$BUCKET" --member "serviceAccount:$SA" --role roles/storage.objectAdmin >/dev/null
 
 echo "→ Log metric manhunt_watchdog_overdue"
 FILTER='resource.type="cloud_run_revision" AND jsonPayload.message="watchdog pass" AND jsonPayload.watchdog.overdue>0'

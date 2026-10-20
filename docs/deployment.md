@@ -42,6 +42,13 @@ Never write test GPS or seed accounts into dev/prod — the seed script refuses 
 
 Later deploys are step 3 only. `firebase deploy --only functions:api` (or `:tick`, …) ships one function.
 
+## First-deploy issues seen with firebase-tools 15.28 (2026-10-20)
+- **409 "Could not create bucket gcf-v2-sources-…"** on a project's first functions deploy: a race between functions created in parallel. Rerun the deploy.
+- **"Unable to set the invoker … tick" / "Cannot read properties of undefined (reading 'filter')":** the CLI crashes granting enqueuer on a new task queue whose IAM policy is empty. Grant it once by hand, then redeploy:
+  `gcloud tasks queues add-iam-policy-binding tick --location us-central1 --project <id> --member serviceAccount:manhunt-backend@<id>.iam.gserviceaccount.com --role roles/cloudtasks.enqueuer`
+- **Scheduler jobs fail with 400 INVALID_ARGUMENT:** the CLI passes a `name@` service-account shorthand to Cloud Scheduler unexpanded. `functions/index.ts` now spells out the full email whenever `GCLOUD_PROJECT` is set, which the CLI does during deploy.
+- **"could not set up cleanup policy":** run `firebase functions:artifacts:setpolicy --project <id> --location us-central1 --days 1 --force` once.
+
 ## Runtime configuration (no secrets required)
 | Var | Source | Notes |
 |---|---|---|

@@ -1,5 +1,5 @@
 import { getApps } from 'firebase-admin/app';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 /**
  * Deployed surface (`firebase deploy` reads each export's `__endpoint`): only
@@ -7,11 +7,20 @@ import { describe, expect, it } from 'vitest';
  * run as the least-privilege backend account. Loading the module must not
  * initialize Firebase or need runtime config (deploy-time discovery).
  */
+/** Imports the entry point fresh with the given environment, as `firebase deploy` discovery would. */
+async function loadFunctions(env: Record<string, string | undefined>) {
+  const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+  for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+  vi.resetModules();
+  try {
+    return (await import('../../src/functions/index.js')) as Record<string, unknown>;
+  } finally {
+    for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+  }
+}
+
 describe('Cloud Functions deployed surface', async () => {
-  const savedEnv = process.env.APP_ENV;
-  delete process.env.APP_ENV;
-  const fns = (await import('../../src/functions/index.js')) as Record<string, unknown>;
-  process.env.APP_ENV = savedEnv;
+  const fns = await loadFunctions({ APP_ENV: undefined, GCLOUD_PROJECT: undefined });
   type Endpoint = Record<string, any>;
   const endpoint = (name: string) => (fns[name] as { __endpoint: Endpoint }).__endpoint;
 
@@ -39,6 +48,15 @@ describe('Cloud Functions deployed surface', async () => {
 
   it('every function runs as the backend service account, never the default compute account', () => {
     for (const name of ['api', 'tick', 'watchdog', 'retention']) expect(endpoint(name).serviceAccountEmail, name).toBe('manhunt-backend@');
+  });
+
+  it('spells the account out in full when the CLI provides the project (Cloud Scheduler rejects the shorthand)', async () => {
+    const deployFns = await loadFunctions({ APP_ENV: undefined, GCLOUD_PROJECT: 'your-prod-project' });
+    const full = 'manhunt-backend@your-prod-project.iam.gserviceaccount.com';
+    for (const name of ['api', 'tick', 'watchdog', 'retention']) {
+      expect((deployFns[name] as { __endpoint: Endpoint }).__endpoint.serviceAccountEmail, name).toBe(full);
+    }
+    expect((deployFns.tick as { __endpoint: Endpoint }).__endpoint.taskQueueTrigger.invoker).toEqual([full]);
   });
 
   it('scheduled jobs keep their cadence', () => {

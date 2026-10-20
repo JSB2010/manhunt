@@ -31,8 +31,15 @@ import { runTickTask } from './tasks.js';
 
 /** Every function, and the task queue, lives here. Keep it near the Firestore location. */
 const REGION = 'us-central1';
-/** Least-privilege runtime identity, created once by scripts/setup-gcp-project.sh. */
-const SERVICE_ACCOUNT = 'manhunt-backend@';
+/**
+ * Least-privilege runtime identity, created once by scripts/setup-gcp-project.sh.
+ * Spelled out in full when the project is known (the CLI sets GCLOUD_PROJECT
+ * for discovery): firebase-tools passes the `name@` shorthand to Cloud
+ * Scheduler unexpanded, which rejects it with 400 INVALID_ARGUMENT.
+ */
+const SERVICE_ACCOUNT_NAME = 'manhunt-backend';
+const PROJECT_ID = process.env.GCLOUD_PROJECT;
+const SERVICE_ACCOUNT = PROJECT_ID ? `${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com` : `${SERVICE_ACCOUNT_NAME}@`;
 const TICK = 'tick';
 
 // Asked on the first `firebase deploy` to a project, then saved in backend/.env.<project>.
@@ -92,7 +99,7 @@ export const tick = onTaskDispatched(
   async (req) => {
     const { cfg, deps, game } = runtime(TICK);
     // The emulator delivers tasks without an OIDC token.
-    const allowedCallers = process.env.FUNCTIONS_EMULATOR === 'true' ? null : [`${SERVICE_ACCOUNT}${cfg.projectId}.iam.gserviceaccount.com`];
+    const allowedCallers = process.env.FUNCTIONS_EMULATOR === 'true' ? null : [`${SERVICE_ACCOUNT_NAME}@${cfg.projectId}.iam.gserviceaccount.com`];
     await runTickTask(req, { game, allowedCallers, log: deps.log, now: () => deps.clock.now() });
   },
 );
