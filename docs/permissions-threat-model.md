@@ -10,7 +10,7 @@
 * **Clients** (two iPhones) are untrusted. They hold a Firebase ID token and can read exactly one Firestore document: their own `sessions/{sid}/views/{uid}` while `members/{uid}.active == true`.
 * **Public API** (`api` Cloud Function, `allUsers` invoker, Firebase-token auth in-app) can read/write everything; enforces per-action authorization derived from session membership.
 * **Private worker** (`tick` task-queue function plus the scheduled `watchdog` and `retention` functions). There's no public invoker: `run.invoker`, and enqueuer on the `tick` queue, belong only to the `manhunt-backend@` service account, which every function runs as. `tick` also checks that the Cloud Tasks OIDC token's email is that account. Firebase client tokens never reach these functions. The local dev worker (`scripts/dev.sh`, tests) is a secret-gated twin that is never deployed.
-* **Storage**: private bucket, uniform bucket-level access, public-access prevention enforced; Storage rules deny all client access. Photos are uploaded and downloaded only through the authorized API.
+* **Storage**: private non-Firebase bucket (`<project>-manhunt-media`), uniform bucket-level access, public-access prevention enforced, no client IAM; Storage rules deny all client access to any Firebase-linked bucket. Photos are uploaded and downloaded only through the authorized API.
 
 ## Enforcement (not UI hiding)
 

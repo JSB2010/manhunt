@@ -45,7 +45,7 @@
 8. **Local development is unchanged.** `scripts/dev.sh` still runs the Fastify API and worker with an in-process scheduler. The worker app is now local-only: it has a shared secret, no OIDC, and is never deployed. `npm run serve:functions` runs the deployable entry points in the Functions and Cloud Tasks emulators.
 
 **Consequences.**
-- One command ships everything: `firebase deploy --only functions,firestore,storage`, wrapped with guardrails in `scripts/deploy-backend.sh`. There's no container image, Artifact Registry repo of our own, or Terraform state. `infra/terraform`, its CI workflow, the Dockerfile and the Cloud Run entry points were removed; they remain in git history.
+- One command ships everything: `firebase deploy --only functions,firestore,auth,hosting`, wrapped with guardrails in `scripts/deploy-backend.sh`. There's no container image, Artifact Registry repo of our own, or Terraform state. `infra/terraform`, its CI workflow, the Dockerfile and the Cloud Run entry points were removed; they remain in git history.
 - 2nd-gen functions are Cloud Run services, so runtime behavior, logs (`resource.type="cloud_run_revision"`) and limits (32 MB requests) are as before. The Cloud Run service names are now `api` and `tick`, and the alert filters were updated.
 - The Blaze plan is still required. Firebase requires it for any server code.
 - `@google-cloud/tasks` and `google-auth-library` were dropped; `firebase-functions` was added.

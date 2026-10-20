@@ -84,6 +84,12 @@ struct SettingsView: View {
             Section {
                 LabeledContent("Version", value: model.env.appVersion)
                 LabeledContent("Server", value: model.env.apiBaseURL.host ?? "")
+                if let url = model.env.privacyPolicyURL {
+                    Link(destination: url) { Label("Privacy Policy", systemImage: "hand.raised") }
+                }
+                if let url = model.env.supportURL {
+                    Link(destination: url) { Label("Support", systemImage: "questionmark.circle") }
+                }
                 if model.env.useEmulators {
                     Label("Development build using local emulators.", systemImage: "hammer.fill")
                         .font(.footnote)

@@ -1,6 +1,6 @@
 # Deployment & operations
 
-Nothing has been deployed. Every step below needs a **dedicated** Firebase project and your explicit approval for billing (Blaze plan). The backend runs on Cloud Functions for Firebase and ships with one `firebase deploy` ([ADR 0012](adr/0012-cloud-functions-for-firebase.md)).
+The production project `your-prod-project` exists with Firestore, Email/Password sign-in and security rules; nothing that needs billing is deployed. The step-by-step prod/TestFlight runbook is [`docs/release-prod.md`](release-prod.md). Every step below needs a **dedicated** Firebase project and your explicit approval for billing (Blaze plan). The backend runs on Cloud Functions for Firebase and ships with one `firebase deploy` ([ADR 0012](adr/0012-cloud-functions-for-firebase.md)).
 
 ## What runs where
 
@@ -32,12 +32,12 @@ Never write test GPS or seed accounts into dev/prod — the seed script refuses 
    gcloud auth login
    PROJECT_ID=manhunt-dev-<suffix> ALERT_EMAIL=you@example.com scripts/setup-gcp-project.sh
    ```
-3. **Deploy** (functions, task queue, scheduler jobs, Firestore rules + indexes + TTL, Storage rules). The first run asks for `APP_ENV`; choose `dev`.
+3. **Deploy** (functions, task queue, scheduler jobs, Firestore rules + indexes + TTL, the Email/Password provider, and the privacy/support site on Hosting). The first run asks for `APP_ENV`; choose `dev`.
    ```bash
    firebase login
    PROJECT_ID=manhunt-dev-<suffix> scripts/deploy-backend.sh
    ```
-   The script asks you to type the project id, then runs `firebase deploy --project <id> --only functions,firestore,storage`. `firebase.json`'s predeploy runs typecheck, unit tests and the build first.
+   The script asks you to type the project id, then runs `firebase deploy --project <id> --only functions,firestore,auth,hosting`. Photos live in the private non-Firebase bucket, so there are no Storage rules to deploy; `storage.rules` (deny-all) is for the emulator and applies only if you ever enable the default Firebase Storage bucket. `firebase.json`'s predeploy runs typecheck, unit tests and the build first.
 4. **iOS** `Local.xcconfig`: `MH_USE_EMULATORS = NO`, `MH_API_BASE_URL = https:/$()/<api function URL>` (printed by the deploy, `https://api-…-uc.a.run.app`), plus the project's `GoogleService-Info.plist`.
 
 Later deploys are step 3 only. `firebase deploy --only functions:api` (or `:tick`, …) ships one function.

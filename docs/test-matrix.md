@@ -6,11 +6,14 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas, Cloud Functions adapter + tick handler + task-queue scheduler) | `cd backend && npm run test:unit` | ✅ 69 / 69 (2026-10-18, after the Cloud Functions port) |
-| Backend integration + security (Auth/Firestore/Storage emulators, rules, deployed-functions surface) | `npm run test:integration` | ✅ 38 / 38 (2026-10-18, after the Cloud Functions port) |
+| Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas, Cloud Functions adapter + tick handler + task-queue scheduler) | `cd backend && npm run test:unit` | ✅ 71 / 71 (2026-10-20; includes the Firestore production-constraints guard) |
+| Backend integration + security (Auth/Firestore/Storage emulators, rules, deployed-functions surface) | `npm run test:integration` | ✅ 38 / 38 (2026-10-20; gameplay now also checks person visibility through a shared night and for an outsider) |
 | Real-time API E2E (live stack, wall clock, local scheduler → worker) | `npm run e2e:two-operators` | ✅ first ping seen 0.5 s after chase start; ping 1 0.7 s after its deadline; sample age 9 s; 0 unreleased coordinates in seeker view; official time = submission time |
 | Real-time API E2E through the **deployable Cloud Functions** (Functions + Cloud Tasks emulators: `api` → task queue → `tick`) | `npm run serve:functions` (alternate ports), then `API_URL=http://127.0.0.1:<port>/demo-manhunt/us-central1/api npm run e2e:two-operators` | ✅ 2026-10-18: first ping seen 1.3 s after chase start; ping 1 0.2 s after its deadline; sample age 7 s; 0 unreleased coordinates in seeker view; photo upload (JPEG through the adapter, metadata stripped), catch, recap, round 2 role swap. The Cloud Tasks emulator ignores `scheduleTime`, so delivery timing here came from `tick`'s early-arrival wait-and-retry (ADR 0012). The first run, before that handling existed, failed at ping 0. |
 | Backend typecheck | `npm run typecheck` | ✅ |
+| iOS **Prod** configuration (unsigned build) | `xcodebuild build -scheme "ManhuntCrews Prod" -configuration Prod -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ 2026-10-20: bundle `com.example.manhuntcrews`, prod API URL, `GoogleService-Info-Prod.plist` bundled, emulators off, manual signing settings resolved |
+| Manual signing helper | `scripts/ios-signing.sh csr` / `install` in a throwaway HOME + keychain with a self-signed stand-in certificate and CMS-signed fake profile | ✅ key/cert pair into an identity; profile checks (bundle, App Store type, push, certificate membership) and `Prod.local.xcconfig` output work. A real Apple certificate and upload are not yet exercised |
+| Prod Firebase project | `firebase deploy --only auth,firestore:rules --project your-prod-project` | ✅ 2026-10-20: Email/Password enabled, rules live. Indexes/TTL need Blaze |
 | iOS unit + listener integration (XCTest) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 14 / 14 (re-run 2026-10-18 on iPhone 18 Pro / iOS 27 after the redesign; the listener test runs only when the local stack is up) |
 | iOS app build (Debug, simulator) | `xcodebuild build …` | ✅ no warnings in app sources |
 | iOS Release build for device (unsigned) | `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ |
@@ -41,6 +44,10 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 | Deletions remove documents and objects | security: delete my data, delete night, delete account |
 | Worker not callable with client token | security worker test (local worker); `security/functions-surface.test.ts` (only `api` public, `tick` invokable only by the backend SA); `unit/functions.tasks.test.ts` (caller check) |
 | iOS: server-time clock rendering, cadence filter, encrypted queue + idempotent batch ids, view decoding, deep links | `ManhuntCrewsTests` |
+
+## Found by the first real deploy (2026-10-20)
+
+Production Firestore rejected two composite indexes that the emulator accepts: `sessions(memberUids CONTAINS, participantPersonIds CONTAINS)` and `groups(memberUids CONTAINS, personIds CONTAINS)`. The queries behind them in `SocialService.canSeePerson` used two `array-contains` filters, which production allows only once per query. The groups query would have returned 500 when viewing a person someone else added, and the sessions query's error was swallowed, hiding people from shared nights. Both now use one `array-contains` and filter the other array in memory, the invalid indexes are gone, and `unit/firestore.indexes.test.ts` fails on either pattern.
 
 ## Two-simulator E2E
 

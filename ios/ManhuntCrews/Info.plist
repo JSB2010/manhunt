@@ -16,6 +16,10 @@
 	<string>$(MH_ENABLE_PUSH)</string>
 	<key>MHBuildFlavor</key>
 	<string>$(MH_BUILD_FLAVOR)</string>
+	<key>MHFirebasePlist</key>
+	<string>$(MH_FIREBASE_PLIST)</string>
+	<key>MHSiteURL</key>
+	<string>$(MH_SITE_URL)</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>During a round you start, Manhunt Crews records your crew phone's GPS route — including while the screen is locked — to release scheduled location pings to the other crew and to show both routes and distances after the round. Tracking stops when the round ends.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

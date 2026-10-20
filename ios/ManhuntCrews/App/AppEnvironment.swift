@@ -12,7 +12,14 @@ struct AppEnvironment: Sendable {
     let appleSignInEnabled: Bool
     let pushEnabled: Bool
     let flavor: String
+    /// Name of the bundled Firebase client config (without `.plist`).
+    let firebasePlist: String
+    /// Hosting site with the privacy policy and support pages.
+    let siteURL: URL?
     let configurationError: String?
+
+    var privacyPolicyURL: URL? { siteURL?.appendingPathComponent("privacy") }
+    var supportURL: URL? { siteURL?.appendingPathComponent("support") }
 
     static let current: AppEnvironment = {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -33,6 +40,8 @@ struct AppEnvironment: Sendable {
             appleSignInEnabled: flag("MHEnableAppleSignIn"),
             pushEnabled: flag("MHEnablePush"),
             flavor: str("MHBuildFlavor"),
+            firebasePlist: str("MHFirebasePlist").isEmpty ? "GoogleService-Info" : str("MHFirebasePlist"),
+            siteURL: URL(string: str("MHSiteURL")).flatMap { $0.host == nil ? nil : $0 },
             configurationError: error)
     }()
 
@@ -61,9 +70,9 @@ struct AppEnvironment: Sendable {
             Firestore.firestore().settings = settings
             return nil
         }
-        guard let path = Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist"),
+        guard let path = Bundle.main.path(forResource: firebasePlist, ofType: "plist"),
               let opts = FirebaseOptions(contentsOfFile: path) else {
-            return "GoogleService-Info.plist is missing. Add it for your Firebase project (it is git-ignored)."
+            return "\(firebasePlist).plist is missing. Add it for your Firebase project (it is git-ignored)."
         }
         FirebaseApp.configure(options: opts)
         let settings = Firestore.firestore().settings

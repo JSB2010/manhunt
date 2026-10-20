@@ -5,9 +5,11 @@
 #
 #   PROJECT_ID=manhunt-dev-abc123 scripts/setup-gcp-project.sh
 #
-# Optional: REGION (default us-central1; must match REGION in
-# backend/src/functions/index.ts), ALERT_EMAIL (creates alert policies),
-# BILLING_ACCOUNT + BUDGET_USD (creates a monthly budget with 50/90/100% alerts).
+# Optional: GCLOUD_ACCOUNT (run gcloud as this account instead of the active
+# one; use the Google account that owns the Firebase project), REGION (default
+# us-central1; must match REGION in backend/src/functions/index.ts),
+# ALERT_EMAIL (creates alert policies), BILLING_ACCOUNT + BUDGET_USD (creates a
+# monthly budget with 50/90/100% alerts).
 #
 # Creates:
 #   * service account manhunt-backend (the runtime identity of every function),
@@ -32,8 +34,10 @@ fi
 SA_ID=manhunt-backend
 SA="$SA_ID@$PROJECT_ID.iam.gserviceaccount.com"
 BUCKET="${MEDIA_BUCKET:-$PROJECT_ID-manhunt-media}"
-G=(gcloud --project "$PROJECT_ID" --quiet)
+G=(gcloud --project "$PROJECT_ID" --quiet ${GCLOUD_ACCOUNT:+--account "$GCLOUD_ACCOUNT"})
+B=(gcloud --quiet ${GCLOUD_ACCOUNT:+--account "$GCLOUD_ACCOUNT"})
 
+echo "gcloud account: ${GCLOUD_ACCOUNT:-$(gcloud config get-value account 2>/dev/null)}"
 echo "About to set up $PROJECT_ID ($REGION): APIs, service account $SA, bucket gs://$BUCKET, log metric${ALERT_EMAIL:+, alerts to $ALERT_EMAIL}${BILLING_ACCOUNT:+, budget \$${BUDGET_USD:-25}/month}."
 read -r -p "Type the project id to confirm: " CONFIRM
 [[ "$CONFIRM" == "$PROJECT_ID" ]] || { echo "Aborted."; exit 1; }
@@ -86,8 +90,8 @@ fi
 if [[ -n "${BILLING_ACCOUNT:-}" ]]; then
   echo "→ Monthly budget \$${BUDGET_USD:-25}"
   DISPLAY="Manhunt $ENV_NAME monthly budget"
-  if [[ -z "$(gcloud billing budgets list --billing-account "$BILLING_ACCOUNT" --filter "displayName=\"$DISPLAY\"" --format 'value(name)')" ]]; then
-    gcloud billing budgets create --billing-account "$BILLING_ACCOUNT" --display-name "$DISPLAY" \
+  if [[ -z "$("${B[@]}" billing budgets list --billing-account "$BILLING_ACCOUNT" --filter "displayName=\"$DISPLAY\"" --format 'value(name)')" ]]; then
+    "${B[@]}" billing budgets create --billing-account "$BILLING_ACCOUNT" --display-name "$DISPLAY" \
       --budget-amount "${BUDGET_USD:-25}USD" --filter-projects "projects/$PROJECT_ID" \
       --threshold-rule percent=0.5 --threshold-rule percent=0.9 --threshold-rule percent=1.0 >/dev/null
   fi

@@ -309,6 +309,11 @@ describe('two-operator vertical slice', () => {
     expect(stats.body.analytics.attribution).toBe('CREW_LEVEL');
     expect(stats.body.analytics.roundsCrewHid).toBe(2);
     expect(stats.body.analytics.pairedNights.stronger).toBe(1);
+    // Casey was added by Morgan; Taylor sees her through the shared night (one array-contains per query in production).
+    const viaNight = await h.call(taylor, 'GET', `/v1/analytics/people/${casey.id}`);
+    expect(viaNight.status, JSON.stringify(viaNight.body)).toBe(200);
+    const outsider = await h.createUser('Outsider');
+    expect((await h.call(outsider, 'GET', `/v1/analytics/people/${casey.id}`)).status).toBe(404);
     const list = await h.call(taylor, 'GET', '/v1/sessions?q=casey');
     expect(list.body.items.map((s: any) => s.id)).toContain(sid);
   });

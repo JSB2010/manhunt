@@ -2,7 +2,9 @@
 # Deploy the whole backend to a DEDICATED Manhunt Firebase project with one
 # `firebase deploy`: the four Cloud Functions (api, tick, watchdog, retention),
 # the tick task queue and scheduler jobs, Firestore rules + indexes + TTL
-# policies, and Storage rules.
+# policies, the Email/Password sign-in provider, and the privacy/support site on
+# Firebase Hosting. Photos live in a private non-Firebase bucket, so there are no
+# Storage rules to deploy (storage.rules is for the emulator).
 #
 #   PROJECT_ID=manhunt-dev-abc123 scripts/deploy-backend.sh
 #
@@ -20,10 +22,14 @@ if [[ "$PROJECT_ID" != *manhunt* && "${ALLOW_ANY_PROJECT:-}" != "1" ]]; then
   echo "Refusing: PROJECT_ID '$PROJECT_ID' does not look like a dedicated Manhunt project (set ALLOW_ANY_PROJECT=1 to override)."; exit 1
 fi
 
-echo "About to deploy functions, Firestore rules/indexes and Storage rules to $PROJECT_ID."
+if grep -rq '{{CONTACT_EMAIL}}' hosting/public; then
+  echo "Refusing: set your contact email in hosting/public/*.html (replace {{CONTACT_EMAIL}}) before publishing the privacy policy."; exit 1
+fi
+
+echo "About to deploy functions, Firestore rules/indexes/TTL, auth providers and the Hosting site to $PROJECT_ID."
 read -r -p "Type the project id to confirm: " CONFIRM
 [[ "$CONFIRM" == "$PROJECT_ID" ]] || { echo "Aborted."; exit 1; }
 
 (cd backend && npm ci)
-firebase deploy --project "$PROJECT_ID" --only functions,firestore,storage
+firebase deploy --project "$PROJECT_ID" --only functions,firestore,auth,hosting
 echo "Deployed. Put the api function's URL (printed above, https://api-…run.app) in ios/Config/Local.xcconfig as MH_API_BASE_URL."

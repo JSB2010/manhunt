@@ -1,0 +1,26 @@
+#include "Shared.xcconfig"
+
+// TestFlight / App Store builds against the production Firebase project
+// (your-prod-project). Build with the "ManhuntCrews Prod" scheme or
+// scripts/ios-release.sh. Never uses emulators or Local.xcconfig.
+//
+// Signing is manual: an Apple Distribution certificate plus an App Store
+// provisioning profile for MH_BUNDLE_ID, installed by scripts/ios-signing.sh,
+// which also writes your paid team ID to Prod.local.xcconfig (git-ignored).
+MH_BUILD_FLAVOR = prod
+MH_USE_EMULATORS = NO
+MH_BUNDLE_ID = com.example.manhuntcrews
+MH_FIREBASE_PROJECT_ID = your-prod-project
+// ios/ManhuntCrews/GoogleService-Info-Prod.plist (git-ignored; `firebase apps:sdkconfig`).
+MH_FIREBASE_PLIST = GoogleService-Info-Prod
+// The api function's stable URL; the API strips the leading /api.
+MH_API_BASE_URL = https:/$()/us-central1-your-prod-project.cloudfunctions.net/api
+MH_ENABLE_PUSH = YES
+MH_ENABLE_APPLE_SIGN_IN = NO
+MH_ENTITLEMENTS = ManhuntCrews/ManhuntCrews-Prod.entitlements
+
+MH_CODE_SIGN_IDENTITY = Apple Distribution
+MH_PROVISIONING_PROFILE = Manhunt Crews App Store
+MH_DEVELOPMENT_TEAM =
+
+#include? "Prod.local.xcconfig"

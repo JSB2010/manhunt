@@ -18,14 +18,6 @@
       ]
     },
     {
-      "collectionGroup": "sessions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "memberUids", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "participantPersonIds", "arrayConfig": "CONTAINS" }
-      ]
-    },
-    {
       "collectionGroup": "points",
       "queryScope": "COLLECTION",
       "fields": [
@@ -88,14 +80,6 @@
       "fields": [
         { "fieldPath": "uids", "arrayConfig": "CONTAINS" },
         { "fieldPath": "blocked", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "groups",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "memberUids", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "personIds", "arrayConfig": "CONTAINS" }
       ]
     },
     {

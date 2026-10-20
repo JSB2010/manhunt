@@ -22,6 +22,8 @@ Configuration lives in `ios/Config/*.xcconfig`; put personal values in `ios/Conf
 Limits (Apple): Personal Team profiles expire after **7 days** (rebuild/reinstall), a small device limit, and **no Push Notifications or Sign in with Apple entitlements**. The app gates both behind flags: auth uses Firebase email/password (`DEV_AUTH_PROVIDER`), and notifications fall back to local deadline nudges. Background location works (Background Modes → Location updates is in `Info.plist`; no paid entitlement needed).
 
 ## Phase B — paid Apple Developer Program ($99/yr), private TestFlight
+**Current path:** the **Prod** build configuration with manual signing (no Apple ID in Xcode) and `scripts/ios-signing.sh` + `scripts/ios-release.sh`. Follow [`docs/release-prod.md`](release-prod.md). The steps below are the general reference.
+
 Required from the program account holder (must meet Apple's eligibility, including age of majority):
 1. Enroll; create App ID for `MH_BUNDLE_ID` with **Push Notifications** and **Sign in with Apple** capabilities.
 2. Create an **APNs Auth Key (.p8)**; upload it in Firebase Console → Project settings → Cloud Messaging (never commit it).

@@ -57,7 +57,7 @@ xcodebuild test -project ios/ManhuntCrews.xcodeproj -scheme ManhuntCrews -destin
 Results and the physical-device acceptance checklist: `docs/test-matrix.md`.
 
 ## Deploying (requires your approval and a dedicated Firebase project on Blaze)
-Nothing in this repo deploys automatically. `docs/deployment.md` walks through the one-time `scripts/setup-gcp-project.sh` (service account, IAM, private bucket, alerts) and `scripts/deploy-backend.sh`, which runs a single `firebase deploy --only functions,firestore,storage`. Both scripts refuse non-Manhunt project ids and ask you to type the id. To try the deployable functions locally: `cd backend && npm run serve:functions` (Functions + Cloud Tasks emulators; stop `dev.sh` first).
+Nothing in this repo deploys automatically. `docs/deployment.md` walks through the one-time `scripts/setup-gcp-project.sh` (service account, IAM, private bucket, alerts) and `scripts/deploy-backend.sh`, which runs a single `firebase deploy --only functions,firestore,auth,hosting`. The production project and TestFlight steps: `docs/release-prod.md`. Both scripts refuse non-Manhunt project ids and ask you to type the id. To try the deployable functions locally: `cd backend && npm run serve:functions` (Functions + Cloud Tasks emulators; stop `dev.sh` first).
 
 ## Repository map
 ```

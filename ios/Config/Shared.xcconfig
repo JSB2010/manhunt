@@ -10,3 +10,7 @@ MH_FIREBASE_PROJECT_ID = demo-manhunt
 MH_ENABLE_APPLE_SIGN_IN = NO
 MH_ENABLE_PUSH = NO
 MH_DEV_HOST = 127.0.0.1
+// Firebase client config for non-emulator builds: ManhuntCrews/<name>.plist (git-ignored).
+MH_FIREBASE_PLIST = GoogleService-Info
+// Privacy policy and support pages (Firebase Hosting, hosting/public), linked from Settings.
+MH_SITE_URL = https:/$()/your-prod-project.web.app

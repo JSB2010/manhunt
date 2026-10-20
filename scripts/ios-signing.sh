@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Manual iOS distribution signing for the Prod configuration, without signing
+# Xcode into the paid Apple Developer account. You do the portal steps in a
+# browser (docs/release-prod.md); this script does the local parts.
+#
+#   scripts/ios-signing.sh csr
+#       Creates a private key + certificate signing request in ~/.manhunt-signing
+#       (0700). Upload the .csr at developer.apple.com → Certificates → + →
+#       "Apple Distribution", then download the .cer.
+#
+#   scripts/ios-signing.sh install <distribution.cer> <profile.mobileprovision>
+#       Imports the certificate and its private key into your login keychain,
+#       installs the App Store provisioning profile, checks that they match each
+#       other and MH_BUNDLE_ID, and writes ios/Config/Prod.local.xcconfig
+#       (git-ignored) with your team ID and the profile name.
+#
+#   scripts/ios-signing.sh status
+#       Shows the installed distribution identities and the Prod signing config.
+#
+# The private key never leaves this Mac and is never written into the repo.
+# Back up ~/.manhunt-signing (e.g. in your password manager) — without the key
+# the certificate is useless and you'd have to issue a new one.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+DIR="${MANHUNT_SIGNING_DIR:-$HOME/.manhunt-signing}"
+KEY="$DIR/distribution.key"
+CSR="$DIR/distribution.csr"
+KEYCHAIN="${KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
+LOCAL_CFG=ios/Config/Prod.local.xcconfig
+BUNDLE_ID=$(sed -n 's/^MH_BUNDLE_ID = //p' ios/Config/Prod.xcconfig)
+
+die() { echo "✗ $*" >&2; exit 1; }
+
+case "${1:-}" in
+  csr)
+    mkdir -p "$DIR" && chmod 700 "$DIR"
+    [[ -f "$KEY" ]] && die "$KEY already exists. Reuse $CSR, or move the old key away first."
+    openssl req -new -newkey rsa:2048 -nodes -keyout "$KEY" -out "$CSR" -subj "/CN=Manhunt Crews Apple Distribution" 2>/dev/null
+    chmod 600 "$KEY" "$CSR"
+    echo "✓ Certificate signing request: $CSR"
+    echo "  Upload it at https://developer.apple.com/account/resources/certificates/add (Apple Distribution),"
+    echo "  download the .cer, then run: scripts/ios-signing.sh install <file.cer> <profile.mobileprovision>"
+    ;;
+
+  install)
+    CER="${2:?usage: install <distribution.cer> <profile.mobileprovision>}"
+    PROFILE="${3:?usage: install <distribution.cer> <profile.mobileprovision>}"
+    [[ -f "$KEY" ]] || die "No private key at $KEY. Run 'scripts/ios-signing.sh csr' first (the .cer must come from that CSR)."
+    TMP=$(mktemp -d)
+    trap 'rm -rf "$TMP"' EXIT
+
+    # The certificate must belong to our private key.
+    openssl x509 -inform DER -in "$CER" -out "$TMP/cert.pem" 2>/dev/null || openssl x509 -in "$CER" -out "$TMP/cert.pem" || die "$CER is not a certificate"
+    [[ "$(openssl x509 -in "$TMP/cert.pem" -noout -pubkey | openssl sha256)" == "$(openssl pkey -in "$KEY" -pubout | openssl sha256)" ]] ||
+      die "$CER was not issued for the key in $KEY (upload $CSR, not another CSR)"
+    SUBJECT=$(openssl x509 -in "$TMP/cert.pem" -noout -subject)
+    [[ "$SUBJECT" == *"Apple Distribution"* || "$SUBJECT" == *"iPhone Distribution"* ]] || die "Not a distribution certificate: $SUBJECT"
+    openssl x509 -in "$TMP/cert.pem" -outform DER -out "$TMP/cert.der"
+
+    # The profile must be an App Store profile for MH_BUNDLE_ID that includes this certificate.
+    security cms -D -i "$PROFILE" > "$TMP/profile.plist" 2>/dev/null ||
+      openssl smime -verify -noverify -inform DER -in "$PROFILE" -out "$TMP/profile.plist" 2>/dev/null ||
+      die "$PROFILE is not a provisioning profile"
+    pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$TMP/profile.plist" 2>/dev/null; }
+    NAME=$(pb Name); UUID=$(pb UUID); TEAM=$(pb TeamIdentifier:0); APP_ID=$(pb Entitlements:application-identifier)
+    [[ "$APP_ID" == "$TEAM.$BUNDLE_ID" ]] || die "Profile is for $APP_ID, expected $TEAM.$BUNDLE_ID"
+    [[ -z "$(pb ProvisionedDevices 2>/dev/null)" ]] || die "Profile '$NAME' lists devices: create an App Store (not Ad Hoc/Development) profile"
+    [[ "$(pb Entitlements:aps-environment)" == "production" ]] || die "Profile '$NAME' lacks Push Notifications: enable it on the App ID and regenerate the profile"
+    FOUND=0
+    for i in $(seq 0 20); do
+      plutil -extract "DeveloperCertificates.$i" raw -o "$TMP/dev.b64" "$TMP/profile.plist" 2>/dev/null || break
+      [[ "$(base64 -d -i "$TMP/dev.b64" | openssl sha1)" == "$(openssl sha1 < "$TMP/cert.der")" ]] && FOUND=1
+    done
+    [[ $FOUND == 1 ]] || die "Profile '$NAME' doesn't include this certificate: edit the profile, tick the new certificate, download again"
+
+    # Keychain: private key + certificate (pairs automatically); codesign may ask once — choose "Always Allow".
+    security import "$KEY" -k "$KEYCHAIN" -T /usr/bin/codesign -T /usr/bin/security >/dev/null 2>&1 || echo "  (private key already in keychain)"
+    security import "$TMP/cert.der" -k "$KEYCHAIN" >/dev/null 2>&1 || echo "  (certificate already in keychain)"
+
+    for d in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"; do
+      mkdir -p "$d" && cp "$PROFILE" "$d/$UUID.mobileprovision"
+    done
+
+    printf '// Written by scripts/ios-signing.sh — your paid team and App Store profile (git-ignored).\nMH_DEVELOPMENT_TEAM = %s\nMH_PROVISIONING_PROFILE = %s\n' "$TEAM" "$NAME" > "$LOCAL_CFG"
+    IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -E "(Apple|iPhone) Distribution.*\($TEAM\)" | head -1 | sed 's/^ *[0-9]*) [0-9A-F]* //' || true)
+    if [[ -n "$IDENTITY" ]]; then
+      echo "✓ Signing identity: $IDENTITY"
+    else
+      echo "! The certificate is installed but macOS doesn't trust it for code signing yet. Install Apple's"
+      echo "  intermediate certificate, then run 'scripts/ios-signing.sh status':"
+      echo "  curl -fsSLO https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer && security import AppleWWDRCAG3.cer -k \"$KEYCHAIN\""
+    fi
+    echo "✓ Profile '$NAME' ($UUID), expires $(pb ExpirationDate)"
+    echo "✓ Wrote $LOCAL_CFG (team $TEAM). Next: scripts/ios-release.sh"
+    ;;
+
+  status)
+    security find-identity -v -p codesigning "$KEYCHAIN" | grep -E "Distribution" || echo "No distribution identity in $KEYCHAIN"
+    [[ -f "$LOCAL_CFG" ]] && cat "$LOCAL_CFG" || echo "$LOCAL_CFG not written yet"
+    ;;
+
+  *)
+    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+    exit 1
+    ;;
+esac

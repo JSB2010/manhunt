@@ -19,7 +19,7 @@ pubsub-debug.log
 emulator-data/
 
 # Credentials — never commit
-**/GoogleService-Info.plist
+**/GoogleService-Info*.plist
 *.p8
 *.p12
 *.mobileprovision
@@ -33,6 +33,7 @@ ios/DerivedData/
 xcuserdata/
 *.xcuserstate
 ios/Config/Local.xcconfig
+ios/Config/*.local.xcconfig
 
 # macOS
 .DS_Store

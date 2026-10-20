@@ -313,11 +313,12 @@ export class SocialService {
     if (!snap.exists) return null;
     const p = snap.data() as PersonDoc;
     if (p.createdByUid === uid || p.linkedUid === uid) return p;
-    const g = await this.p.groups().where('memberUids', 'array-contains', uid).where('personIds', 'array-contains', personId).limit(1).get();
-    if (!g.empty) return p;
+    // Firestore allows one array-contains per query (the emulator doesn't enforce it), so filter the second array in memory.
+    const groups = await this.p.groups().where('memberUids', 'array-contains', uid).select('personIds').get();
+    if (groups.docs.some((d) => ((d.get('personIds') as string[] | undefined) ?? []).includes(personId))) return p;
     // People who appeared in a session the user played in are visible (names are already in that session's snapshot).
-    const s = await this.p.sessions().where('memberUids', 'array-contains', uid).where('participantPersonIds', 'array-contains', personId).limit(1).get().catch(() => null);
-    return s && !s.empty ? p : null;
+    const sessions = await this.p.sessions().where('participantPersonIds', 'array-contains', personId).select('memberUids').get();
+    return sessions.docs.some((d) => ((d.get('memberUids') as string[] | undefined) ?? []).includes(uid)) ? p : null;
   }
 
   async listPeople(uid: string, query?: string) {

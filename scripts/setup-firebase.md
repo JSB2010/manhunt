@@ -9,7 +9,7 @@ All local development uses the Firebase Emulator Suite with project id `demo-man
 5. **Register the iOS app** with your `MH_BUNDLE_ID`; download `GoogleService-Info.plist` to `ios/ManhuntCrews/` (git-ignored).
 6. **Cloud Messaging** (paid Apple program): upload your APNs Auth Key (.p8).
 7. **One-time setup**: `PROJECT_ID=<id> scripts/setup-gcp-project.sh`. It creates the backend service account and IAM, the private media bucket and the log metric. Add `ALERT_EMAIL=…` for alerts, and `BILLING_ACCOUNT=… BUDGET_USD=25` for a budget.
-8. **Deploy**: `PROJECT_ID=<id> scripts/deploy-backend.sh`. One `firebase deploy` ships the functions (`api`, `tick`, `watchdog`, `retention`), the task queue, the scheduler jobs, Firestore rules, indexes and TTL, and Storage rules. Choose `dev` when it asks for `APP_ENV`.
+8. **Deploy**: `PROJECT_ID=<id> scripts/deploy-backend.sh`. One `firebase deploy` ships the functions (`api`, `tick`, `watchdog`, `retention`), the task queue, the scheduler jobs, Firestore rules, indexes and TTL, the Email/Password provider and the privacy/support site. Choose `dev` (or `prod`) when it asks for `APP_ENV`.
 9. **iOS**: in `ios/Config/Local.xcconfig` set `MH_USE_EMULATORS = NO`, `MH_FIREBASE_PROJECT_ID = <id>`, `MH_API_BASE_URL = https:/$()/<api function URL>`.
 
 Never download service-account JSON keys; the functions run as the attached `manhunt-backend@` service account.
