@@ -82,7 +82,12 @@ struct PeopleView: View {
         }
         .searchable(text: $query, prompt: "Search saved people")
         .navigationTitle("People")
-        .task(id: query) { await load() }
+        .task(id: query) {
+            // Debounce typing: a newer query cancels this task before it hits the network.
+            if !query.isEmpty { try? await Task.sleep(nanoseconds: 300_000_000) }
+            guard !Task.isCancelled else { return }
+            await load()
+        }
         .refreshable { await load() }
         .confirmationDialog("Already saved?", isPresented: Binding(get: { !duplicates.isEmpty }, set: { if !$0 { duplicates = [] } }), titleVisibility: .visible) {
             Button("Create a new \(newName) anyway") { create(confirm: true) }

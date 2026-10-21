@@ -207,7 +207,7 @@ final class APIClient: @unchecked Sendable {
     /// One request. A 401 gets one retry with a coalesced token refresh; a 429
     /// becomes `.rateLimited` and starts a cool-down that later calls respect.
     @discardableResult
-    func raw(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil, contentType: String? = nil, idempotencyKey: String? = nil, authenticated: Bool = true) async throws -> (Data, HTTPURLResponse) {
+    func raw(_ method: String, _ path: String, query: [URLQueryItem] = [], body: Data? = nil, contentType: String? = nil, idempotencyKey: String? = nil, headers: [String: String] = [:], authenticated: Bool = true) async throws -> (Data, HTTPURLResponse) {
         let throttleKey = "\(method) \(path)"
         let wait = await throttle.remaining(for: throttleKey)
         if wait > RetryPolicy.maxWait { throw APIError.rateLimited(retryAfter: wait) }
@@ -221,6 +221,7 @@ final class APIClient: @unchecked Sendable {
         if let contentType { req.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         if let idempotencyKey { req.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key") }
         req.setValue(UUID().uuidString, forHTTPHeaderField: "X-Request-Id")
+        for (name, value) in headers { req.setValue(value, forHTTPHeaderField: name) }
         let tokens = authenticated ? self.tokens : nil
         var sentToken: String?
         if let tokens {
@@ -234,7 +235,8 @@ final class APIClient: @unchecked Sendable {
             req.setValue("Bearer \(fresh)", forHTTPHeaderField: "Authorization")
             (data, http) = try await perform(req)
         }
-        guard (200..<300).contains(http.statusCode) else {
+        // 304: a conditional GET whose content hasn't changed (no body).
+        guard (200..<300).contains(http.statusCode) || http.statusCode == 304 else {
             let env = try? JSONCoding.decoder.decode(ErrorEnvelope.self, from: data)
             if http.statusCode == 429 {
                 let retryAfter = RetryPolicy.retryAfter(header: http.value(forHTTPHeaderField: "Retry-After"), bodySeconds: env?.error.details?.retryAfterSeconds)

@@ -22,6 +22,8 @@ actor TelemetryQueue {
 
     private var state: Persisted?
     private let maxBatch = 200
+    /// After an outage the newest fixes go first (a waiting ping needs the hiders' current position).
+    private let urgentBatch = 20
     private let maxQueued = 20_000
     private var lastPersist = Date.distantPast
     private var dirty = false
@@ -56,15 +58,16 @@ actor TelemetryQueue {
     }
 
     /// Next batch to send. Reuses the in-flight batch id if a previous attempt's
-    /// outcome is unknown, so the server's idempotency replays it.
-    func nextBatch() -> (Context, String, [SamplePayload])? {
+    /// outcome is unknown, so the server's idempotency replays it. `newestFirst`
+    /// sends the latest fixes ahead of a backlog.
+    func nextBatch(newestFirst: Bool = false) -> (Context, String, [SamplePayload])? {
         guard var s = state else { return nil }
         if let id = s.inFlightBatchId {
             let ids = Set(s.inFlightPointIds)
             let samples = s.samples.filter { ids.contains($0.pointId) }
             if !samples.isEmpty { return (s.context, id, samples) }
         }
-        let samples = Array(s.samples.prefix(maxBatch))
+        let samples = newestFirst && s.samples.count > urgentBatch ? Array(s.samples.suffix(urgentBatch)) : Array(s.samples.prefix(maxBatch))
         let id = UUID().uuidString
         s.inFlightBatchId = id
         s.inFlightPointIds = samples.map(\.pointId)
@@ -75,6 +78,17 @@ actor TelemetryQueue {
 
     func ack(batchId: String) {
         guard var s = state, s.inFlightBatchId == batchId else { return }
+        let ids = Set(s.inFlightPointIds)
+        s.samples.removeAll { ids.contains($0.pointId) }
+        s.inFlightBatchId = nil
+        s.inFlightPointIds = []
+        state = s
+        persist(force: true)
+    }
+
+    /// The server refused this batch outright (malformed or too large): drop it so it can't block the queue.
+    func dropInFlight() {
+        guard var s = state, s.inFlightBatchId != nil else { return }
         let ids = Set(s.inFlightPointIds)
         s.samples.removeAll { ids.contains($0.pointId) }
         s.inFlightBatchId = nil

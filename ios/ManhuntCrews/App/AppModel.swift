@@ -2,7 +2,6 @@ import Foundation
 import Observation
 import SwiftUI
 import UIKit
-import FirebaseFirestore
 
 enum DeepLink: Equatable {
     case join(code: String)
@@ -45,7 +44,10 @@ final class AppModel {
     /// The open night was reopened automatically at launch (not by the user).
     private var autoResumed = false
     private var lastSnapshotAt = Date.distantPast
+    private var lastReconcileAt = Date.distantPast
     private var reconcileTask: Task<Void, Never>?
+    /// View hash of the last applied view: the ETag for conditional reloads.
+    private var lastViewHash: String?
 
     var pendingDeepLink: DeepLink?
     var toast: String?
@@ -75,6 +77,7 @@ final class AppModel {
             }
         }
         location.attach(api: client)
+        location.onReconnect = { [weak self] in Task { await self?.reconcile(force: true) } }
         notifications.attach(api: client)
         if firebaseError == nil { auth.start() }
         // Tokens expire while the app is suspended; refresh once on return, before the screen's requests pile in.
@@ -82,6 +85,7 @@ final class AppModel {
             Task { @MainActor in
                 guard let self, self.auth.uid != nil else { return }
                 await self.api.tokens?.refreshIfNeeded()
+                await self.reconcile(force: true)
             }
         }
     }
@@ -125,6 +129,7 @@ final class AppModel {
         if activeSessionId != id {
             sessionView = nil
             lastStateVersion = 0
+            lastViewHash = nil
         }
         activeSessionId = id
         viewError = nil
@@ -144,26 +149,41 @@ final class AppModel {
 
     /// The Firestore listener is the fast path, but long-lived streams can die
     /// silently (mobile handoffs, proxies, emulator resets) while the SDK still
-    /// believes it is connected. Reconcile over REST on a short cadence and
-    /// restart the listener (with a network reset) when it has gone quiet, so the
-    /// screen never shows a stale phase for long. Ordering by `stateVersion`
-    /// prevents a REST response from overwriting newer listener state.
+    /// believes it is connected. When the listener has been quiet for a while,
+    /// ask over REST whether anything changed: a conditional GET costs a body-less
+    /// 304 when nothing did. Only when REST has something newer than the listener
+    /// is the stream restarted. Ordering by `stateVersion` keeps an older REST
+    /// response from overwriting newer listener state (ADR 0010, 0016).
     private func startReconcileLoop() {
         reconcileTask?.cancel()
         reconcileTask = Task { [weak self] in
             while !Task.isCancelled {
-                let foreground = UIApplication.shared.applicationState == .active
-                try? await Task.sleep(nanoseconds: (foreground ? 10 : 30) * 1_000_000_000)
-                guard let self, !Task.isCancelled, let id = self.activeSessionId, let uid = self.auth.uid else { return }
-                await self.reloadSessionView()
-                if Date().timeIntervalSince(self.lastSnapshotAt) > 60 {
-                    realtimeLog.info("listener quiet for 60s — restarting stream")
-                    let db = Firestore.firestore()
-                    try? await db.disableNetwork()
-                    try? await db.enableNetwork()
-                    self.startListener(id: id, uid: uid)
-                }
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                guard let self, !Task.isCancelled, self.activeSessionId != nil else { return }
+                await self.reconcile(force: false)
             }
+        }
+    }
+
+    /// Quiet threshold: 45 s in the foreground, 2 min in the background.
+    private var quietThreshold: TimeInterval { UIApplication.shared.applicationState == .active ? 45 : 120 }
+
+    /// Conditional reload when the listener has gone quiet (or `force`: foreground, reconnect).
+    func reconcile(force: Bool) async {
+        guard let id = activeSessionId, let uid = auth.uid else { return }
+        let quiet = Date().timeIntervalSince(max(lastSnapshotAt, lastReconcileAt))
+        guard force || quiet >= quietThreshold else { return }
+        lastReconcileAt = Date()
+        do {
+            guard let v = try await api.session(id, ifNoneMatch: lastViewHash) else { return } // 304: nothing missed
+            let missed = v.stateVersion > lastStateVersion || v.viewHash != lastViewHash
+            apply(v, fromCache: false)
+            if missed && !force {
+                realtimeLog.info("listener missed an update — restarting stream")
+                startListener(id: id, uid: uid)
+            }
+        } catch {
+            if (error as? APIError)?.code == "NOT_FOUND" { await reloadSessionView() }
         }
     }
 
@@ -217,6 +237,7 @@ final class AppModel {
         }
         realtimeLog.info("view applied v=\(v.stateVersion, privacy: .public) state=\(v.round?.state.rawValue ?? "-", privacy: .public) cache=\(fromCache)")
         lastStateVersion = v.stateVersion
+        if !fromCache { lastViewHash = v.viewHash }
         sessionView = v
         autoResumed = false
         viewError = nil
@@ -234,6 +255,7 @@ final class AppModel {
         }
         if round.state.isActive, let start = round.roundStartAt {
             await location.beginTracking(sessionId: v.sessionId, roundId: round.id, role: role, roundStartAt: start)
+            location.setPingSchedule(nextPingAt: role == .HIDING ? round.nextPingAt : nil, waiting: role == .HIDING && round.waitingPing != nil)
         } else if round.state == .READY, let myTeam = v.session.myTeam, round.isReady(myTeam) {
             if location.mode == .idle { await location.beginPreflight(sessionId: v.sessionId, roundId: round.id, role: role) }
         } else if location.mode != .idle {

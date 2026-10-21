@@ -44,6 +44,24 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
     private var authContinuation: CheckedContinuation<CLAuthorizationStatus, Never>?
     private let persistedContextKey = "mh.tracking.context"
 
+    // Upload pacing (ADR 0016): hiders upload often (their fixes become pings), seekers rarely
+    // (their track only matters after the round). Failures back off; a reconnect flushes at once.
+    private var uploading = false
+    private var consecutiveFailures = 0
+    private var lastAttemptAt = Date.distantPast
+    private var lastHealthSent: HealthPayload?
+    /// Server time of the next ping deadline, and whether a ping is waiting for the hiders' GPS.
+    private var nextPingAt: Date?
+    private var pingWaiting = false
+    private var trailFetchedRoundId: String?
+    /// Called when the network comes back (the app reconciles its view then).
+    var onReconnect: (() -> Void)?
+
+    static let hiderCadence: TimeInterval = 15
+    static let seekerCadence: TimeInterval = 90
+    /// Health-only batches at most this often when nothing changed.
+    static let heartbeatInterval: TimeInterval = 60
+
     init(queue: TelemetryQueue = TelemetryQueue()) {
         self.queue = queue
         super.init()
@@ -52,7 +70,12 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
         preciseLocation = manager.accuracyAuthorization == .fullAccuracy
         UIDevice.current.isBatteryMonitoringEnabled = true
         pathMonitor.pathUpdateHandler = { [weak self] path in
-            Task { @MainActor in self?.networkReachable = path.status == .satisfied }
+            Task { @MainActor in
+                guard let self else { return }
+                let wasReachable = self.networkReachable
+                self.networkReachable = path.status == .satisfied
+                if !wasReachable && self.networkReachable { self.reconnected() }
+            }
         }
         pathMonitor.start(queue: DispatchQueue(label: "mh.path"))
     }
@@ -151,9 +174,22 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
         mode = .tracking
         persistContext(sessionId: sessionId, roundId: roundId, role: role, roundStartAt: roundStartAt)
         startUploadLoop()
-        if ownTrail.isEmpty, let api, let track = try? await api.myTrack(sessionId, roundId) {
-            ownTrail = track.points.map { .init(latitude: $0.latitude, longitude: $0.longitude) }
+        // Restore this phone's own trail once per round (after a relaunch), not on every view update.
+        if ownTrail.isEmpty, trailFetchedRoundId != roundId, let api {
+            trailFetchedRoundId = roundId
+            if let track = try? await api.myTrack(sessionId, roundId) {
+                ownTrail = track.points.map { .init(latitude: $0.latitude, longitude: $0.longitude) }
+            }
         }
+    }
+
+    /// The round's ping schedule as the server sees it (from the view). Hider phones use it
+    /// to put a fresh fix on the server just before each deadline, and right away while a ping waits.
+    func setPingSchedule(nextPingAt: Date?, waiting: Bool) {
+        self.nextPingAt = nextPingAt
+        let startedWaiting = waiting && !pingWaiting
+        pingWaiting = waiting
+        if startedWaiting && role == .HIDING && mode == .tracking { Task { await uploadOnce() } }
     }
 
     /// Stop everything (round over, consent withdrawn, logout, manual stop).
@@ -262,6 +298,30 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
             ownTrail.append(loc.coordinate)
             if ownTrail.count > 4000 { ownTrail.removeFirst(ownTrail.count - 4000) }
         }
+        // Location callbacks keep arriving in the background, so deadline-driven uploads work in a pocket.
+        if role == .HIDING, shouldUploadForPing() { Task { await uploadOnce() } }
+    }
+
+    /// A hider fix should reach the server now: a ping is waiting for it, or a deadline is under 25 s away
+    /// and nothing was uploaded in that window yet.
+    private func shouldUploadForPing() -> Bool {
+        let sinceAttempt = Date().timeIntervalSince(lastAttemptAt)
+        if pingWaiting { return sinceAttempt > 5 }
+        guard let deadline = nextPingAt else { return false }
+        let toDeadline = deadline.timeIntervalSince(ServerClock.shared.now())
+        return toDeadline > 3 && toDeadline <= 25 && sinceAttempt > 25 - toDeadline + 1
+    }
+
+    private func reconnected() {
+        guard mode == .tracking else { onReconnect?(); return }
+        Task {
+            // Newest fix first, then the backlog.
+            for _ in 0..<10 {
+                await uploadOnce(newestFirst: true)
+                if consecutiveFailures > 0 || queuedSamples == 0 { break }
+            }
+            onReconnect?()
+        }
     }
 
     // MARK: Upload
@@ -270,36 +330,69 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
         guard uploadTask == nil else { return }
         uploadTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.uploadOnce()
-                // ~15–20 s cadence; faster drain when a backlog exists.
-                let backlog = await self?.queue.count ?? 0
-                try? await Task.sleep(nanoseconds: backlog > 200 ? 3_000_000_000 : 15_000_000_000)
+                guard let self else { return }
+                await self.uploadOnce()
+                try? await Task.sleep(nanoseconds: UInt64(await self.nextUploadDelay() * 1_000_000_000))
             }
         }
     }
 
-    /// Upload one batch (or an empty heartbeat batch carrying device health).
-    func uploadOnce() async {
-        guard let api, let (ctx, batchId, samples) = await queue.nextBatch() else { return }
+    /// Seconds until the next routine upload: role cadence, a fast drain for a big backlog,
+    /// or exponential backoff (capped at 30 s) after failures.
+    private func nextUploadDelay() async -> TimeInterval {
+        let cadence = role == .HIDING ? Self.hiderCadence : Self.seekerCadence
+        if consecutiveFailures > 0 { return min(cadence, min(30, pow(2, Double(consecutiveFailures))) * Double.random(in: 0.8...1.2)) }
+        return await queue.count > 200 ? 3 : cadence
+    }
+
+    /// Upload one batch (or a health heartbeat). Never runs twice at once.
+    func uploadOnce(newestFirst: Bool = false) async {
+        guard let api, !uploading else { return }
+        uploading = true
+        defer { uploading = false }
+        guard let (ctx, batchId, samples) = await queue.nextBatch(newestFirst: newestFirst) else { return }
         guard ctx.roundStartAt != nil else { return } // never upload preflight
-        let body = LocationBatchBody(batchId: batchId, sentAt: Date(), samples: samples, health: health())
+        let health = health()
+        // Nothing new: send health only when it changed or once a minute.
+        if samples.isEmpty, let last = lastHealthSent, !health.differsMeaningfully(from: last),
+           let at = lastUploadAt, Date().timeIntervalSince(at) < Self.heartbeatInterval {
+            return
+        }
+        lastAttemptAt = Date()
+        let body = LocationBatchBody(batchId: batchId, sentAt: Date(), samples: samples, health: health)
         do {
             let res = try await api.uploadLocations(ctx.sessionId, ctx.roundId, body)
             await queue.ack(batchId: batchId)
             lastUploadAt = Date()
+            lastHealthSent = health
+            consecutiveFailures = 0
             lastUploadError = res.rejected.isEmpty ? nil : "\(res.rejected.count) samples rejected"
         } catch let e as APIError {
             switch e.code {
             case "GAME_CLOSED", "NOT_FOUND", "OPERATOR_NOT_AUTHORIZED":
                 // The round no longer accepts samples from this phone.
                 await queue.discardAll()
-                lastUploadError = e.localizedDescription
+                consecutiveFailures = 0
+            case "VALIDATION_FAILED", "PAYLOAD_TOO_LARGE":
+                // This batch can never succeed; drop it rather than block the queue behind it.
+                await queue.dropInFlight()
+                consecutiveFailures = 0
             default:
-                lastUploadError = e.localizedDescription // keep queued; retry next loop
+                consecutiveFailures += 1 // keep queued; retry with backoff
             }
+            lastUploadError = e.localizedDescription
         } catch {
+            consecutiveFailures += 1
             lastUploadError = error.localizedDescription
         }
         queuedSamples = await queue.count
+    }
+}
+
+extension HealthPayload {
+    /// Changes other phones would notice (coarse status), ignoring fix age and battery drift.
+    func differsMeaningfully(from o: HealthPayload) -> Bool {
+        permission != o.permission || preciseLocation != o.preciseLocation || trackingActive != o.trackingActive
+            || backgroundSessionActive != o.backgroundSessionActive || lowPowerMode != o.lowPowerMode || networkReachable != o.networkReachable
     }
 }

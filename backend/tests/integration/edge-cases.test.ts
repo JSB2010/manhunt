@@ -188,6 +188,26 @@ describe('edge cases', () => {
   });
 });
 
+describe('compressed uploads', () => {
+  it('accepts a gzip-compressed location batch and refuses one that inflates past the body limit', async () => {
+    const { gzipSync } = await import('node:zlib');
+    const v = await view(a);
+    const r = v.round;
+    expect(r.state).toBe('HEAD_START');
+    h.clock.advance(130_000); // every sample below falls inside the round
+    const body = batch(h.clock, Array.from({ length: 120 }, (_, i) => [h.clock.now() - (120 - i) * 1000, 39.74 + i * 1e-5, -104.99] as [number, number, number]));
+    const gz = gzipSync(Buffer.from(JSON.stringify(body)));
+    const ok = await h.call(a, 'POST', `/v1/sessions/${sid}/rounds/${r.id}/location-batches`, gz, { 'content-type': 'application/json', 'content-encoding': 'gzip' });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body.accepted).toBe(120);
+    const bomb = gzipSync(Buffer.alloc(2_000_000, 0x20));
+    const big = await h.call(a, 'POST', `/v1/sessions/${sid}/rounds/${r.id}/location-batches`, bomb, { 'content-type': 'application/json', 'content-encoding': 'gzip' });
+    expect(big.status).toBe(413);
+    const junk = await h.call(a, 'POST', `/v1/sessions/${sid}/rounds/${r.id}/location-batches`, Buffer.from([0x1f, 0x8b, 1, 2, 3]), { 'content-type': 'application/json', 'content-encoding': 'gzip' });
+    expect(junk.status).toBe(400);
+  });
+});
+
 describe('crews, night code and phones', () => {
   let org: TestUser;
   let night: string;

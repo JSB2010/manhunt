@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { gunzipSync } from 'node:zlib';
 import { Timestamp } from 'firebase-admin/firestore';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { AppError } from '../domain/errors.js';
@@ -138,6 +140,40 @@ export function installErrorHandling(app: FastifyInstance, deps: Deps) {
       .send(errorBody(new AppError('RETRYABLE_TEMPORARY', retry ? 'Temporary contention, please retry' : 'Internal error'), now, req.id));
   });
   app.setNotFoundHandler((req, reply) => reply.status(404).send(errorBody(new AppError('NOT_FOUND', 'Route not found'), deps.clock.now(), req.id)));
+}
+
+/**
+ * `Content-Encoding: gzip` request bodies (the app compresses large location
+ * backlogs). Runs after authentication. Inflation is capped at the route's body
+ * limit, so a small bomb can't expand into memory. Cloud Functions may already
+ * have inflated the body (its rawBody) while leaving the header: only bytes that
+ * start with the gzip magic number are inflated.
+ */
+export function installGzipBodies(app: FastifyInstance) {
+  app.addHook('preParsing', async (req, _reply, payload) => {
+    if (req.headers['content-encoding'] !== 'gzip') return payload;
+    const limit = req.routeOptions.bodyLimit ?? app.initialConfig.bodyLimit ?? 1_000_000;
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of payload) {
+      size += (chunk as Buffer).length;
+      if (size > limit) throw new AppError('PAYLOAD_TOO_LARGE', 'Request body too large');
+      chunks.push(chunk as Buffer);
+    }
+    const raw = Buffer.concat(chunks);
+    let body = raw;
+    if (raw[0] === 0x1f && raw[1] === 0x8b) {
+      try {
+        body = gunzipSync(raw, { maxOutputLength: limit });
+      } catch (err) {
+        if ((err as { code?: string }).code === 'ERR_BUFFER_TOO_LARGE') throw new AppError('PAYLOAD_TOO_LARGE', 'Request body too large');
+        throw new AppError('VALIDATION_FAILED', 'Body is not valid gzip');
+      }
+    }
+    const out = Readable.from([body]) as Readable & { receivedEncodedLength?: number };
+    out.receivedEncodedLength = raw.length;
+    return out;
+  });
 }
 
 /** Adds `serverTime` to every JSON object response and the X-Server-Time header to all responses. */

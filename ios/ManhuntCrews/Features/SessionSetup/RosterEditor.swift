@@ -116,6 +116,9 @@ struct PeoplePicker: View {
                 }
             }
             .task(id: query) {
+                // Debounce typing: a newer query cancels this task before it hits the network.
+                if !query.isEmpty { try? await Task.sleep(nanoseconds: 300_000_000) }
+                guard !Task.isCancelled else { return }
                 people = (try? await model.api.people(query: query.isEmpty ? nil : query).people) ?? []
             }
         }

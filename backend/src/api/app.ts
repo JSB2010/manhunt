@@ -6,7 +6,7 @@ import { DataService } from '../services/dataService.js';
 import { GameService } from '../services/gameService.js';
 import type { Deps } from '../services/repo.js';
 import { SocialService } from '../services/socialService.js';
-import { bucketFor, FAILURE_ONLY_BUCKETS, installErrorHandling, installIdempotency, installServerTime, isTransientVerifyError, RateLimiter, rateLimited } from './http.js';
+import { bucketFor, FAILURE_ONLY_BUCKETS, installErrorHandling, installGzipBodies, installIdempotency, installServerTime, isTransientVerifyError, RateLimiter, rateLimited } from './http.js';
 import { registerDataRoutes } from './routes/data.js';
 import { registerGameRoutes } from './routes/game.js';
 import { registerMeRoutes } from './routes/me.js';
@@ -86,6 +86,7 @@ export async function buildApiApp(deps: Deps, opts: ApiOptions): Promise<Fastify
   });
 
   installErrorHandling(app, deps);
+  installGzipBodies(app);
   installServerTime(app, deps);
   installIdempotency(app, deps);
 

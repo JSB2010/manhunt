@@ -142,7 +142,7 @@ struct LobbyView: View {
     private func lobbyHeartbeat() async {
         guard crewReady else { return }
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
             guard crewReady, !Task.isCancelled else { return }
             try? await model.api.setReady(view.sessionId, ready: true, preflight: model.location.health())
         }

@@ -148,6 +148,11 @@ extension APIClient {
         return try await get("/v1/sessions", query: q)
     }
     func session(_ id: String) async throws -> SessionViewDoc { try await get("/v1/sessions/\(id)") }
+    /// The stored view only if it changed since `etag` (its view hash); nil on 304 (no body sent).
+    func session(_ id: String, ifNoneMatch etag: String?) async throws -> SessionViewDoc? {
+        let (data, http) = try await raw("GET", "/v1/sessions/\(id)", headers: etag.map { ["If-None-Match": "\"\($0)\""] } ?? [:])
+        return http.statusCode == 304 ? nil : try decode(data)
+    }
     /// The night's reusable code (fetched, not re-created). `regenerate` revokes the old one.
     func nightCode(_ sid: String, regenerate: Bool = false, targetUid: String? = nil) async throws -> InviteCreated {
         struct Body: Encodable { var targetUid: String?; var regenerate: Bool? }
@@ -185,8 +190,14 @@ extension APIClient {
     }
     func uploadLocations(_ sid: String, _ rid: String, _ body: LocationBatchBody) async throws -> LocationBatchResponse {
         // The batch id doubles as the idempotency key: retries never duplicate samples.
-        let data = try JSONCoding.encoder.encode(body)
-        let (resp, _) = try await raw("POST", "/v1/sessions/\(sid)/rounds/\(rid)/location-batches", body: data, contentType: "application/json", idempotencyKey: body.batchId)
+        var data = try JSONCoding.encoder.encode(body)
+        var headers: [String: String] = [:]
+        // Backlogs after an outage compress ~5×; small routine batches aren't worth it.
+        if data.count > 4096, let gz = Gzip.compress(data) {
+            data = gz
+            headers["Content-Encoding"] = "gzip"
+        }
+        let (resp, _) = try await raw("POST", "/v1/sessions/\(sid)/rounds/\(rid)/location-batches", body: data, contentType: "application/json", idempotencyKey: body.batchId, headers: headers)
         return try decode(resp)
     }
     func myTrack(_ sid: String, _ rid: String) async throws -> MyTrack { try await get("/v1/sessions/\(sid)/rounds/\(rid)/my-track") }
