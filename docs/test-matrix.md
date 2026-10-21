@@ -6,8 +6,9 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas, Cloud Functions adapter + tick handler + task-queue scheduler) | `cd backend && npm run test:unit` | ✅ 71 / 71 (2026-10-20; includes the Firestore production-constraints guard) |
-| Backend integration + security (Auth/Firestore/Storage emulators, rules, deployed-functions surface) | `npm run test:integration` | ✅ 38 / 38 (2026-10-20; gameplay now also checks person visibility through a shared night and for an outsider) |
+| Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas, Cloud Functions adapter + tick handler + task-queue scheduler) | `cd backend && npm run test:unit` | ✅ 108 / 108 (2026-10-21, crews: several phones per crew, three crews, waiting pings, Race/Together credit, shuffler-independent scoring, privacy of source phones) |
+| Backend integration + security (Auth/Firestore/Storage emulators, rules, deployed-functions surface) | `npm run test:integration` | ✅ 48 / 48 (2026-10-21: open night with two phones on a crew and a third crew added mid-night; concurrent hider decisions; Race photo restriction; hider outage → waiting ping → current position on reconnect; night code cap/regenerate/brute-force; phone moves/removal; changed-only view writes and 304) |
+| Real-time crews E2E (live stack, wall clock, 5 phones with Firestore listeners, 3 crews) | `npm run e2e:crews` | ✅ 2026-10-21: ping waited through a 65 s hider outage and released the current position 0.4 s after reconnect (no backlog point); 0 unreleased coordinates in seeker REST views or listener snapshots; Race catch credited to Crew C only, Crew B denied its photo; phone moved and any crew hid next; night ended by a phone. Bandwidth per phone with **1-min pings**: ~4 listener snapshots/min (~16 KB/min) and 3–5 REST calls/min (~1–2.5 KB/min) — vs. a full view rewrite on every batch from every phone before (≈20 snapshots/min per phone with 5 phones) |
 | Real-time API E2E (live stack, wall clock, local scheduler → worker) | `npm run e2e:two-operators` | ✅ first ping seen 0.5 s after chase start; ping 1 0.7 s after its deadline; sample age 9 s; 0 unreleased coordinates in seeker view; official time = submission time |
 | Real-time API E2E through the **deployable Cloud Functions** (Functions + Cloud Tasks emulators: `api` → task queue → `tick`) | `npm run serve:functions` (alternate ports), then `API_URL=http://127.0.0.1:<port>/demo-manhunt/us-central1/api npm run e2e:two-operators` | ✅ 2026-10-18: first ping seen 1.3 s after chase start; ping 1 0.2 s after its deadline; sample age 7 s; 0 unreleased coordinates in seeker view; photo upload (JPEG through the adapter, metadata stripped), catch, recap, round 2 role swap. The Cloud Tasks emulator ignores `scheduleTime`, so delivery timing here came from `tick`'s early-arrival wait-and-retry (ADR 0012). The first run, before that handling existed, failed at ping 0. |
 | Backend typecheck | `npm run typecheck` | ✅ |
@@ -104,10 +105,11 @@ Simulators cannot validate real GPS reliability, suspension, signal loss or Low 
 | Hider denies Precise Location | Start warns; coarse fix never released (accuracy gate) | ✅ server; ⏳ device |
 | Force-quit hider app | Honest "Tracking stopped/No signal"; documented OS limit | ⏳ |
 | Capture upload fails | No claim; timer runs; retry with encrypted local copy | 🟡 code path; ⏳ |
-| Rounds 1–4 alternate | Operators keep crews; roles switch | ✅ emulator |
+| Open night: any crew hides next, phones move between rounds, no round count | Phones keep or change crews; roles follow the hiding crew | ✅ emulator + real-time E2E |
+| Hider phone offline across a ping | Ping waits; current position released on reconnect, labelled late | ✅ emulator + real-time E2E; ⏳ device |
 | New night with mixed roster | Stable personId history shows composition change | ✅ (scoring unit + people API) |
 | One timeout/abort | Censored/incomparable labels, no false winner | ✅ |
-| Both request route deletion | Routes/objects/exports invalidated | ✅ |
+| Phones request route deletion | That phone's routes/objects/pins invalidated; crew route recomputed from its other phones | ✅ |
 | Finalized round inspected by both | Combined routes, photos, distances | ✅ emulator |
 
 ### Outdoor protocol (to run)

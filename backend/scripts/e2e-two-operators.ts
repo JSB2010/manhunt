@@ -79,12 +79,12 @@ const created = await call(host, 'POST', '/v1/sessions', {
   scheduledDate: new Date().toISOString().slice(0, 10),
   myTeam: 'A',
   teams: { A: { name: 'Crew A', roster: [{ personId: me.profile.selfPersonId, displayName: 'Morgan' }, { displayName: 'Casey' }] }, B: { name: 'Crew B', roster: [{ displayName: 'Riley' }] } },
-  rules: { headStartSeconds: 60, pingIntervalSeconds: 60, totalRounds: 2, confirmationTimeoutSeconds: 60 },
+  rules: { headStartSeconds: 60, pingIntervalSeconds: 60, confirmationTimeoutSeconds: 60 },
 });
 expect(created.status === 200, 'host created the night');
 const sid = created.body.sessionId as string;
 const inv = await call(host, 'POST', `/v1/sessions/${sid}/invites`, {});
-expect((await call(guest, 'POST', '/v1/invites/redeem', { code: inv.body.code })).status === 200, 'second operator joined by code');
+expect((await call(guest, 'POST', '/v1/invites/redeem', { code: inv.body.code, teamKey: 'B' })).status === 200, 'second operator joined by night code');
 for (const t of [host, guest]) {
   await call(t, 'POST', `/v1/sessions/${sid}/consent`, { accepted: true, consentVersion: 'v1', routeSharingAfterRound: true, guestDisclosureAcknowledged: true });
   await call(t, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health });
@@ -163,8 +163,9 @@ await uploader;
 
 await sleep(1500);
 const sum = (await call(guest, 'GET', `/v1/sessions/${sid}/rounds/${rid}/summary`)).body;
-log(`recap: hider on foot ${sum.result.hidingDistanceTotalMeters} m (chase ${sum.result.hidingDistanceChaseMeters} m), seeker by car ${sum.result.seekingDistanceChaseMeters} m, coverage ${sum.result.gpsCoverageFractionHider}/${sum.result.gpsCoverageFractionSeeker}`);
-expect(sum.result.hidingDistanceTotalMeters > 150 && sum.result.seekingDistanceChaseMeters > 800, 'distances computed separately for walking and driving');
+const [hc, sc] = [sum.result.crews.A, sum.result.crews.B];
+log(`recap: hiders on foot ${hc.distanceTotalMeters} m (chase ${hc.distanceChaseMeters} m), seekers by car ${sc.distanceChaseMeters} m, coverage ${hc.gpsCoverageFraction}/${sc.gpsCoverageFraction}`);
+expect(hc.distanceTotalMeters > 150 && sc.distanceChaseMeters > 800, 'distances computed separately for walking and driving');
 const next = await call(host, 'POST', `/v1/sessions/${sid}/next-round`, {});
-expect(next.status === 200 && next.body.round.hidingTeam === 'B' && next.body.round.state === 'READY', 'round 2 created with roles swapped and NOT auto-started');
+expect(next.status === 200 && next.body.round.hidingTeam === 'B' && next.body.round.state === 'READY', 'round 2 suggests the crew that has not hidden, and is NOT auto-started');
 console.log(process.exitCode ? 'E2E FAILED' : 'E2E PASSED', `session ${sid}`);

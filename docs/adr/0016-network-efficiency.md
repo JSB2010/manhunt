@@ -16,3 +16,5 @@
 * `stateVersion` comes from the session and round document versions, which only grow. A REST response that read older state can no longer outrank a newer listener snapshot.
 
 **Decision (app, to follow).** Reconcile over REST only when the listener has been quiet for 45 s or on foreground, conditionally. Hider uploads stay at 15–20 s during the chase, with a fix uploaded just before each deadline; seekers upload every 90 s. On reconnect, the newest fix goes first. Request bodies are gzipped and health is sent only when it changes or once a minute.
+
+**Measured (2026-10-21, `npm run e2e:crews`, 5 phones, 3 crews, 1-minute pings).** About 4 listener snapshots a minute per phone (~16 KB/min) and 3–5 REST calls a minute (~1–2.5 KB/min), down from a full rewrite of every view on every batch from every phone (≈20 snapshots a minute per phone with five phones). Every remaining snapshot is a real game event: start, chase start, a ping, a waiting or late ping, a claim, a decision. With 10-minute pings, snapshots drop to a handful per ping interval.

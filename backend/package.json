@@ -18,7 +18,8 @@
     "test:rules": "firebase --project demo-manhunt --config ../firebase.json emulators:exec --only firestore,storage \"vitest run tests/security/firestore-rules.test.ts\"",
     "test": "npm run test:unit && npm run test:integration",
     "seed:emulator": "tsx scripts/seed-emulator.ts",
-    "e2e:two-operators": "tsx scripts/e2e-two-operators.ts"
+    "e2e:two-operators": "tsx scripts/e2e-two-operators.ts",
+    "e2e:crews": "tsx scripts/e2e-crews.ts"
   },
   "dependencies": {
     "fastify": "^5.12.7",
