@@ -6,7 +6,7 @@ import { DataService } from '../services/dataService.js';
 import { GameService } from '../services/gameService.js';
 import type { Deps } from '../services/repo.js';
 import { SocialService } from '../services/socialService.js';
-import { installErrorHandling, installIdempotency, installServerTime, RateLimiter } from './http.js';
+import { bucketFor, installErrorHandling, installIdempotency, installServerTime, isTransientVerifyError, RateLimiter, rateLimited } from './http.js';
 import { registerDataRoutes } from './routes/data.js';
 import { registerGameRoutes } from './routes/game.js';
 import { registerMeRoutes } from './routes/me.js';
@@ -61,11 +61,16 @@ export async function buildApiApp(deps: Deps, opts: ApiOptions): Promise<Fastify
     try {
       const decoded = await opts.verifyIdToken(header.slice(7));
       req.auth = { uid: decoded.uid, email: decoded.email, name: decoded.name as string | undefined };
-    } catch {
+    } catch (err) {
+      if (isTransientVerifyError(err)) {
+        req.log.warn({ err }, 'token verification unavailable');
+        throw new AppError('RETRYABLE_TEMPORARY', 'Sign-in check temporarily unavailable, please retry');
+      }
       throw new AppError('UNAUTHENTICATED', 'Invalid or expired token');
     }
-    const bucket = req.routeOptions.config?.rateLimit ?? 'default';
-    if (!limiter.check(req.auth.uid, bucket, deps.clock.now())) throw new AppError('RATE_LIMITED', 'Too many requests, slow down');
+    const bucket = bucketFor(req.method, req.routeOptions.url, req.routeOptions.config?.rateLimit);
+    const waitMs = limiter.take(req.auth.uid, bucket, deps.clock.now());
+    if (waitMs > 0) throw rateLimited(waitMs);
     await services.social.ensureUser(req.auth.uid, { email: req.auth.email, name: req.auth.name });
   });
 

@@ -13,7 +13,12 @@ import CryptoKit
 final class AuthService {
     enum State: Equatable { case unknown, signedOut, signedIn(uid: String, email: String?) }
 
-    private(set) var state: State = .unknown
+    /// Driven by the Firebase listener (and set at once on sign-out); tests set it directly.
+    var state: State = .unknown
+    /// Called when the signed-in account goes away or changes without `signOut()`
+    /// (Firebase signs out by force on a revoked token), so cached tokens never
+    /// outlive their account. Not called on sign-in, where there is nothing to drop.
+    var onAccountEnded: (() -> Void)?
     private var handle: AuthStateDidChangeListenerHandle?
     private var currentNonce: String?
     let env: AppEnvironment
@@ -26,7 +31,10 @@ final class AuthService {
         guard handle == nil else { return }
         handle = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             Task { @MainActor in
-                if let user { self?.state = .signedIn(uid: user.uid, email: user.email) } else { self?.state = .signedOut }
+                guard let self else { return }
+                let previous = self.uid
+                if let user { self.state = .signedIn(uid: user.uid, email: user.email) } else { self.state = .signedOut }
+                if previous != nil, previous != user?.uid { self.onAccountEnded?() }
             }
         }
     }
@@ -43,6 +51,8 @@ final class AuthService {
         return name?.isEmpty == false ? name : nil
     }
 
+    /// Raw Firebase token fetch. Callers go through `TokenBroker`, which coalesces
+    /// refreshes and maps Firebase errors (only definitive ones end the session).
     nonisolated func idToken(forceRefresh: Bool) async throws -> String {
         guard let user = Auth.auth().currentUser else { throw APIError.unauthenticated }
         return try await user.getIDToken(forcingRefresh: forceRefresh)
@@ -65,7 +75,10 @@ final class AuthService {
         try await Auth.auth().sendPasswordReset(withEmail: email)
     }
 
+    /// Signed out as far as the app is concerned even if Firebase's keychain
+    /// cleanup throws; the listener's later `.signedOut` is then a no-op.
     func signOut() throws {
+        defer { state = .signedOut }
         try Auth.auth().signOut()
     }
 

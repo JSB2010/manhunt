@@ -4,7 +4,7 @@ import { isFinishedState, type CaptureClaim, type DomainEvent, type MemberDoc, t
 import { teamForUid } from '../domain/engine.js';
 import type { RouteDoc } from './finalize.js';
 import { paths, writeEvents, writeViews, type Deps } from './repo.js';
-import { SocialService, type PersonDoc, type UserDoc } from './socialService.js';
+import { deletedAccountRef, SocialService, type PersonDoc, type UserDoc } from './socialService.js';
 
 const iso = (ms: number | null | undefined) => (ms === null || ms === undefined ? null : new Date(ms).toISOString());
 const PHOTO_RETENTION_UNCONFIRMED_MS = 7 * 24 * 3600_000;
@@ -296,6 +296,7 @@ export class DataService {
   async deleteAccount(uid: string) {
     const now = this.d.clock.now();
     await this.p.user(uid).set({ deletion: { requestedAt: now, status: 'IN_PROGRESS' } }, { merge: true });
+    await deletedAccountRef(this.d.db, uid).set({ uid, deletedAt: now });
     const sessions = await this.p.sessions().where('memberUids', 'array-contains', uid).get();
     let sessionsDeleted = 0;
     for (const d of sessions.docs) {

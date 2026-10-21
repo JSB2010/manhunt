@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import type { Firestore } from 'firebase-admin/firestore';
 import type { z } from 'zod';
 import { fail } from '../domain/errors.js';
 import type { PersonRef } from '../domain/types.js';
@@ -55,6 +56,13 @@ export const pairId = (a: string, b: string) => [a, b].sort().join('_');
 const token = () => randomBytes(18).toString('base64url');
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
+/**
+ * Deletion tombstone (`deletedAccounts/{uid}`: uid and time only). An ID token
+ * stays valid for up to an hour after the account is deleted, so without it the
+ * next request would provision a fresh profile for the deleted uid.
+ */
+export const deletedAccountRef = (db: Firestore, uid: string) => db.collection('deletedAccounts').doc(uid);
+
 export function publicProfile(u: UserDoc) {
   return { uid: u.uid, displayName: u.displayName, handle: u.handle };
 }
@@ -79,8 +87,9 @@ export class SocialService {
     }
     const now = this.d.clock.now();
     const user = await this.d.db.runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      if (snap.exists) return snap.data() as UserDoc;
+      const [snap, tombstone] = await tx.getAll(ref, deletedAccountRef(this.d.db, uid));
+      if (snap!.exists) return snap!.data() as UserDoc;
+      if (tombstone!.exists) fail('UNAUTHENTICATED', 'This account was deleted');
       const displayName = (claims.name ?? claims.email?.split('@')[0] ?? 'Operator').slice(0, 60);
       const personRef = this.p.people().doc();
       const tok = token();
