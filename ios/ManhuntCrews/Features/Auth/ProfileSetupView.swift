@@ -35,8 +35,6 @@ struct ProfileSetupView: View {
                         .onSubmit { focus = .handle }
                 } header: {
                     Text("Name")
-                } footer: {
-                    Text("Shown to your crew in lobbies, rosters and round recaps.")
                 }
 
                 Section {
@@ -59,13 +57,8 @@ struct ProfileSetupView: View {
                         Label(handleError, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(Theme.danger)
                     } else {
-                        Text("Friends add you with your handle. 3–24 characters: lowercase letters, numbers, period or underscore.")
+                        Text("3–24 characters: a–z, 0–9, . or _")
                     }
-                }
-
-                Section {
-                } footer: {
-                    Label("Your location is never discoverable. Being friends doesn’t share where you are.", systemImage: "lock.fill")
                 }
             }
             .navigationTitle("Set Up Your Profile")
@@ -154,10 +147,6 @@ private struct ProfilePreview: View {
             Text(handle.isEmpty ? "@handle" : "@\(handle)")
                 .font(.body)
                 .foregroundStyle(handle.isEmpty ? .tertiary : .secondary)
-            Text("This is how friends see you")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
         }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
