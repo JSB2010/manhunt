@@ -16,12 +16,24 @@ final class ClockTests: XCTestCase {
         XCTAssertEqual(c.elapsedMs(at: Date().addingTimeInterval(9999)), 26 * 60_000)
     }
 
-    func testServerClockAnchorsToUptime() {
+    func testServerClockAnchorsToTheMonotonicClock() {
         let clock = ServerClock()
         let server = Date(timeIntervalSince1970: 2_000_000_000)
         clock.observe(serverTime: server, rtt: 0.2)
         let now = clock.now()
         XCTAssertEqual(now.timeIntervalSince(server), 0.1, accuracy: 0.5)
+    }
+
+    func testServerClockKeepsCountingAcrossSleep() {
+        var t: TimeInterval = 500
+        let clock = ServerClock(elapsed: { t })
+        let server = Date(timeIntervalSince1970: 2_000_000_000)
+        clock.observe(serverTime: server, rtt: 0.2)
+        t += 40 * 60  // phone locked in a pocket for 40 minutes
+        XCTAssertEqual(clock.now().timeIntervalSince(server), 40 * 60 + 0.1, accuracy: 0.01)
+        // The old anchor is stale after the gap, so even a slow first response re-anchors.
+        clock.observe(serverTime: server.addingTimeInterval(40 * 60 + 5), rtt: 2)
+        XCTAssertEqual(clock.now().timeIntervalSince(server), 40 * 60 + 6, accuracy: 0.01)
     }
 
     func testFormatting() {

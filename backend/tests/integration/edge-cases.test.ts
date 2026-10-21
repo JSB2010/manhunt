@@ -220,7 +220,7 @@ describe('crews, night code and phones', () => {
       title: 'Crew night',
       scheduledDate: '2026-10-19',
       myTeam: 'A',
-      teams: { A: { name: 'Owls', roster: [] }, B: { name: 'Wolves', roster: [] }, C: { name: 'Foxes', roster: [] } },
+      teams: { A: { name: 'Owls', roster: [{ displayName: 'Phone0' }] }, B: { name: 'Wolves', roster: [] }, C: { name: 'Foxes', roster: [] } },
     });
     expect(s.status, JSON.stringify(s.body)).toBe(200);
     night = s.body.sessionId;
@@ -236,6 +236,8 @@ describe('crews, night code and phones', () => {
       const r = await h.call(p, 'POST', '/v1/invites/redeem', { code: nightCode, teamKey: 'A' });
       expect(r.status, JSON.stringify(r.body)).toBe(200);
     }
+    // The organizer typed "Phone0" as a guest; Phone0 joining doesn't add the name twice.
+    expect((await nv(org)).session.teams.A.roster.filter((p: any) => p.displayName === 'Phone0')).toHaveLength(1);
     const full = await h.call(phones[4]!, 'POST', '/v1/invites/redeem', { code: nightCode, teamKey: 'A' });
     expect(full.status).toBe(409);
     const prev = await h.call(phones[4]!, 'POST', '/v1/invites/preview', { code: nightCode });

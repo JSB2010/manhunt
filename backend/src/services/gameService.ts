@@ -594,9 +594,11 @@ export class GameService {
       if (!crew) fail('VALIDATION_FAILED', 'That crew is not part of this night');
       if (crew!.operatorUids.length >= MAX_OPERATORS_PER_TEAM) fail('CONFLICT', `${crew!.name} already has ${MAX_OPERATORS_PER_TEAM} phones`);
       crew!.operatorUids.push(uid);
-      // The phone's owner plays on its crew; add their own person record if no crew lists them.
+      // The phone's owner plays on its crew; add their own person record unless a crew already
+      // lists them — by record, or by name (a guest entry the organizer typed for them).
       const selfPersonId = (user!.selfPersonId as string | undefined) ?? null;
-      if (selfPersonId && !teamKeysOf(s).some((k) => s.teams[k]!.roster.some((p) => p.personId === selfPersonId))) {
+      const sameName = (p: PersonRef) => p.personId === selfPersonId || p.displayName.trim().toLowerCase() === displayName.trim().toLowerCase();
+      if (selfPersonId && !teamKeysOf(s).some((k) => s.teams[k]!.roster.some(sameName))) {
         crew!.roster.push({ personId: selfPersonId, displayName });
         s.participantPersonIds = [...new Set([...s.participantPersonIds, selfPersonId])];
       }

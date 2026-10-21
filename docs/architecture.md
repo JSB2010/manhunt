@@ -48,7 +48,7 @@ flowchart TD
 * `roundStartAt` = server time of the start call (any phone of a playing crew). All deadlines derive from persisted `roundStartAt`, `chaseStartAt` and `pauses[]` via `clock.ts`; pauses may overlap (safety pause during a pending claim) and are unioned.
 * `chaseStartAt` is the *official* pause-adjusted deadline, not processing time; ping 0 is scheduled exactly there.
 * Ping *n* is due when effective (pause-excluded) chase time reaches `n × interval`. A capture claim opens a `CAPTURE` pause at submission; rejection/expiry closes it, shifting every future deadline.
-* Clients render clocks as `accumulatedMs + (serverNow − runningSince)`; `ServerClock` anchors server time to monotonic uptime so changing the phone's clock cannot alter timers.
+* Clients render clocks as `accumulatedMs + (serverNow − runningSince)`; `ServerClock` anchors server time to a monotonic clock that keeps counting through device sleep, so neither changing the phone's clock nor locking it mid-round can alter timers.
 
 ## Scheduling and idempotency
 

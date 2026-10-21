@@ -6,9 +6,12 @@ struct LobbyView: View {
     let view: SessionViewDoc
     let round: RoundView
 
-    @State private var showConsent = false
-    @State private var showCode = false
-    @State private var showEdit = false
+    /// One sheet at a time, chosen by value (several `isPresented` sheets on one view can present the wrong one).
+    private enum Sheet: String, Identifiable {
+        case consent, code, edit, warnings
+        var id: String { rawValue }
+    }
+    @State private var sheet: Sheet?
     @State private var confirmEndNight = false
     @State private var busy = false
     @State private var error: String?
@@ -59,8 +62,8 @@ struct LobbyView: View {
                 ToolbarItem(placement: .cancellationAction) { CloseButton { model.closeSession() } }
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
-                        Button("Night Code", systemImage: "qrcode") { showCode = true }
-                        Button("Crews & Rules", systemImage: "person.3") { showEdit = true }
+                        Button("Night Code", systemImage: "qrcode") { sheet = .code }
+                        Button("Crews & Rules", systemImage: "person.3") { sheet = .edit }
                         Divider()
                         Button("End Night", systemImage: "moon.zzz", role: .destructive) { confirmEndNight = true }
                     } label: {
@@ -70,12 +73,15 @@ struct LobbyView: View {
                 }
             }
             .bottomActionBar { actionBar }
-            .sheet(isPresented: $showConsent) { ConsentSheet(sessionId: view.sessionId) }
-            .sheet(isPresented: $showCode) { NightCodeSheet(sessionId: view.sessionId, code: view.session.joinCode) }
-            .sheet(isPresented: $showEdit) { EditNightSheet(view: view) }
-            .sheet(isPresented: Binding(get: { !startWarnings.isEmpty || !blocking.isEmpty }, set: { if !$0 { startWarnings = []; blocking = [] } })) {
-                StartWarningsSheet(warnings: startWarnings, blocking: blocking) { start(ack: true) }
-                    .presentationDetents([.medium, .large])
+            .sheet(item: $sheet, onDismiss: { startWarnings = []; blocking = [] }) { which in
+                switch which {
+                case .consent: ConsentSheet(sessionId: view.sessionId)
+                case .code: NightCodeSheet(sessionId: view.sessionId, code: view.session.joinCode)
+                case .edit: EditNightSheet(view: view)
+                case .warnings:
+                    StartWarningsSheet(warnings: startWarnings, blocking: blocking) { start(ack: true) }
+                        .presentationDetents([.medium, .large])
+                }
             }
             .confirmationDialog("End the night?", isPresented: $confirmEndNight, titleVisibility: .visible) {
                 Button("End Night", role: .destructive) { perform($busy, $error) { try await model.api.completeSession(view.sessionId) } }
@@ -92,11 +98,11 @@ struct LobbyView: View {
     @ViewBuilder private var actionBar: some View {
         VStack(spacing: 10) {
             if !myConsent {
-                Button { showConsent = true } label: { ActionLabel(title: "Review Tracking", systemImage: "doc.text.magnifyingglass") }
+                Button { sheet = .consent } label: { ActionLabel(title: "Review Tracking", systemImage: "doc.text.magnifyingglass") }
                     .floatingProminentButton()
                     .accessibilityIdentifier("lobby.consent")
             } else if crewWithoutPhone {
-                Button { showCode = true } label: { ActionLabel(title: "Invite Phones", systemImage: "person.badge.plus") }
+                Button { sheet = .code } label: { ActionLabel(title: "Invite Phones", systemImage: "person.badge.plus") }
                     .floatingProminentButton()
                     .accessibilityIdentifier("lobby.invite")
             } else if myRole != nil {
@@ -180,6 +186,7 @@ struct LobbyView: View {
                     blocking = details?.blocking ?? []
                     startWarnings = details?.warnings ?? []
                     if blocking.isEmpty && startWarnings.isEmpty { throw e }
+                    sheet = .warnings
                 } else { throw e }
             }
         }
@@ -362,7 +369,6 @@ struct ConsentSheet: View {
                 .disabled(busy)
                 .accessibilityIdentifier("consent.accept")
             }
-            .presentationDetents([.medium, .large])
             .errorAlert($error)
         }
     }

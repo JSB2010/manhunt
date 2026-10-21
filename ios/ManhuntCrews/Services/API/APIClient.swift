@@ -254,7 +254,7 @@ final class APIClient: @unchecked Sendable {
     }
 
     private func perform(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let started = ProcessInfo.processInfo.systemUptime
+        let started = ServerClock.continuousSeconds()
         let data: Data
         let response: URLResponse
         do {
@@ -263,7 +263,7 @@ final class APIClient: @unchecked Sendable {
             throw APIError.offline((error as NSError).localizedDescription)
         }
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        let rtt = ProcessInfo.processInfo.systemUptime - started
+        let rtt = ServerClock.continuousSeconds() - started
         if let st = http.value(forHTTPHeaderField: "x-server-time"), let date = JSONCoding.parseDate(st) {
             clock.observe(serverTime: date, rtt: rtt)
         }
