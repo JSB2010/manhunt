@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Hiding operator reviews a catch claim. Confirming finalizes the official
+/// Any hiding-crew phone reviews a catch claim; the first decision counts. Confirming finalizes the official
 /// time at the server’s *submission* time, not now.
 struct HiderConfirmView: View {
     @Environment(AppModel.self) private var model
@@ -16,7 +16,8 @@ struct HiderConfirmView: View {
     @State private var busy = false
     @State private var error: String?
 
-    private var seekers: TeamView? { view.session.team(view.round?.seekingTeam ?? .B) }
+    /// The crew that claimed the catch.
+    private var seekers: TeamView? { view.session.team(request.byTeam) }
 
     var body: some View {
         NavigationStack {
@@ -63,7 +64,7 @@ struct HiderConfirmView: View {
                         }
                     }
 
-                    Text("Confirming records the catch at the submission time above. Rejecting resumes the round from the frozen clock; positions during the review are not revealed.")
+                    Text("Confirming records the catch at the submission time.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -99,7 +100,7 @@ struct HiderConfirmView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("The round resumes from the frozen clock. Both operators can still settle it together after the round.")
+                Text("The round resumes from the frozen clock.")
             }
             .task {
                 do {

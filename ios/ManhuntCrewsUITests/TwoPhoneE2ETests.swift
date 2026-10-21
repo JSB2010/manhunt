@@ -29,18 +29,16 @@ final class TwoPhoneE2ETests: XCTestCase {
         signIn(app)
 
         tap(app.buttons["home.create"])
-        let ack = app.buttons["create.ack"]
-        scrollTo(ack, in: app)
-        XCTAssertTrue(ack.waitForExistence(timeout: 5))
-        check(ack)
         let submit = app.buttons["create.submit"]
         tap(submit)
         // Under heavy load a tap on the sheet's toolbar can be dropped. Retry only while the
         // form is still up and idle (a busy Create shows a spinner, not this button).
-        for _ in 0..<2 where !app.buttons["lobby.invite"].waitForExistence(timeout: 10) && submit.exists && submit.isEnabled {
+        for _ in 0..<2 where !app.buttons["lobby.consent"].waitForExistence(timeout: 10) && submit.exists && submit.isEnabled {
             submit.tap()
         }
 
+        acceptConsent(app)
+        // Crew B has no phone yet: the lobby offers the night code.
         tap(app.buttons["lobby.invite"], timeout: 30)
         let code = app.staticTexts["invite.code"]
         XCTAssertTrue(code.waitForExistence(timeout: 30))
@@ -48,7 +46,6 @@ final class TwoPhoneE2ETests: XCTestCase {
         try write("invite.txt", code.label)
         tap(app.buttons["invite.done"])
 
-        acceptConsent(app)
         let ready = app.buttons["lobby.ready"]
         waitUntil(ready, enabled: true, timeout: 300) // seeker operator must have joined
         ready.tap()
@@ -133,6 +130,8 @@ final class TwoPhoneE2ETests: XCTestCase {
         tap(field)
         field.typeText(code)
         tap(app.buttons["join.lookup"])
+        // The crew with no phone yet is preselected.
+        XCTAssertTrue(app.buttons["join.crew.B"].waitForExistence(timeout: 20))
         tap(app.buttons["join.submit"], timeout: 20)
 
         acceptConsent(app)
@@ -228,16 +227,7 @@ final class TwoPhoneE2ETests: XCTestCase {
 
     private func acceptConsent(_ app: XCUIApplication) {
         tap(app.buttons["lobby.consent"], timeout: 30)
-        for id in ["consent.t1", "consent.t2", "consent.t3"] {
-            let t = app.buttons[id]
-            // Form rows load lazily: scroll first, then assert.
-            scrollTo(t, in: app)
-            XCTAssertTrue(t.waitForExistence(timeout: 5), "missing \(id)")
-            check(t)
-        }
         let accept = app.buttons["consent.accept"]
-        scrollTo(accept, in: app)
-        for id in ["consent.t1", "consent.t2", "consent.t3"] where app.buttons[id].exists { check(app.buttons[id]) }
         waitUntil(accept, enabled: true, timeout: 10)
         accept.tap()
     }

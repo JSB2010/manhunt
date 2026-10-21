@@ -73,6 +73,8 @@ export interface CrewStatusView {
 export interface RulesView extends Rules {}
 
 export interface OperatorView {
+  /** the phone's account id, so any operator can move it between crews (members of the night only) */
+  uid: string;
   /** the operator's own roster person (links the phone to a roster name) */
   personId: string | null;
   displayName: string;
@@ -378,6 +380,7 @@ export function renderView(params: {
       color: t.color,
       roster: t.roster,
       operators: t.operatorUids.map((u) => ({
+        uid: u,
         personId: members[u]?.selfPersonId ?? null,
         displayName: members[u]?.displayName ?? 'Phone',
         isMe: u === uid,

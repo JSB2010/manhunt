@@ -177,7 +177,7 @@ describe('open night with crews of several phones', () => {
     // Drew records 3 s after Morgan: the freshest fix at 8:10 is Drew's 8:09:53.
     expect(Date.parse(sv.round.pins[0].observedAt)).toBe(chaseStart - 7000);
     expect(sv.round.crewStatus.A).toMatchObject({ live: 2, total: 2 });
-    expect(JSON.stringify(sv)).not.toContain(drew.uid);
+    expect(JSON.stringify(sv.round)).not.toContain(drew.uid);
     const fsv = await firestoreView(taylor);
     expect(fsv.round.pins).toHaveLength(1);
 

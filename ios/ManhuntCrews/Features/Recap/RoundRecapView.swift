@@ -1,9 +1,10 @@
 import SwiftUI
 import MapKit
 
-/// Post-round recap (spec §6.1, screen 12): official time, separate walking vs.
-/// driving distances, both routes (only after completion), pings, photo,
-/// timeline, disputes and the explicit next-round flow. No round winner.
+/// Post-round recap (spec §6.1, screen 12): official time, per-crew walking vs.
+/// driving distances, every crew's route (only after completion), pings, photo,
+/// timeline, disputes and the next-round flow. No round winner — catch credit
+/// (Together/Race) is attribution only.
 struct RoundRecapView: View {
     @Environment(AppModel.self) private var model
     let sessionId: String
@@ -17,9 +18,8 @@ struct RoundRecapView: View {
     @State private var photo: UIImage?
     @State private var busy = false
     @State private var error: String?
-    @State private var overrideTeam: TeamKey?
-    @State private var overrideReason = ""
-    @State private var showOverride = false
+    @State private var showWhoHides = false
+    @State private var showEdit = false
     @State private var confirmEndNight = false
     @State private var showMap = false
 
@@ -48,7 +48,7 @@ struct RoundRecapView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .accessibilityLabel("Route map")
-                    .accessibilityHint("Opens an interactive map of both routes")
+                    .accessibilityHint("Opens an interactive map of every crew’s route")
                     .fullScreenCover(isPresented: $showMap) {
                         NavigationStack {
                             RecapMap(summary: s, routes: routes, interactive: true)
@@ -88,9 +88,9 @@ struct RoundRecapView: View {
             if live != nil { ToolbarItem(placement: .cancellationAction) { CloseButton { model.closeSession() } } }
         }
         .bottomActionBar {
-            if let live, live.session.isHost, live.session.status != .COMPLETED, let next = live.nextRound {
-                Button { overrideTeam = nil; createNext(live) } label: {
-                    ActionLabel(title: "Set Up Round \(next.index)", systemImage: "arrow.triangle.2.circlepath", busy: busy)
+            if let live, live.session.status != .COMPLETED, let next = live.nextRound {
+                Button { createNext(hidingTeam: nil) } label: {
+                    ActionLabel(title: "Next: Round \(next.index)", systemImage: "arrow.triangle.2.circlepath", busy: busy)
                 }
                 .floatingProminentButton()
                 .controlSize(.large)
@@ -100,16 +100,17 @@ struct RoundRecapView: View {
         }
         .task(id: live?.round?.result?.observedChaseSeconds) { await load() }
         .refreshable { await load() }
-        .confirmationDialog("Who hides next?", isPresented: $showOverride, titleVisibility: .visible) {
+        .confirmationDialog("Who hides next?", isPresented: $showWhoHides, titleVisibility: .visible) {
             if let live {
-                ForEach(TeamKey.allCases) { k in
-                    Button(live.session.team(k)?.name ?? k.rawValue) { overrideTeam = k; createNext(live) }
+                ForEach(live.session.teamKeys) { k in
+                    Button(live.session.name(k)) { createNext(hidingTeam: k) }
                 }
             }
-        } message: { Text("Overrides of the suggested alternation are recorded in history.") }
-        .confirmationDialog("End the night now?", isPresented: $confirmEndNight, titleVisibility: .visible) {
+        }
+        .confirmationDialog("End the night?", isPresented: $confirmEndNight, titleVisibility: .visible) {
             Button("End Night", role: .destructive) { perform($busy, $error) { try await model.api.completeSession(sessionId) } }
-        } message: { Text("Played rounds stay in history. No more rounds can be started tonight.") }
+        } message: { Text("Played rounds stay in history.") }
+        .sheet(isPresented: $showEdit) { if let live { EditNightSheet(view: live) } }
         .errorAlert($error)
     }
 
@@ -130,7 +131,7 @@ struct RoundRecapView: View {
         if s.routesAvailable {
             do { routes = try await model.api.routes(sessionId, roundId) } catch { routesError = error.localizedDescription }
         } else {
-            routesError = "Routes are hidden until both operators have agreed to post-round route sharing."
+            routesError = "Routes show once every phone in the round has agreed to sharing them."
         }
         if let claim = s.claims.first(where: { $0.status == "CONFIRMED" }), let path = claim.photoPath, let data = try? await model.api.photo(path: path) {
             photo = UIImage(data: data)
@@ -155,59 +156,61 @@ struct RoundRecapView: View {
                     .fontDesign(.rounded)
                     .monospacedDigit()
                     .accessibilityIdentifier("recap.outcome")
-                Text("Official time is when the server received the confirmed photo\(r.resolvedByDispute ? " (settled jointly after the round)" : "").")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                if r.seekMode == .RACE, let k = r.catchCreditTeams.first {
+                    Label("\(r.name(k)) made the catch", systemImage: "flag.checkered")
+                        .font(.headline)
+                        .foregroundStyle(Theme.crew(k))
+                }
+                if r.resolvedByDispute {
+                    Text("Settled together after the round.").font(.footnote).foregroundStyle(.secondary)
+                }
             case "TIMED_OUT":
                 Text("Not caught — survived ≥ \(Fmt.clock(Double(r.observedChaseSeconds)))")
                     .font(.title.bold())
                     .fontDesign(.rounded)
                     .accessibilityIdentifier("recap.outcome")
-                Text("The time limit was reached. This is a lower bound, not a catch time.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             default:
                 Text("Round Aborted")
                     .font(.title.bold())
                     .accessibilityIdentifier("recap.outcome")
                 if let reason = r.abortedReason { Text(reason).font(.callout) }
-                Text("Aborted rounds are left out of comparisons.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
-            Label("One round is one attempt — there’s no round winner. Compare crews across the night.", systemImage: "info.circle")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
     }
 
     @ViewBuilder private func roles(_ s: RoundSummary, _ r: RoundResult) -> some View {
-        Label { Text("\(r.hidingTeamName) hid") } icon: { Image(systemName: Role.HIDING.symbol).foregroundStyle(crewColor(s, role: .HIDING)) }
-        Label { Text("\(r.seekingTeamName) sought") } icon: { Image(systemName: Role.SEEKING.symbol).foregroundStyle(crewColor(s, role: .SEEKING)) }
+        Label { Text("\(r.name(r.hidingTeam)) hid") } icon: { Image(systemName: Role.HIDING.symbol).foregroundStyle(Theme.crew(r.hidingTeam)) }
+        Label { Text("\(r.seekersName) sought\(r.seekingTeams.count > 1 ? (r.seekMode == .RACE ? " (race)" : " (together)") : "")") } icon: {
+            Image(systemName: Role.SEEKING.symbol).foregroundStyle(r.seekingTeams.first.map(Theme.crew) ?? .secondary)
+        }
     }
 
     private func crewColor(_ s: RoundSummary, role: Role) -> Color {
-        guard let team = routes?.teams.values.first(where: { $0.role == role })?.team ?? (role == .HIDING ? live?.round?.hidingTeam : live?.round?.seekingTeam) else { return .secondary }
-        return Theme.crew(team)
+        role == .HIDING ? Theme.crew(s.hidingTeam) : (s.seekingTeams.first.map(Theme.crew) ?? .secondary)
     }
 
+    /// Distances per crew, from each crew's best-covered phone. On foot and by car are never combined.
     @ViewBuilder private func stats(_ s: RoundSummary, _ r: RoundResult) -> some View {
-        Section {
-            LabeledContent("Hiders on foot", value: Fmt.distance(r.hidingDistanceTotalMeters, units: units))
-            LabeledContent("…during the chase", value: Fmt.distance(r.hidingDistanceChaseMeters, units: units))
-            LabeledContent("Seekers by car (chase)", value: Fmt.distance(r.seekingDistanceChaseMeters, units: units))
-        } header: {
-            Text("Distances")
-        } footer: {
-            Text("Walking and driving are reported separately, never combined into one score. They come from the operator phones as a proxy for each crew — hiders’ route: \(quality(r.routeQualityHider)); seekers’ route: \(quality(r.routeQualitySeeker)).")
+        Section("Distances") {
+            if let h = r.crew(r.hidingTeam) {
+                LabeledContent("\(r.name(r.hidingTeam)) on foot", value: Fmt.distance(h.distanceTotalMeters, units: units))
+                LabeledContent("…during the chase", value: Fmt.distance(h.distanceChaseMeters, units: units))
+            }
+            ForEach(r.seekingTeams, id: \.self) { k in
+                LabeledContent("\(r.name(k)) by car", value: Fmt.distance(r.crew(k)?.distanceChaseMeters, units: units))
+            }
         }
         Section("Round") {
             LabeledContent("Head start", value: Fmt.clock(Double(r.headStartSeconds)))
             LabeledContent("Pauses", value: Fmt.clock(Double(r.totalPauseSeconds)))
             LabeledContent("Round duration", value: Fmt.clock(Double(r.roundElapsedSeconds)))
-            LabeledContent("Pings released", value: "\(r.pingsReleased) of \(r.pingSlots)\(r.pingsMissing > 0 ? " (\(r.pingsMissing) unavailable)" : "")")
-            LabeledContent("GPS coverage", value: "Hiders \(Fmt.percent(r.gpsCoverageFractionHider)) · Seekers \(Fmt.percent(r.gpsCoverageFractionSeeker))")
+            LabeledContent("Pings released", value: "\(r.pingsReleased) of \(r.pingSlots)\(r.pingsMissing > 0 ? " (\(r.pingsMissing) missed)" : "")\(r.pingsDelayed > 0 ? " · \(r.pingsDelayed) late" : "")")
+            ForEach([r.hidingTeam] + r.seekingTeams, id: \.self) { k in
+                if let c = r.crew(k) {
+                    LabeledContent("\(r.name(k)) GPS", value: "\(Fmt.percent(c.gpsCoverageFraction)) · \(quality(c.routeQuality))")
+                }
+            }
         }
         .monospacedDigit()
     }
@@ -230,7 +233,7 @@ struct RoundRecapView: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Ping \(p.index) · \(Fmt.time(p.scheduledAt))")
-                        Text(p.status == "RELEASED" ? "Sample \(p.ageSeconds ?? 0)s old · ±\(Int(p.accuracyMeters ?? 0)) m" : "No fresh GPS fix — not revealed")
+                        Text(p.status == "RELEASED" ? "Sample \(p.ageSeconds ?? 0)s old · ±\(Int(p.accuracyMeters ?? 0)) m\(p.delayed ? " · late" : "")" : "No GPS got through — not revealed")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -242,14 +245,15 @@ struct RoundRecapView: View {
     }
 
     @ViewBuilder private func claims(_ s: RoundSummary) -> some View {
-        let disputable = s.claims.filter { $0.status == "REJECTED" || $0.status == "EXPIRED" }
+        // Disputes are settled by the hiding crew and the claiming crew.
+        let disputable = s.claims.filter { c in (c.status == "REJECTED" || c.status == "EXPIRED") && (s.myTeam == s.hidingTeam || s.myTeam == c.team) }
         if !s.claims.isEmpty {
             Section {
                 ForEach(s.claims) { c in
                     LabeledContent {
                         if let t = c.chaseSecondsAtClaim { Text(Fmt.clock(Double(t))).monospacedDigit() }
                     } label: {
-                        Text("\(Fmt.time(c.submittedAt)) · \(c.status.capitalized)")
+                        Text("\(c.team.map { "\(s.teamNames[$0.rawValue] ?? $0.rawValue) · " } ?? "")\(Fmt.time(c.submittedAt)) · \(c.status.capitalized)")
                         if let reason = c.rejectionReason { Text(reason) }
                     }
                 }
@@ -266,7 +270,7 @@ struct RoundRecapView: View {
                 Text("Catch Claims")
             } footer: {
                 if !disputable.isEmpty {
-                    Text("Disputed a rejected claim? Both operators can jointly accept it as the catch, or either can keep it rejected.")
+                    Text("The hiders and the claiming crew can both accept a claim as the catch.")
                 }
             }
         }
@@ -293,58 +297,47 @@ struct RoundRecapView: View {
                     Label("Night Summary & Scorecard", systemImage: "trophy.fill")
                 }
             } header: {
-                Text("Night Complete")
+                Text("Night Over")
             }
         } else if let next = live.nextRound {
-            let hider = live.session.team(next.suggestedHidingTeam)?.name ?? next.suggestedHidingTeam.rawValue
             Section {
-                Label { Text("\(hider) hide next") } icon: {
+                Label { Text("\(live.session.name(next.suggestedHidingTeam)) hide next") } icon: {
                     Image(systemName: Role.HIDING.symbol).foregroundStyle(Theme.crew(next.suggestedHidingTeam))
                 }
                 .font(.headline)
-                if live.session.isHost {
-                    Button("Change Who Hides…") { showOverride = true }
-                    Button("End the Night Now", role: .destructive) { confirmEndNight = true }
-                } else {
-                    Label("Waiting for the host to set up round \(next.index)…", systemImage: "hourglass")
-                        .foregroundStyle(.secondary)
-                }
+                Button("Someone Else Hides…") { showWhoHides = true }
+                Button("Crews & Rules…") { showEdit = true }
                 NavigationLink { NightSummaryView(sessionId: sessionId) } label: {
                     Label("Night So Far", systemImage: "list.number")
                 }
+                Button("End the Night", role: .destructive) { confirmEndNight = true }
             } header: {
                 Text("Round \(next.index)")
-            } footer: {
-                Text("Roles switch; each operator stays with their own crew. Reposition, check both phones, then both tap Ready. Nothing starts automatically.")
             }
         }
     }
 
-    private func createNext(_ live: SessionViewDoc) {
-        let suggestion = live.nextRound?.suggestedHidingTeam
-        let team = overrideTeam
-        perform($busy, $error) {
-            _ = try await model.api.nextRound(sessionId, hidingTeam: team, overrideReason: team != nil && team != suggestion ? "Host override" : nil)
-        }
+    private func createNext(hidingTeam: TeamKey?) {
+        perform($busy, $error) { _ = try await model.api.nextRound(sessionId, hidingTeam: hidingTeam) }
     }
 
     private func dispute(_ c: RoundSummary.Claim, accept: Bool) {
         perform($busy, $error) {
             try await model.api.dispute(sessionId, roundId, claimId: c.claimId, accept: accept)
-            model.show("Proposal recorded — the other operator must agree")
+            model.show("Recorded — the other crew must agree")
             await load()
         }
     }
 }
 
-/// Both crews' completed routes (static polylines with markers). Solid = on foot,
+/// Every crew's completed route (static polylines with markers). Solid = on foot,
 /// dashed = car, so the legend never relies on colour alone.
 struct RecapMap: View {
     let summary: RoundSummary
     let routes: RouteRecap?
     var interactive = true
 
-    private var hidingTeam: TeamKey? { routes?.teams.values.first(where: { $0.role == .HIDING })?.team }
+    private var hidingTeam: TeamKey? { summary.hidingTeam }
 
     var body: some View {
         Map(interactionModes: interactive ? .all : []) {

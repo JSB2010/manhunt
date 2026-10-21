@@ -68,12 +68,12 @@ private struct OfflineBanner: View {
     }
 }
 
-/// One crew in the lobby: identity, role, roster and readiness.
+/// One crew in the lobby: identity, role, roster, phones and readiness.
 struct CrewRow: View {
     let team: TeamView
-    let role: Role
+    let role: Role?
     let ready: Bool
-    var opponentHealth: OpponentHealthView?
+    var status: CrewStatusView?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -88,8 +88,10 @@ struct CrewRow: View {
                         .background(.fill.secondary, in: Capsule())
                 }
                 Spacer(minLength: 8)
-                RoleLabel(role: role, crew: team.key)
-                    .font(.subheadline.weight(.semibold))
+                if let role {
+                    RoleLabel(role: role, crew: team.key)
+                        .font(.subheadline.weight(.semibold))
+                }
             }
             if !team.roster.isEmpty {
                 Text(team.roster.map(\.displayName).formatted(.list(type: .and)))
@@ -97,24 +99,21 @@ struct CrewRow: View {
                     .foregroundStyle(.secondary)
             }
             FlowLayout(spacing: 6) {
-                if team.hasOperator {
-                    StatusBadge(text: team.operatorDisplayName ?? "Operator", systemImage: "iphone")
-                    if team.consentGiven {
-                        StatusBadge(text: "Disclosure accepted", systemImage: "checkmark.shield.fill", tint: Theme.ok)
-                    } else {
-                        StatusBadge(text: "Disclosure pending", systemImage: "hourglass", tint: Theme.warning)
+                if team.hasPhone {
+                    ForEach(team.operators, id: \.uid) { op in
+                        StatusBadge(text: op.isMe ? "\(op.displayName) (you)" : op.displayName,
+                                    systemImage: op.consentGiven ? "iphone" : "iphone.slash",
+                                    tint: op.consentGiven ? .secondary : Theme.warning)
                     }
-                    if ready {
-                        StatusBadge(text: "Ready", systemImage: "checkmark.circle.fill", tint: Theme.ok)
-                    } else {
-                        StatusBadge(text: "Not ready", systemImage: "circle")
-                    }
-                    if let h = opponentHealth, !team.isMine {
-                        let p = HealthPresentation(health: h, inLobby: true)
-                        StatusBadge(text: p.text, systemImage: p.symbol, tint: p.tint)
+                    if role != nil {
+                        if ready {
+                            StatusBadge(text: "Ready", systemImage: "checkmark.circle.fill", tint: Theme.ok)
+                        } else {
+                            StatusBadge(text: "Not ready", systemImage: "circle")
+                        }
                     }
                 } else {
-                    StatusBadge(text: "Waiting for operator", systemImage: "hourglass", tint: Theme.warning)
+                    StatusBadge(text: "No phone yet", systemImage: "hourglass", tint: Theme.warning)
                 }
             }
         }
@@ -123,50 +122,34 @@ struct CrewRow: View {
     }
 }
 
-/// Opponent integrity — coarse status only, never coordinates.
+/// A crew's phone status — coarse only ("2 of 2 live"), never times or coordinates.
 struct HealthPresentation {
     let text: String
     let symbol: String
     let state: StatusRow.State
 
     var tint: Color { StatusRow.tint(for: state) }
-    /// Compact form for chips ("No signal").
-    var shortText: String {
-        switch text {
-        case "No signal from phone": "no signal"
-        case "Location permission off": "location off"
-        case "Tracking stopped": "tracking stopped"
-        case "Tracking stale": "tracking stale"
-        default: text.lowercased()
-        }
-    }
     var isProblem: Bool { state == .warning || state == .problem }
 
-    init(health: OpponentHealthView, inLobby: Bool = false) {
-        let v: (String, String, StatusRow.State)
-        // Before a round, "not tracking" is expected — don’t alarm anyone.
-        if inLobby && ["STOPPED", "UNKNOWN", "STALE", "NO_SIGNAL"].contains(health.state) {
-            v = ("Not tracking yet", "location", .neutral)
-        } else {
-            v = switch health.state {
-            case "ACTIVE": ("Tracking OK", "dot.radiowaves.left.and.right", .ok)
-            case "STALE": ("Tracking stale", "exclamationmark.triangle.fill", .warning)
-            case "NO_SIGNAL": ("No signal from phone", "antenna.radiowaves.left.and.right.slash", .problem)
-            case "STOPPED": ("Tracking stopped", "location.slash.fill", .problem)
-            case "PERMISSION_ISSUE": ("Location permission off", "location.slash.fill", .problem)
-            default: ("Status unknown", "questionmark.circle", .neutral)
-            }
+    init(status: CrewStatusView) {
+        let v: (String, String, StatusRow.State) = switch status.state {
+        case "ACTIVE": (status.total > 1 ? "\(status.live) of \(status.total) live" : "Live", "dot.radiowaves.left.and.right", status.live < status.total ? .warning : .ok)
+        case "STALE": ("Signal weak", "exclamationmark.triangle.fill", .warning)
+        case "NO_SIGNAL": ("No signal", "antenna.radiowaves.left.and.right.slash", .problem)
+        case "STOPPED": ("Tracking stopped", "location.slash.fill", .problem)
+        case "PERMISSION_ISSUE": ("Location off", "location.slash.fill", .problem)
+        default: ("Unknown", "questionmark.circle", .neutral)
         }
         text = v.0
         symbol = v.1
         state = v.2
     }
 
-    /// Extra coarse issues reported for the opponent phone.
-    static func extraIssues(_ health: OpponentHealthView) -> [String] {
+    /// Extra coarse issues reported for a crew's phones.
+    static func extraIssues(_ status: CrewStatusView) -> [String] {
         var out: [String] = []
-        if health.issues.contains("PRECISE_LOCATION_OFF") { out.append("Approximate location") }
-        if health.issues.contains("LOW_POWER_MODE") { out.append("Low Power Mode") }
+        if status.issues.contains("PRECISE_LOCATION_OFF") { out.append("Approximate location") }
+        if status.issues.contains("LOW_POWER_MODE") { out.append("Low Power Mode") }
         return out
     }
 }

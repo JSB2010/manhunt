@@ -117,7 +117,8 @@ describe('per-user view privacy invariant', () => {
       expect(numbers(v).filter((n) => sampleCoords.has(n) && !released.has(n))).toEqual([]);
       const json = JSON.stringify(v);
       for (const k of ['sourceUid', 'sourcePointId', 'routeSourceUids', 'operatorsByTeam']) expect(json).not.toContain(`"${k}"`);
-      expect(json).not.toContain(HIDER2 === uid ? '__never__' : `"${HIDER2}"`);
+      // Phones are listed by crew for the night's members, but nothing in the round says which phone a pin came from.
+      expect(JSON.stringify(v.round)).not.toContain(HIDER2);
     }
   });
 

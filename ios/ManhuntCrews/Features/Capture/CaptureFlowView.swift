@@ -63,7 +63,7 @@ struct CaptureFlowView: View {
                             .accessibilityHidden(true)
                         Text("Catch Submitted")
                             .font(.title.bold())
-                        Text("The chase clock froze at the server’s submission time. The hiding crew must confirm.")
+                        Text("The clock froze. The hiders confirm next.")
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.secondary)
                         Button { dismiss() } label: { ActionLabel(title: "Back to Map", systemImage: "map.fill") }
@@ -114,7 +114,7 @@ struct CaptureFlowView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .glassSurface()
-                    Text("Keep the app open. If the network is slow, the catch time is set when the server accepts it.")
+                    Text("Keep the app open.")
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.85))
                         .multilineTextAlignment(.center)
@@ -123,7 +123,7 @@ struct CaptureFlowView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Label(msg, systemImage: "exclamationmark.triangle.fill")
                             .font(.subheadline.weight(.semibold))
-                        Text("No catch was recorded and the clock keeps running. The photo is saved on this phone so you can retry.")
+                        Text("No catch recorded; the photo is kept so you can retry.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }

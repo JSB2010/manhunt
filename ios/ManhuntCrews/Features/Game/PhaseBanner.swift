@@ -5,7 +5,6 @@ import SwiftUI
 struct PhaseBanner: View {
     let view: SessionViewDoc
     let round: RoundView
-    var showPassengerReminder = true
     @ScaledMetric(relativeTo: .largeTitle) private var clockSize: CGFloat = 58
 
     private var crewColor: Color { view.session.myTeam.map(Theme.crew) ?? .secondary }
@@ -23,7 +22,7 @@ struct PhaseBanner: View {
                     Text(title)
                         .accessibilityIdentifier("game.phase")
                     Spacer(minLength: 8)
-                    Text("Round \(round.index) of \(view.session.totalRounds)")
+                    Text("Round \(round.index)")
                         .foregroundStyle(.secondary)
                 }
                 .font(.subheadline.weight(.semibold))
@@ -42,12 +41,6 @@ struct PhaseBanner: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
-                if round.myRole == .SEEKING && showPassengerReminder {
-                    Label("Passenger only — the driver never uses this app", systemImage: "car.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 4)
-                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -73,7 +66,7 @@ struct PhaseBanner: View {
     }
 
     private var title: String {
-        let role = round.myRole?.label ?? ""
+        let role = round.myRole?.label ?? "Watching"
         switch round.state {
         case .HEAD_START: return "Head Start · \(role)"
         case .CHASE: return "Chase · \(role)"
@@ -103,7 +96,7 @@ struct PhaseBanner: View {
     private func subtitle(_ now: Date) -> String {
         switch round.state {
         case .HEAD_START:
-            return round.myRole == .HIDING ? "Move! The seekers get your first ping at 0:00." : "Wait here. The first ping releases at 0:00 — then go."
+            return round.myRole == .HIDING ? "Move! First ping at 0:00." : "Wait. First ping at 0:00 — then go."
         case .CHASE:
             var parts: [String] = []
             if let next = round.nextPingAt {
@@ -114,7 +107,7 @@ struct PhaseBanner: View {
             return parts.joined(separator: " · ")
         case .CAPTURE_PENDING:
             let exp = (round.myClaim?.expiresAt ?? round.captureRequest?.expiresAt).map { Fmt.clock(max(0, $0.timeIntervalSince(now))) } ?? "—"
-            return round.myRole == .SEEKING ? "Clock frozen at submission. Waiting for the hiders to confirm (\(exp))." : "Review the catch photo (\(exp) left)."
+            return round.myRole == .HIDING ? "Review the catch photo (\(exp) left)." : "Clock frozen. Hiders are reviewing (\(exp))."
         case .PAUSED:
             return round.pause?.reason ?? "Clock and pings are frozen."
         default:
@@ -123,7 +116,7 @@ struct PhaseBanner: View {
     }
 }
 
-/// Blocks the map while a round is paused; both operators must resume.
+/// Blocks the map while a round is paused; one hider and one seeker must resume.
 struct PausedOverlay: View {
     @Environment(AppModel.self) private var model
     let view: SessionViewDoc
@@ -132,7 +125,8 @@ struct PausedOverlay: View {
     @State private var error: String?
 
     private var safety: Bool { round.pause?.kind == "SAFETY" }
-    private var mine: Bool { view.session.myTeam.map { round.pause?.resumeVotes[$0.rawValue] == true } ?? false }
+    /// My side already voted (any phone of any crew on my side counts).
+    private var mine: Bool { round.pause?.mySide.map { round.pause?.voted($0) ?? false } ?? false }
 
     var body: some View {
         ZStack {
@@ -152,16 +146,16 @@ struct PausedOverlay: View {
                 if let reason = round.pause?.reason {
                     Text(reason).font(.title3).multilineTextAlignment(.center)
                 }
-                Text("The clock and ping schedule are frozen for both crews. Both operators must tap Resume.")
+                Text("Clock and pings are frozen. Hiders and seekers both tap Resume.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                 VStack(spacing: 8) {
-                    ForEach(TeamKey.allCases) { k in
-                        let ready = round.pause?.resumeVotes[k.rawValue] == true
+                    ForEach([Side.HIDERS, .SEEKERS], id: \.self) { side in
+                        let ready = round.pause?.voted(side) ?? false
                         HStack {
-                            CrewDot(key: k)
-                            Text(view.session.team(k)?.name ?? k.rawValue)
+                            Image(systemName: side == .HIDERS ? Role.HIDING.symbol : Role.SEEKING.symbol).foregroundStyle(.secondary)
+                            Text(side.label)
                             Spacer()
                             Label(ready ? "Ready" : "Waiting", systemImage: ready ? "checkmark.circle.fill" : "hourglass")
                                 .foregroundStyle(ready ? Theme.ok : .secondary)
@@ -174,11 +168,11 @@ struct PausedOverlay: View {
                 Button {
                     perform($busy, $error) { try await model.api.resume(view.sessionId, round.id) }
                 } label: {
-                    ActionLabel(title: mine ? "Waiting for the Other Crew" : "Ready to Resume", systemImage: "play.fill", busy: busy)
+                    ActionLabel(title: mine ? "Waiting for the Other Side" : "Ready to Resume", systemImage: "play.fill", busy: busy)
                 }
                 .floatingProminentButton()
                 .controlSize(.large)
-                .disabled(mine || busy)
+                .disabled(mine || busy || round.pause?.mySide == nil)
             }
             .padding(24)
             .frame(maxWidth: 440)

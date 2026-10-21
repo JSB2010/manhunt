@@ -66,7 +66,7 @@ private struct NightRow: View {
                 VStack(alignment: .leading, spacing: 4) { crews }
             }
             .font(.subheadline)
-            Text("\(item.completedRoundCount) of \(item.totalRounds) rounds\(item.status == .COMPLETED ? "" : " · in progress")")
+            Text("\(item.completedRoundCount) \(item.completedRoundCount == 1 ? "round" : "rounds")\(item.status == .COMPLETED ? "" : " · in progress")")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
@@ -116,8 +116,8 @@ struct SessionDetailView: View {
                                 Text(t.roster.map(\.displayName).formatted(.list(type: .and)))
                                     .font(.subheadline)
                             }
-                            if let op = t.operatorDisplayName {
-                                Label("Operator: \(op)", systemImage: "iphone")
+                            if t.phoneCount > 0 {
+                                Label(t.phoneCount == 1 ? "1 phone" : "\(t.phoneCount) phones", systemImage: "iphone")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
@@ -146,7 +146,7 @@ struct SessionDetailView: View {
                 Button("Delete My Tracks & Photos From This Night", role: .destructive) { confirmMyData = true }
                 if item.isHost { Button("Delete This Night for Everyone", role: .destructive) { confirmDelete = true } }
             } footer: {
-                Text("Deleting your data removes your operator routes, raw GPS and photos you took; crew scores remain. The organizer can’t override your deletion.")
+                Text("Removes this phone’s routes, raw GPS and photos. Crew scores stay.")
             }
         }
         .navigationTitle(item.title)
@@ -159,7 +159,7 @@ struct SessionDetailView: View {
                     model.show("Deleted \(r.pointsDeleted) GPS points and \(r.photosDeleted) photos")
                 }
             }
-        } message: { Text("Your routes, raw GPS and photos from this night are removed. This can’t be undone.") }
+        } message: { Text("This can’t be undone.") }
         .confirmationDialog("Delete the whole night?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete Night", role: .destructive) {
                 perform($busy, $error) {
@@ -167,7 +167,7 @@ struct SessionDetailView: View {
                     dismiss()
                 }
             }
-        } message: { Text("Removes rounds, routes, photos and exports for both operators. This can’t be undone.") }
+        } message: { Text("Removes rounds, routes and photos for everyone. This can’t be undone.") }
         .errorAlert($error)
     }
 }

@@ -245,7 +245,7 @@ components:
             myTeam: { type: [string, 'null'] }
             completedRoundCount: { type: integer }
             rules: { $ref: '#/components/schemas/Rules' }
-            teams: { type: object, description: 'Per crew: {teamId, key, name, color, roster, operators: [{personId, displayName, isMe, consentGiven}], isMine}' }
+            teams: { type: object, description: 'Per crew: {teamId, key, name, color, roster, operators: [{uid, personId, displayName, isMe, consentGiven}], isMine}' }
             joinCode: { type: [string, 'null'], description: reusable night code; null once the night ends }
             revoked: { type: boolean }
         round: { oneOf: [{ $ref: '#/components/schemas/RoundView' }, { type: 'null' }] }

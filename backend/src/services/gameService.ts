@@ -675,8 +675,8 @@ export class GameService {
       const m = structuredClone(members[uid]!);
       if (ready && !hasConsent(m)) fail('CONSENT_REQUIRED', 'Accept the tracking and route disclosure first');
       m.health = healthFrom(preflight, m.health, now);
-      // Un-readying only clears the crew's mark if this phone set it.
-      if (!ready && round.ready[team] && round.ready[team]!.uid !== uid) return { result: { ok: true }, members: { ...members, [uid]: m } };
+      // Any phone of the crew sets or clears the crew's mark; a repeat mark only refreshes health.
+      if (ready && round.state === 'READY' && round.ready[team]) return { result: { ok: true }, members: { ...members, [uid]: m } };
       const t = engineSetReady(round, team, uid, ready, now);
       return { result: { ok: true }, round: t.round, members: { ...members, [uid]: m }, events: t.events, notifications: t.notifications };
     });
@@ -788,11 +788,12 @@ export class GameService {
     const warnings = new Set<string>();
     for (const team of roundTeams(round)) {
       const role = team === round.hidingTeam ? 'HIDER' : 'SEEKER';
-      const phones = (session.teams[team]?.operatorUids ?? []).filter((u) => eligible.has(u)).map((u) => members[u]!.health);
-      if (!phones.length) continue; // the engine reports the missing phone
+      // Phones that have reported in (the ready phone always has); the others report once tracking starts.
+      const phones = (session.teams[team]?.operatorUids ?? []).filter((u) => eligible.has(u)).map((u) => members[u]!.health).filter((h) => h.lastHeartbeatAt !== null);
+      if (!phones.length) continue; // the engine reports a crew without a ready phone
       const permitted = phones.filter((h) => h.permission === 'WHEN_IN_USE' || h.permission === 'ALWAYS');
       if (!permitted.length) blocking.push(`${role}_LOCATION_PERMISSION_DENIED`);
-      else if (permitted.length < phones.length) warnings.add(`${role}_SOME_PHONES_NO_LOCATION`);
+      else if (phones.some((h) => h.permission === 'DENIED' || h.permission === 'RESTRICTED')) warnings.add(`${role}_SOME_PHONES_NO_LOCATION`);
       if (!phones.some((h) => h.preciseLocation)) warnings.add(`${role}_PRECISE_LOCATION_OFF`);
       if (!phones.some((h) => h.lastHeartbeatAt !== null && now - h.lastHeartbeatAt <= 120_000)) warnings.add(`${role}_OFFLINE`);
       if (!phones.some((h) => h.lastSampleRecordedAt !== null && now - h.lastSampleRecordedAt <= 120_000)) warnings.add(`${role}_GPS_STALE`);

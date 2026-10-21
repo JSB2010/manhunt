@@ -6,19 +6,19 @@ struct CreateNightView: View {
 
     @State private var title = "Manhunt night"
     @State private var date = Date()
-    @State private var nameA = "Crew A"
-    @State private var nameB = "Crew B"
+    @State private var crews = CrewDraft.defaults(count: 2)
     @State private var myTeam: TeamKey = .A
-    @State private var rosterA: [RosterEntryBody] = []
-    @State private var rosterB: [RosterEntryBody] = []
+    @State private var firstHider: TeamKey = .A
+    @State private var seekMode: SeekMode = .TOGETHER
     @State private var rules = Rules.defaults
     @State private var groups: [GroupsResponse.Group] = []
     @State private var groupId: String?
-    @State private var acknowledged = false
     @State private var busy = false
     @State private var error: String?
 
     private var groupPeople: [Person] { groups.first(where: { $0.id == groupId })?.people ?? [] }
+    private var selfPersonId: String? { model.me?.profile.selfPersonId }
+    private func name(_ k: TeamKey) -> String { crews.first { $0.key == k }?.name ?? "Crew \(k.rawValue)" }
 
     var body: some View {
         NavigationStack {
@@ -33,28 +33,22 @@ struct CreateNightView: View {
                         }
                     }
                 }
-                Section {
-                    Label { TextField("Crew A name", text: $nameA) } icon: { CrewDot(key: .A) }
-                    Label { TextField("Crew B name", text: $nameB) } icon: { CrewDot(key: .B) }
-                    Picker("My phone operates", selection: $myTeam) {
-                        Text(nameA).tag(TeamKey.A)
-                        Text(nameB).tag(TeamKey.B)
+                CrewsEditor(crews: $crews, phonePersonIds: Set([selfPersonId].compactMap { $0 }), groupPeople: groupPeople) { followSelf() }
+                Section("Round 1") {
+                    Picker("My phone’s crew", selection: $myTeam) {
+                        ForEach(crews) { Text($0.name).tag($0.key) }
                     }
                     .onChange(of: myTeam) { _, _ in placeSelf() }
-                } header: {
-                    Text("Crews")
-                } footer: {
-                    Text("You’ll invite the other crew’s operator next. Exactly two tracking iPhones: one per crew.")
+                    Picker("Hides first", selection: $firstHider) {
+                        ForEach(crews) { Text($0.name).tag($0.key) }
+                    }
+                    if crews.count > 2 {
+                        Picker("Seeking crews", selection: $seekMode) {
+                            ForEach(SeekMode.allCases) { Text($0.label).tag($0) }
+                        }
+                    }
                 }
-                RosterEditor(title: "\(nameA) Roster", roster: $rosterA, excluded: Set(rosterB.compactMap(\.personId)), groupPeople: groupPeople)
-                RosterEditor(title: "\(nameB) Roster", roster: $rosterB, excluded: Set(rosterA.compactMap(\.personId)), groupPeople: groupPeople)
-                RulesEditor(rules: $rules, teamNames: (nameA, nameB))
-                Section {
-                    CheckRow(text: "I’ll tell my crew that my phone’s route, our roster and catch photos are recorded, released to the other crew as scheduled pings during play, and shown to both operators after each round.", isOn: $acknowledged)
-                        .accessibilityIdentifier("create.ack")
-                } header: {
-                    Text("Disclosure")
-                }
+                RulesEditor(rules: $rules)
             }
             .navigationTitle("Create a Night")
             .navigationBarTitleDisplayMode(.inline)
@@ -62,9 +56,13 @@ struct CreateNightView: View {
                 ToolbarItem(placement: .cancellationAction) { CancelButton { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     ConfirmButton(title: "Create", busy: busy) { create() }
-                        .disabled(!acknowledged || title.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || crews.contains { $0.name.trimmingCharacters(in: .whitespaces).isEmpty })
                         .accessibilityIdentifier("create.submit")
                 }
+            }
+            .onChange(of: crews.count) { _, _ in
+                if !crews.contains(where: { $0.key == myTeam }) { myTeam = .A; placeSelf() }
+                if !crews.contains(where: { $0.key == firstHider }) { firstHider = .A }
             }
             .task {
                 #if DEBUG
@@ -72,7 +70,6 @@ struct CreateNightView: View {
                 if ProcessInfo.processInfo.arguments.contains("-uiTestShortRules") {
                     rules.headStartSeconds = 60
                     rules.pingIntervalSeconds = 60
-                    rules.totalRounds = 2
                     title = "UI test night"
                 }
                 #endif
@@ -83,12 +80,18 @@ struct CreateNightView: View {
         }
     }
 
+    /// The creator's own name sits on the crew their phone joins.
     private func placeSelf() {
         guard let me = model.me else { return }
-        let selfEntry = RosterEntryBody(personId: me.profile.selfPersonId, displayName: me.profile.displayName)
-        rosterA.removeAll { $0.personId == selfEntry.personId }
-        rosterB.removeAll { $0.personId == selfEntry.personId }
-        if myTeam == .A { rosterA.insert(selfEntry, at: 0) } else { rosterB.insert(selfEntry, at: 0) }
+        let entry = RosterEntryBody(personId: me.profile.selfPersonId, displayName: me.profile.displayName)
+        for i in crews.indices { crews[i].roster.removeAll { $0.personId == entry.personId } }
+        if let i = crews.firstIndex(where: { $0.key == myTeam }) { crews[i].roster.insert(entry, at: 0) }
+    }
+
+    /// After a shuffle, the phone goes where its owner was dealt.
+    private func followSelf() {
+        guard let selfPersonId, let crew = crews.first(where: { $0.roster.contains { $0.personId == selfPersonId } }) else { return }
+        myTeam = crew.key
     }
 
     private func create() {
@@ -99,7 +102,9 @@ struct CreateNightView: View {
             title: title,
             scheduledDate: f.string(from: date),
             myTeam: myTeam,
-            teams: ["A": .init(name: nameA, roster: rosterA), "B": .init(name: nameB, roster: rosterB)],
+            teams: Dictionary(uniqueKeysWithValues: crews.map { ($0.key.rawValue, TeamInputBody(name: $0.name, roster: $0.roster)) }),
+            firstHidingTeam: firstHider,
+            seekMode: crews.count > 2 ? seekMode : nil,
             rules: RulesPatch(rules),
             groupId: groupId)
         perform($busy, $error) {

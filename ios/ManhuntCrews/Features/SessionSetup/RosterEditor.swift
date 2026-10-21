@@ -7,7 +7,7 @@ struct RosterEditor: View {
     @Environment(AppModel.self) private var model
     let title: String
     @Binding var roster: [RosterEntryBody]
-    /// People already used by the other crew (cannot be on both).
+    /// People already on another crew (nobody is on two).
     var excluded: Set<String> = []
     var groupPeople: [Person] = []
 
@@ -39,8 +39,6 @@ struct RosterEditor: View {
             Button("Choose Saved People…") { showPicker = true }
         } header: {
             Text(title)
-        } footer: {
-            Text("Named crew members don’t need the app. Only the operator’s phone is tracked as the crew’s location.")
         }
         .sheet(isPresented: $showPicker) {
             PeoplePicker(selected: Set(roster.compactMap(\.personId)), excluded: excluded, groupPeople: groupPeople) { picked in
@@ -81,7 +79,7 @@ struct RosterEditor: View {
     private func append(_ p: Person) {
         duplicates = []
         newName = ""
-        guard !excluded.contains(p.id) else { error = "\(p.displayName) is already on the other crew."; return }
+        guard !excluded.contains(p.id) else { error = "\(p.displayName) is already on another crew."; return }
         if !roster.contains(where: { $0.personId == p.id }) { roster.append(.init(personId: p.id, displayName: p.displayName)) }
     }
 }

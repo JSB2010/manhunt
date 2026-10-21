@@ -23,12 +23,13 @@ struct RoundSummary: Codable, Sendable {
     }
     struct Claim: Codable, Identifiable, Sendable {
         var claimId: String
+        var team: TeamKey?
         var status: String
         var submittedAt: Date?
         var reviewedAt: Date?
         var rejectionReason: String?
         var chaseSecondsAtClaim: Int?
-        var hasPhoto: Bool
+        /// nil when there is no photo, or this phone may not see it (another crew's RACE claim)
         var photoPath: String?
         var id: String { claimId }
     }
@@ -48,9 +49,11 @@ struct RoundSummary: Codable, Sendable {
     var state: RoundState
     var summaryReady: Bool
     var hidingTeam: TeamKey
-    var seekingTeam: TeamKey
+    var seekingTeams: [TeamKey]
+    var seekMode: SeekMode
+    var myTeam: TeamKey?
     var teamNames: [String: String]
-    var teamColors: [String: String]
+    var teamColors: [String: String?]
     var rules: Rules
     var result: RoundResult?
     var roundStartAt: Date?
@@ -103,8 +106,10 @@ struct TeamScore: Codable, Sendable {
     var hideSurvivalAverageIncludesCensored: Bool
     var caughtOnlyHideAverageSeconds: Int?
     var seekRoundCount: Int
+    var seekCreditedCatches: Int
     var seekCaptureAverageSeconds: Int?
     var seekUncaughtCount: Int
+    var seekCaughtByOtherCrew: Int
     var hiderFootMetersTotal: Double
     var hiderFootMetersChase: Double
     var seekerVehicleMetersChase: Double
@@ -142,7 +147,6 @@ struct SessionAnalytics: Codable, Sendable {
     var title: String
     var scheduledDate: String
     var status: SessionStatus
-    var plannedRounds: Int
     var playedRounds: Int
     var teams: [String: TeamInfo]
     var scorecard: Scorecard
@@ -174,7 +178,7 @@ struct MeResponse: Codable, Sendable {
         var inviteId: String
         var sessionId: String
         var sessionTitle: String
-        var teamName: String
+        var teamName: String?
         var hostDisplayName: String?
         var expiresAt: Date
         var id: String { inviteId }
@@ -231,7 +235,7 @@ struct IdResponse: Codable, Sendable { var id: String }
 struct PersonAnalyticsResponse: Codable, Sendable {
     struct Analytics: Codable, Sendable {
         struct Hide: Codable, Sendable { var rounds: Int; var averageSeconds: Int?; var caught: Int; var censored: Int; var includesCensored: Bool }
-        struct Seek: Codable, Sendable { var rounds: Int; var averageSeconds: Int?; var uncaught: Int }
+        struct Seek: Codable, Sendable { var rounds: Int; var averageSeconds: Int?; var uncaught: Int; var caughtByOtherCrew: Int }
         struct Paired: Codable, Sendable { var stronger: Int; var weaker: Int; var tied: Int; var provisional: Int; var insufficient: Int }
         struct Composition: Codable, Identifiable, Sendable { var fingerprint: String; var members: [PersonRef]; var rounds: Int; var hideRounds: Int; var hideAverageSeconds: Int?; var censoredHideRounds: Int; var id: String { fingerprint } }
         struct CoPlayer: Codable, Identifiable, Sendable { var personId: String; var displayName: String; var sessionsTogether: Int; var id: String { personId } }

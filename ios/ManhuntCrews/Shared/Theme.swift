@@ -7,7 +7,13 @@ import SwiftUI
 /// All are asset-catalog colours with dark and increased-contrast variants that keep
 /// text at 4.5:1 or better on system backgrounds.
 enum Theme {
-    static func crew(_ key: TeamKey) -> Color { key == .A ? Color(.crewA) : Color(.crewB) }
+    static func crew(_ key: TeamKey) -> Color {
+        switch key {
+        case .A: Color(.crewA)
+        case .B: Color(.crewB)
+        case .C: Color(.crewC)
+        }
+    }
     static let ok = Color.accentColor
     static let warning = Color(.warning)
     static let danger = Color(.danger)
@@ -107,23 +113,21 @@ extension View {
 }
 
 extension String {
+    /// Start warnings arrive as `HIDER_…` / `SEEKER_…` codes, one per side of the round.
     var warningLabel: String {
+        let side = hasPrefix("HIDER_") ? "Hiders" : hasPrefix("SEEKER_") ? "Seekers" : nil
+        let code = side == nil ? self : String(drop(while: { $0 != "_" }).dropFirst())
         let map: [String: String] = [
-            "HIDER_PRECISE_LOCATION_OFF": "Hider: Precise Location is off",
-            "SEEKER_PRECISE_LOCATION_OFF": "Seeker: Precise Location is off",
-            "HIDER_OFFLINE": "Hider phone hasn’t checked in recently",
-            "SEEKER_OFFLINE": "Seeker phone hasn’t checked in recently",
-            "HIDER_GPS_STALE": "Hider has no recent GPS fix",
-            "SEEKER_GPS_STALE": "Seeker has no recent GPS fix",
-            "HIDER_GPS_INACCURATE": "Hider GPS accuracy is poor",
-            "SEEKER_GPS_INACCURATE": "Seeker GPS accuracy is poor",
-            "HIDER_LOW_POWER_MODE": "Hider is in Low Power Mode",
-            "SEEKER_LOW_POWER_MODE": "Seeker is in Low Power Mode",
-            "HIDER_LOCATION_PERMISSION_DENIED": "Hider has location permission off",
-            "SEEKER_LOCATION_PERMISSION_DENIED": "Seeker has location permission off",
-            "HIDER_CONSENT_MISSING": "Hider hasn’t accepted the tracking disclosure",
-            "SEEKER_CONSENT_MISSING": "Seeker hasn’t accepted the tracking disclosure",
+            "PRECISE_LOCATION_OFF": "Precise Location is off",
+            "OFFLINE": "no phone has checked in recently",
+            "GPS_STALE": "no recent GPS fix",
+            "GPS_INACCURATE": "GPS accuracy is poor",
+            "LOW_POWER_MODE": "a phone is in Low Power Mode",
+            "LOCATION_PERMISSION_DENIED": "location access is off",
+            "SOME_PHONES_NO_LOCATION": "a phone has location access off",
+            "CONSENT_MISSING": "tracking not accepted",
         ]
-        return map[self] ?? self.replacingOccurrences(of: "_", with: " ").capitalized
+        let text = map[code] ?? code.replacingOccurrences(of: "_", with: " ").lowercased()
+        return side.map { "\($0): \(text)" } ?? text.prefix(1).uppercased() + text.dropFirst()
     }
 }

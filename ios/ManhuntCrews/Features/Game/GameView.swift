@@ -37,7 +37,7 @@ struct GameView: View {
             .ignoresSafeArea()
             .safeAreaInset(edge: .top, spacing: 8) {
                 VStack(spacing: 8) {
-                    PhaseBanner(view: view, round: round, showPassengerReminder: !carMoving)
+                    PhaseBanner(view: view, round: round)
                     banners
                     HStack(alignment: .top) {
                         MapScaleView(scope: mapScope)
@@ -75,9 +75,9 @@ struct GameView: View {
             }
             .confirmationDialog("Abort this round?", isPresented: $confirmAbort, titleVisibility: .visible) {
                 Button("Abort for Safety", role: .destructive) { act { try await model.api.abort(view.sessionId, round.id, reason: "Safety abort from the field", safety: true) } }
-                Button("Abort (Both Crews Agreed)", role: .destructive) { act { try await model.api.abort(view.sessionId, round.id, reason: "Aborted by agreement", safety: false) } }
+                Button("Abort (Everyone Agreed)", role: .destructive) { act { try await model.api.abort(view.sessionId, round.id, reason: "Aborted by agreement", safety: false) } }
                 Button("Keep Playing", role: .cancel) {}
-            } message: { Text("The round is recorded as aborted, not caught. It won’t count toward crew comparisons.") }
+            } message: { Text("An aborted round doesn’t count.") }
             .confirmationDialog("Stop tracking this phone?", isPresented: $confirmStopTracking, titleVisibility: .visible) {
                 Button("Stop Tracking & Safety Pause", role: .destructive) {
                     act {
@@ -86,13 +86,13 @@ struct GameView: View {
                     }
                 }
                 Button("Cancel", role: .cancel) {}
-            } message: { Text("Both crews will see that tracking stopped. Pings can’t be released while it’s off — this affects fairness.") }
+            } message: { Text("Everyone sees that tracking stopped.") }
             .alert("Pause the round?", isPresented: $showPausePrompt) {
                 TextField("Reason (optional)", text: $pauseReason)
                 Button("Request Pause") { act { try await model.api.pause(view.sessionId, round.id, safety: false, reason: pauseReason.isEmpty ? nil : pauseReason) } }
                 Button("Safety Pause Now", role: .destructive) { act { try await model.api.pause(view.sessionId, round.id, safety: true, reason: pauseReason.isEmpty ? nil : pauseReason) } }
                 Button("Cancel", role: .cancel) {}
-            } message: { Text("A normal pause needs the other operator to confirm. A safety pause takes effect immediately for both crews.") }
+            } message: { Text("A pause starts when the other side confirms; a safety pause starts now.") }
             .errorAlert($error)
     }
 
@@ -114,6 +114,11 @@ struct GameView: View {
                 }
                 Annotation(role == .HIDING ? "Seen at ping \(pin.index)" : "Ping \(pin.index)", coordinate: pin.coordinate, anchor: .bottom) {
                     PinMarker(pin: pin, latest: latest, ownPin: role == .HIDING, color: hiderColor)
+                        .contextMenu {
+                            if role == .SEEKING {
+                                Button("Directions", systemImage: "arrow.triangle.turn.up.right.diamond.fill") { Directions.open(to: pin) }
+                            }
+                        }
                 }
                 .annotationTitles(.hidden)
             }
@@ -142,22 +147,28 @@ struct GameView: View {
                 MapBanner(text: "Location permission is off — this phone isn’t tracked", systemImage: "location.slash.fill", tint: Theme.danger)
             }
         }
-        if let p = round.pendingPauseRequest {
+        if role == .HIDING, round.waitingPing != nil {
+            MapBanner(text: "Seekers are waiting on your ping. Get signal.", systemImage: "antenna.radiowaves.left.and.right.slash", tint: Theme.warning)
+        }
+        if let p = round.pendingPauseRequest, role != nil {
             if p.mine {
-                MapBanner(text: "Pause requested — waiting for the other operator", systemImage: "pause.circle.fill", tint: Theme.warning)
+                MapBanner(text: "Pause requested — waiting for the \(p.bySide == .HIDERS ? "seekers" : "hiders")", systemImage: "pause.circle.fill", tint: Theme.warning)
             } else {
-                MapBanner(text: "\(view.session.team(p.byTeam)?.name ?? "The other crew") asked to pause\(p.reason.map { ": \($0)" } ?? "")",
+                MapBanner(text: "\(view.session.name(p.byTeam)) asked to pause\(p.reason.map { ": \($0)" } ?? "")",
                           systemImage: "pause.circle.fill", tint: Theme.warning, actionTitle: "Confirm") {
                     act { try await model.api.pause(view.sessionId, round.id, safety: false, reason: p.reason) }
                 }
             }
+        }
+        if role == nil {
+            MapBanner(text: "You joined after this round started — watching only.", systemImage: "eye", tint: .secondary)
         }
         if let o = round.lastClaimOutcome, o.status != "CONFIRMED", dismissedClaimOutcomeAt != o.at, ServerClock.shared.now().timeIntervalSince(o.at) < 180 {
             MapBanner(text: o.status == "REJECTED" ? "Catch rejected\(o.reason.map { ": \($0)" } ?? "") — round resumed" : "Catch claim expired — round resumed",
                       systemImage: "camera.badge.ellipsis", tint: Theme.warning, actionTitle: "Dismiss") { dismissedClaimOutcomeAt = o.at }
         }
         if carMoving {
-            MapBanner(text: "Car is moving — passenger only. The driver must never use this app.", systemImage: "car.fill", tint: Theme.warning)
+            MapBanner(text: "Car is moving — passenger only.", systemImage: "car.fill", tint: Theme.warning)
         }
     }
 
@@ -174,7 +185,7 @@ struct GameView: View {
             GlassGroup(spacing: 12) {
                 HStack(spacing: 12) {
                     Menu {
-                        if round.rules.manualPausesEnabled { Button("Pause…", systemImage: "pause") { showPausePrompt = true } }
+                        if round.rules.manualPausesEnabled && role != nil { Button("Pause…", systemImage: "pause") { showPausePrompt = true } }
                         Button("Safety Pause Now", systemImage: "exclamationmark.octagon") { act { try await model.api.pause(view.sessionId, round.id, safety: true, reason: nil) } }
                         Button("Phone Status", systemImage: "antenna.radiowaves.left.and.right") { showStatus = true }
                         Divider()
@@ -189,6 +200,19 @@ struct GameView: View {
                     .buttonBorderShape(.circle)
 
                     primaryControl
+
+                    if role == .SEEKING, let pin = round.pins.last {
+                        Button { Directions.open(to: pin) } label: {
+                            Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                                .labelStyle(.iconOnly)
+                                .frame(minWidth: 24, minHeight: 24)
+                        }
+                        .floatingButton()
+                        .buttonBorderShape(.circle)
+                        .accessibilityLabel("Directions to ping \(pin.index)")
+                        .accessibilityHint("Opens driving directions in Maps")
+                        .accessibilityIdentifier("game.directions")
+                    }
 
                     Button { model.closeSession() } label: {
                         Label("Home", systemImage: "house.fill")
@@ -207,7 +231,7 @@ struct GameView: View {
     @ViewBuilder private var primaryControl: some View {
         if role == .SEEKING {
             Button { showCapture = true } label: {
-                ActionLabel(title: round.state == .CAPTURE_PENDING ? "Awaiting Confirmation" : "Photo Catch", systemImage: "camera.fill")
+                ActionLabel(title: round.state == .CAPTURE_PENDING ? pendingTitle : "Photo Catch", systemImage: "camera.fill")
             }
             .floatingProminentButton()
             .disabled(round.state != .CHASE)
@@ -219,7 +243,28 @@ struct GameView: View {
         }
     }
 
+    /// While a claim is reviewed: "Awaiting confirmation" for the claiming crew, who claimed for everyone else.
+    private var pendingTitle: String {
+        if round.myClaim != nil { return "Awaiting Confirmation" }
+        return round.claimByTeam.map { "\(view.session.name($0)) Claimed" } ?? "Catch Under Review"
+    }
+
     private func act(_ work: @escaping () async throws -> Void) { perform($busy, $error, work) }
+}
+
+/// One-tap driving directions to a released ping in Apple Maps.
+enum Directions {
+    @MainActor
+    static func open(to pin: PinView) {
+        let item: MKMapItem
+        if #available(iOS 26.0, *) {
+            item = MKMapItem(location: CLLocation(latitude: pin.latitude, longitude: pin.longitude), address: nil)
+        } else {
+            item = MKMapItem(placemark: MKPlacemark(coordinate: pin.coordinate))
+        }
+        item.name = "Ping #\(pin.index) · \(Fmt.ago(pin.scheduledAt, now: ServerClock.shared.now()))"
+        item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeDriving])
+    }
 }
 
 private struct IdentifiedRequest: Identifiable {
@@ -332,7 +377,13 @@ struct PingChip: View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             let now = ServerClock.shared.now()
             Group {
-                if let last = round.pingLog.last, last.isMissing {
+                if let w = round.waitingPing {
+                    chip(symbol: "antenna.radiowaves.left.and.right", tint: Theme.warning,
+                         text: "Ping \(w.index): waiting for GPS · \(Fmt.clock(max(0, now.timeIntervalSince(w.since))))")
+                        .symbolEffect(.pulse)
+                        .accessibilityLabel("Ping \(w.index) is waiting for the hiders’ GPS. It goes out as soon as it arrives.")
+                        .accessibilityIdentifier("game.waitingPing")
+                } else if let last = round.pingLog.last, last.isMissing {
                     chip(symbol: "location.slash.fill", tint: Theme.warning, text: "Ping \(last.index): no fresh GPS")
                         .accessibilityLabel("Ping \(last.index) unavailable — the hiding crew had no fresh GPS fix")
                 } else if let pin = round.pins.last {
@@ -393,13 +444,25 @@ struct HealthChip: View {
         let loc = model.location
         if !loc.networkReachable { return ("Offline", "wifi.slash", Theme.danger) }
         if !loc.preciseLocation { return ("Precise Location off", "location.slash.fill", Theme.danger) }
-        let opponent = HealthPresentation(health: round.opponentHealth)
-        if opponent.state == .problem { return ("Other phone: \(opponent.shortText)", opponent.symbol, opponent.tint) }
+        // Worst other crew first: e.g. "Hiders: no signal".
+        let others = round.teams.filter { $0 != round.myTeam }.compactMap { k in round.status(k).map { (k, HealthPresentation(status: $0)) } }
+        let worst = others.max { rank($0.1.state) < rank($1.1.state) }
+        let label = { (k: TeamKey) in round.role(of: k) == .HIDING ? "Hiders" : "Seekers" }
+        if let (k, p) = worst, p.state == .problem { return ("\(label(k)): \(p.text.lowercased())", p.symbol, p.tint) }
         guard let age = loc.lastFixAge else { return ("No GPS fix yet", "location", Theme.warning) }
         if age > 60 { return ("GPS stale \(Int(age))s", "exclamationmark.triangle.fill", Theme.warning) }
-        if opponent.isProblem { return ("Other phone: \(opponent.shortText)", opponent.symbol, opponent.tint) }
+        if let (k, p) = worst, p.isProblem { return ("\(label(k)): \(p.text.lowercased())", p.symbol, p.tint) }
         if loc.queuedSamples > 0 { return ("\(loc.queuedSamples) unsent", "tray.full.fill", Theme.warning) }
         return ("GPS ±\(Int(loc.lastFix?.horizontalAccuracy ?? 0)) m", "location.fill", Theme.ok)
+    }
+
+    private func rank(_ s: StatusRow.State) -> Int {
+        switch s {
+        case .problem: 3
+        case .warning: 2
+        case .neutral: 1
+        case .ok: 0
+        }
     }
 }
 
@@ -425,16 +488,16 @@ struct PhoneStatusSheet: View {
                         StatusRow(title: "Unsent samples", value: "\(loc.queuedSamples)", state: loc.queuedSamples > 0 ? .warning : .ok)
                         if let d = loc.lastDiagnostic { StatusRow(title: "Diagnostic", value: d, state: .warning) }
                     }
-                    Section {
-                        let p = HealthPresentation(health: round.opponentHealth)
-                        StatusRow(title: "Tracking", value: p.text, state: p.state)
-                        ForEach(HealthPresentation.extraIssues(round.opponentHealth), id: \.self) { issue in
-                            StatusRow(title: "Note", value: issue, state: .warning)
+                    ForEach(round.teams, id: \.self) { k in
+                        if let st = round.status(k) {
+                            Section(k == round.myTeam ? "Your Crew" : round.role(of: k) == .HIDING ? "Hiders" : "Seekers") {
+                                let p = HealthPresentation(status: st)
+                                StatusRow(title: "Phones", value: p.text, state: p.state)
+                                ForEach(HealthPresentation.extraIssues(st), id: \.self) { issue in
+                                    StatusRow(title: "Note", value: issue, state: .warning)
+                                }
+                            }
                         }
-                    } header: {
-                        Text("Other Crew’s Phone")
-                    } footer: {
-                        Text("Coarse status only, refreshed about every 30 seconds — never a location.")
                     }
                 }
             }

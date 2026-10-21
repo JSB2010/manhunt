@@ -170,7 +170,7 @@ private struct InvitationRow: View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(invite.sessionTitle).font(.headline)
-                Text("\(invite.hostDisplayName ?? "A friend") invited you to operate \(invite.teamName)")
+                Text("\(invite.hostDisplayName ?? "A friend") invited you")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

@@ -17,9 +17,6 @@ struct RulesPatch: Codable, Sendable {
     var headStartSeconds: Int?
     var pingIntervalSeconds: Int?
     var visiblePingHistoryCount: Int??
-    var totalRounds: Int?
-    var initialHidingTeam: TeamKey?
-    var alternateRoles: Bool?
     var maxChaseSeconds: Int??
     var confirmationTimeoutSeconds: Int?
     var manualPausesEnabled: Bool?
@@ -30,9 +27,6 @@ struct RulesPatch: Codable, Sendable {
         headStartSeconds = r.headStartSeconds
         pingIntervalSeconds = r.pingIntervalSeconds
         visiblePingHistoryCount = .some(r.visiblePingHistoryCount)
-        totalRounds = r.totalRounds
-        initialHidingTeam = r.initialHidingTeam
-        alternateRoles = r.alternateRoles
         maxChaseSeconds = .some(r.maxChaseSeconds)
         confirmationTimeoutSeconds = r.confirmationTimeoutSeconds
         manualPausesEnabled = r.manualPausesEnabled
@@ -46,9 +40,6 @@ struct RulesPatch: Codable, Sendable {
         try c.encodeIfPresent(headStartSeconds, forKey: .headStartSeconds)
         try c.encodeIfPresent(pingIntervalSeconds, forKey: .pingIntervalSeconds)
         if let v = visiblePingHistoryCount { try c.encode(v, forKey: .visiblePingHistoryCount) }
-        try c.encodeIfPresent(totalRounds, forKey: .totalRounds)
-        try c.encodeIfPresent(initialHidingTeam, forKey: .initialHidingTeam)
-        try c.encodeIfPresent(alternateRoles, forKey: .alternateRoles)
         if let v = maxChaseSeconds { try c.encode(v, forKey: .maxChaseSeconds) }
         try c.encodeIfPresent(confirmationTimeoutSeconds, forKey: .confirmationTimeoutSeconds)
         try c.encodeIfPresent(manualPausesEnabled, forKey: .manualPausesEnabled)
@@ -61,16 +52,43 @@ struct CreateSessionBody: Encodable, Sendable {
     var title: String
     var scheduledDate: String
     var myTeam: TeamKey
+    /// two or three crews keyed A, B[, C]
     var teams: [String: TeamInputBody]
+    var firstHidingTeam: TeamKey?
+    var seekMode: SeekMode?
     var rules: RulesPatch
     var groupId: String?
 }
 
+/// Between-rounds editor. A crew set to `.remove` is deleted (its phones move to the emptiest crew);
+/// operator phones change only through `moves` (teamKey nil removes the phone from the night).
 struct SetupPatchBody: Encodable, Sendable {
+    enum CrewEdit: Encodable, Sendable {
+        case edit(TeamPatch)
+        case remove
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.singleValueContainer()
+            switch self {
+            case .edit(let p): try c.encode(p)
+            case .remove: try c.encodeNil()
+            }
+        }
+    }
+    struct TeamPatch: Encodable, Sendable { var name: String?; var roster: [RosterEntryBody]? }
+    struct Move: Encodable, Sendable {
+        var uid: String
+        var teamKey: TeamKey?
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(uid, forKey: .uid)
+            try c.encode(teamKey, forKey: .teamKey) // explicit null = remove
+        }
+        enum CodingKeys: String, CodingKey { case uid, teamKey }
+    }
     var title: String?
     var rules: RulesPatch?
-    var teams: [String: TeamPatch]?
-    struct TeamPatch: Encodable, Sendable { var name: String?; var roster: [RosterEntryBody]? }
+    var teams: [String: CrewEdit]?
+    var moves: [Move]?
 }
 
 struct HealthPayload: Codable, Sendable {
@@ -130,17 +148,18 @@ extension APIClient {
         return try await get("/v1/sessions", query: q)
     }
     func session(_ id: String) async throws -> SessionViewDoc { try await get("/v1/sessions/\(id)") }
-    func createInvite(_ sid: String, targetUid: String? = nil) async throws -> InviteCreated {
-        struct Body: Encodable { var targetUid: String? }
-        return try await post("/v1/sessions/\(sid)/invites", Body(targetUid: targetUid))
+    /// The night's reusable code (fetched, not re-created). `regenerate` revokes the old one.
+    func nightCode(_ sid: String, regenerate: Bool = false, targetUid: String? = nil) async throws -> InviteCreated {
+        struct Body: Encodable { var targetUid: String?; var regenerate: Bool? }
+        return try await post("/v1/sessions/\(sid)/invites", Body(targetUid: targetUid, regenerate: regenerate ? true : nil))
     }
-    func previewInvite(code: String) async throws -> InvitePreview {
-        struct Body: Encodable { var code: String }
-        return try await post("/v1/invites/preview", Body(code: code))
-    }
-    func redeemInvite(code: String? = nil, inviteId: String? = nil) async throws -> SessionViewDoc {
+    func previewInvite(code: String? = nil, inviteId: String? = nil) async throws -> InvitePreview {
         struct Body: Encodable { var code: String?; var inviteId: String? }
-        return try await post("/v1/invites/redeem", Body(code: code, inviteId: inviteId))
+        return try await post("/v1/invites/preview", Body(code: code, inviteId: inviteId))
+    }
+    func redeemInvite(code: String? = nil, inviteId: String? = nil, teamKey: TeamKey? = nil) async throws -> SessionViewDoc {
+        struct Body: Encodable { var code: String?; var inviteId: String?; var teamKey: TeamKey? }
+        return try await post("/v1/invites/redeem", Body(code: code, inviteId: inviteId, teamKey: teamKey))
     }
     func editSetup(_ sid: String, _ body: SetupPatchBody) async throws { let _: OkResponse = try await patch("/v1/sessions/\(sid)/setup", body) }
     func consent(_ sid: String, accepted: Bool) async throws {
@@ -189,9 +208,10 @@ extension APIClient {
         let _: EmptyBody = try await post("/v1/sessions/\(sid)/rounds/\(rid)/captures/\(claimId)/dispute", Body(resolution: accept ? "ACCEPT_AS_CATCH" : "KEEP_REJECTED"))
     }
     func photo(path: String) async throws -> Data { try await raw("GET", path).0 }
-    func nextRound(_ sid: String, hidingTeam: TeamKey?, overrideReason: String?) async throws -> SessionViewDoc {
-        struct Body: Encodable { var hidingTeam: TeamKey?; var overrideReason: String? }
-        return try await post("/v1/sessions/\(sid)/next-round", Body(hidingTeam: hidingTeam, overrideReason: overrideReason))
+    /// Sets up the next round, or re-targets a READY one (who hides, together or race).
+    func nextRound(_ sid: String, hidingTeam: TeamKey? = nil, seekMode: SeekMode? = nil) async throws -> SessionViewDoc {
+        struct Body: Encodable { var hidingTeam: TeamKey?; var seekMode: SeekMode? }
+        return try await post("/v1/sessions/\(sid)/next-round", Body(hidingTeam: hidingTeam, seekMode: seekMode))
     }
     func completeSession(_ sid: String) async throws { let _: OkResponse = try await post("/v1/sessions/\(sid)/complete") }
     func keepPhotos(_ sid: String, keep: Bool) async throws {

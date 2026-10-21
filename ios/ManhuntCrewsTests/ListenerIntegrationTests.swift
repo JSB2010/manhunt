@@ -63,14 +63,14 @@ final class ListenerIntegrationTests: XCTestCase {
             XCTFail("listener did not deliver: \(label) (got \(received.count) snapshots)")
         }
 
-        try await waitFor("initial") { $0.session.team(.B)?.hasOperator == false }
-        let invite = try await host.createInvite(sid)
-        _ = try await guest.redeemInvite(code: invite.code)
-        try await waitFor("guest joined") { $0.session.team(.B)?.hasOperator == true }
+        try await waitFor("initial") { $0.session.team(.B)?.hasPhone == false }
+        let invite = try await host.nightCode(sid)
+        _ = try await guest.redeemInvite(code: invite.code, teamKey: .B)
+        try await waitFor("guest joined") { $0.session.team(.B)?.hasPhone == true }
         try await guest.consent(sid, accepted: true)
-        try await waitFor("guest consent") { $0.session.team(.B)?.consentGiven == true }
+        try await waitFor("guest consent") { $0.session.team(.B)?.operators.first?.consentGiven == true }
         try await host.consent(sid, accepted: true)
-        try await waitFor("host consent") { $0.session.team(.A)?.consentGiven == true }
+        try await waitFor("host consent") { $0.session.team(.A)?.operators.first?.consentGiven == true }
         let health = HealthPayload(permission: "WHEN_IN_USE", preciseLocation: true, trackingActive: false, backgroundSessionActive: false, lowPowerMode: false, batteryLevel: nil, networkReachable: true, appVersion: nil, queuedSamples: 0, lastFixAgeSeconds: nil, lastFixAccuracyMeters: nil)
         try await guest.setReady(sid, ready: true, preflight: health)
         try await waitFor("guest ready") { $0.round?.isReady(.B) == true }
