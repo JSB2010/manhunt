@@ -34,7 +34,7 @@
 | CSV injection in exports | Leading `= + - @` neutralized | code |
 
 ## Abuse limits
-Per-uid token buckets (per function instance): default 300/min, location 60/min, capture 20/min, invites 20/h, friend actions 30/h, exports 30/h, account deletion 10/h. Page sizes capped (sessions ≤ 50, batches ≤ 500 samples, photos ≤ 8 MB JPEG, ≤ 20 claims per seeker per round). Effective limits scale with instance count — acceptable for a friends-only app (`maxInstances` is 5 for `api`, set in `backend/src/functions/index.ts`).
+Per-uid token buckets (per function instance): default 300/min, open-night view poll (`GET /v1/sessions/:id`) 240/min, location 60/min, capture 20/min, invites 20/h, friend actions 30/h, exports 30/h, account deletion 10/h; every 429 carries `Retry-After`, which the app honours with jitter. Page sizes capped (sessions ≤ 50, batches ≤ 500 samples, photos ≤ 8 MB JPEG, ≤ 20 claims per seeker per round). Effective limits scale with instance count — acceptable for a friends-only app (`maxInstances` is 20 for `api`, set in `backend/src/functions/index.ts`; it scales to zero when idle).
 
 ## Device security
 Firebase Auth tokens live in the Keychain (SDK default). The offline GPS queue and unsent photos are AES-GCM encrypted with a `ThisDeviceOnly` Keychain key and written with `completeUntilFirstUserAuthentication` protection (required so background location writes work while locked). Everything is purged on logout and account deletion. Firestore cache is memory-only.

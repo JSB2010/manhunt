@@ -84,7 +84,9 @@ const getApiApp = () =>
     throw err;
   }));
 
-export const api = onRequest({ invoker: 'public', memory: '512MiB', concurrency: 40, maxInstances: 5, timeoutSeconds: 60 }, fastifyHandler(getApiApp));
+// Scales to zero when idle; the ceiling only bounds a busy night (Cloud Run answers
+// a plain 429 once every instance is saturated, which the app backs off from).
+export const api = onRequest({ invoker: 'public', memory: '512MiB', concurrency: 40, maxInstances: 20, timeoutSeconds: 60 }, fastifyHandler(getApiApp));
 
 export const tick = onTaskDispatched(
   {

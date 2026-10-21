@@ -50,18 +50,40 @@ final class AppModel {
     var pendingDeepLink: DeepLink?
     var toast: String?
 
-    init(env: AppEnvironment = .current) {
+    enum SignOutReason { case user, sessionExpired }
+    /// Set for the whole of `signOut`: nothing that fails during it may sign out again.
+    private var signingOut = false
+    @ObservationIgnored private var foregroundObserver: NSObjectProtocol?
+
+    init(env: AppEnvironment = .current, api: APIClient? = nil) {
         self.env = env
-        self.api = APIClient(baseURL: env.apiBaseURL)
+        self.api = api ?? APIClient(baseURL: env.apiBaseURL)
         self.auth = AuthService(env: env)
         self.location = LocationTrackingCoordinator()
         self.notifications = NotificationService(env: env)
         firebaseError = env.configureFirebase()
         let auth = self.auth
-        api.tokenProvider = { force in try await auth.idToken(forceRefresh: force) }
-        location.attach(api: api)
-        notifications.attach(api: api)
+        let client = self.api
+        client.tokenProvider = { force in try await auth.idToken(forceRefresh: force) }
+        auth.onAccountEnded = { [weak self] in
+            guard let self else { return }
+            if self.auth.uid == nil {
+                // Firebase signed out by force (revoked refresh token, deleted or disabled account).
+                Task { await self.signOut(reason: .sessionExpired) }
+            } else {
+                Task { await client.resetAuth() }
+            }
+        }
+        location.attach(api: client)
+        notifications.attach(api: client)
         if firebaseError == nil { auth.start() }
+        // Tokens expire while the app is suspended; refresh once on return, before the screen's requests pile in.
+        foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.auth.uid != nil else { return }
+                await self.api.tokens?.refreshIfNeeded()
+            }
+        }
     }
 
     // MARK: Session lifecycle
@@ -78,15 +100,21 @@ final class AppModel {
     }
 
     func refreshMe() async {
+        // Signed out (or signing out): there is no profile to load, and a failed
+        // load must not be mistaken for an expired session.
+        guard let uid = auth.uid, !signingOut else { return }
         do {
-            me = try await api.me()
+            let fresh = try await api.me()
+            guard auth.uid == uid else { return }
+            me = fresh
             meError = nil
         } catch APIError.unauthenticated {
-            // The stored session is no longer valid (expired refresh token, deleted
+            // The stored session is no longer valid (revoked refresh token, deleted
             // account, or a reset backend). Don't strand the user on an error screen.
-            await signOut()
-            show("Your session expired — please sign in again.")
+            guard auth.uid == uid, !signingOut else { return }
+            await signOut(reason: .sessionExpired)
         } catch {
+            guard auth.uid == uid else { return }
             meError = error.localizedDescription
         }
     }
@@ -159,14 +187,15 @@ final class AppModel {
         }
     }
 
-    func closeSession() {
+    /// `refresh: false` during sign-out: there is no account left to refresh.
+    func closeSession(refresh: Bool = true) {
         realtimeLog.info("closeSession")
         reconcileTask?.cancel()
         reconcileTask = nil
         listener.stop()
         activeSessionId = nil
         sessionView = nil
-        Task { await refreshMe() }
+        if refresh { Task { await refreshMe() } }
     }
 
     private func handle(_ update: SessionViewListener.Update) {
@@ -214,13 +243,21 @@ final class AppModel {
 
     // MARK: Account
 
-    func signOut() async {
+    /// Never re-entrant. Everything that calls the API (and could fail and land
+    /// back here) stops first. Only an involuntary sign-out says the session expired.
+    func signOut(reason: SignOutReason = .user) async {
+        guard !signingOut else { return }
+        signingOut = true
+        defer { signingOut = false }
+        closeSession(refresh: false)
         await location.purgeLocalData()
         notifications.clearAll()
-        closeSession()
         EncryptedStore.purgeAll()
+        await api.resetAuth()
         try? auth.signOut()
         me = nil
+        meError = nil
+        if reason == .sessionExpired { show("Your session expired — please sign in again.") }
     }
 
     func handle(url: URL) {
