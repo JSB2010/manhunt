@@ -30,7 +30,7 @@ struct GroupsView: View {
                 ContentUnavailableView {
                     Label("No Groups", systemImage: "person.3.fill")
                 } description: {
-                    Text("Save your usual crew pool to set up nights faster.")
+                    Text("Save your usual players for quicker setup.")
                 } actions: {
                     Button("New Group") { creating = true }.buttonStyle(.borderedProminent)
                 }
@@ -79,7 +79,7 @@ struct GroupEditor: View {
                     ForEach(friends) { f in
                         Toggle(f.displayName, isOn: Binding(get: { selectedFriends.contains(f.uid) }, set: { if $0 { selectedFriends.insert(f.uid) } else { selectedFriends.remove(f.uid) } }))
                     }
-                } header: { Text("Share With Friends") } footer: { Text("Shared friends can see this group’s roster and use it for nights.") }
+                } header: { Text("Share With Friends") } footer: { Text("Shared friends can see this group’s roster.") }
             }
             .navigationTitle(group == nil ? "New Group" : "Edit Group")
             .navigationBarTitleDisplayMode(.inline)

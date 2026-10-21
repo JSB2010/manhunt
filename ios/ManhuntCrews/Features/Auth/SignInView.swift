@@ -25,7 +25,7 @@ struct SignInView: View {
                         BrandMark()
                         Text("Manhunt Crews")
                             .font(.largeTitle.bold())
-                        Text("Two crews, one phone each. Scheduled pings, photo catches and honest stats.")
+                        Text("Scheduled pings. Photo catches. Crew stats.")
                             .font(.body)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -186,20 +186,17 @@ struct PrivacySummaryView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("What Is Recorded") {
-                    Label("Only the two crew operator phones are tracked, and only during a round you explicitly start (plus a short ready check). Tracking stops when the round ends.", systemImage: "iphone.gen3.radiowaves.left.and.right")
-                    Label("Your crew’s exact route is hidden from the other crew while playing. They only receive scheduled location pings.", systemImage: "eye.slash.fill")
-                    Label("After each round, both operators can see both routes, pings, distances and the catch photo.", systemImage: "map.fill")
+                Section("While You Play") {
+                    Label("Each crew’s operator phones are tracked only during rounds you start, plus the ready check.", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                    Label("Other crews get only scheduled pings, never your live location or route.", systemImage: "eye.slash.fill")
                 }
-                Section("Teammates Without the App") {
-                    Label("Make sure your crew knows the operator phone’s location, the crew roster and catch photos are recorded and shown to both operators after rounds.", systemImage: "person.3.fill")
+                Section("After a Round") {
+                    Label("The round’s phones see its pings, distances and catch photo, and its routes if everyone in the round agreed.", systemImage: "map.fill")
+                    Label("Crew rosters and catch photos are saved too, so let teammates without the app know.", systemImage: "person.3.fill")
                 }
                 Section("Retention and Deletion") {
-                    Label("Raw GPS samples: up to 30 days. Simplified routes and stats: until the night is deleted or you delete your data. Rejected photos: 7 days; confirmed photos: 30 days unless both operators keep them.", systemImage: "clock.arrow.circlepath")
-                    Label("You can delete your own tracks and photos from any night, delete a night you organized, or delete your account in Settings.", systemImage: "trash")
-                }
-                Section("Honesty About GPS") {
-                    Label("iOS may delay or pause background location, and a force-quit stops tracking. Missing fixes are shown as missing, never invented. Notifications can be late; the app’s clock comes from the server.", systemImage: "location.slash.fill")
+                    Label("Raw GPS: 30 days. Routes and stats: until deleted. Photos: 7 days if unconfirmed; 30 days if confirmed, unless every crew keeps them.", systemImage: "clock.arrow.circlepath")
+                    Label("Delete your tracks and photos from any night, a night you organized, or your whole account in Settings.", systemImage: "trash")
                 }
             }
             .labelStyle(PrivacyLabelStyle())

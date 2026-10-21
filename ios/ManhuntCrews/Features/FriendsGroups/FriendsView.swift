@@ -31,7 +31,7 @@ struct FriendsView: View {
             } header: {
                 Text("Add Friends")
             } footer: {
-                Text("Friends can be invited to nights and groups. Friendship never shares your location; there’s no public map or directory.")
+                Text("Friends never see your location.")
             }
 
             if let incoming = requests?.incoming, !incoming.isEmpty {
@@ -74,7 +74,7 @@ struct FriendsView: View {
                         }
                 }
                 if friends != nil && (friends?.friends ?? []).isEmpty {
-                    Text("No friends yet — share your link or add a handle above.")
+                    Text("No friends yet.")
                         .foregroundStyle(.secondary)
                 }
             }

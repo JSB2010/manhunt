@@ -51,7 +51,7 @@ struct PeopleView: View {
             } header: {
                 Text("Add a Person")
             } footer: {
-                Text("People don’t need accounts. Use the same saved person across nights so stats follow them even when crews change.")
+                Text("No account needed. Stats follow each person.")
             }
             if !links.isEmpty {
                 Section("Account Link Requests") {
@@ -87,7 +87,7 @@ struct PeopleView: View {
         .confirmationDialog("Already saved?", isPresented: Binding(get: { !duplicates.isEmpty }, set: { if !$0 { duplicates = [] } }), titleVisibility: .visible) {
             Button("Create a new \(newName) anyway") { create(confirm: true) }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("You already have: " + duplicates.map(\.displayName).joined(separator: ", ") + ". Reuse them to keep history together.") }
+        } message: { Text("You already have " + duplicates.map(\.displayName).formatted(.list(type: .and)) + ".") }
         .errorAlert($error)
     }
 
@@ -124,16 +124,16 @@ struct PersonDetailView: View {
             if person.canEdit {
                 Section("Name") {
                     TextField("Name", text: $name)
-                    Button("Save Name") { perform($busy, $error) { _ = try await model.api.renamePerson(person.id, name: name); model.show("Saved — past nights keep the names used then") } }
+                    Button("Save Name") { perform($busy, $error) { _ = try await model.api.renamePerson(person.id, name: name); model.show("Saved") } }
                         .disabled(name == person.displayName || name.isEmpty)
                     if !person.hasAccount { Button("Merge Into Another Saved Person…") { showMerge = true } }
                 }
             } else if !person.hasAccount {
                 Section {
                     Button("This Is Me — Request Account Link") {
-                        perform($busy, $error) { try await model.api.requestPersonLink(person.id); model.show("Request sent to the organizer who saved this person") }
+                        perform($busy, $error) { try await model.api.requestPersonLink(person.id); model.show("Request sent") }
                     }
-                } footer: { Text("The organizer who created this person must confirm. Names alone never link accounts.") }
+                } footer: { Text("Whoever saved this person must approve.") }
             }
             if let a = stats?.analytics {
                 Section {
@@ -171,7 +171,7 @@ struct PersonDetailView: View {
                     perform($busy, $error) { try await model.api.mergePerson(person.id, into: target.id); dismiss() }
                 }
             }
-        } message: { Text("Use this for duplicates of the same human. History snapshots keep their original names.") }
+        } message: { Text("For duplicates of the same person.") }
         .errorAlert($error)
     }
 }

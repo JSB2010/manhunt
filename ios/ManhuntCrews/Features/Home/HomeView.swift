@@ -18,9 +18,9 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let notice = model.location.interruptedResumeNotice {
+                if model.location.interruptedResumeNotice != nil {
                     Section {
-                        InlineNotice(message: notice, actionTitle: "Dismiss") {
+                        InlineNotice(message: "Tracking was interrupted and has resumed.", actionTitle: "Dismiss") {
                             model.location.dismissResumeNotice()
                         }
                     }
@@ -60,19 +60,6 @@ struct HomeView: View {
                     .controlSize(.large)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
-                }
-
-                if active.isEmpty && invites.isEmpty {
-                    Section {
-                        HowItWorksRow(symbol: "iphone.gen3.radiowaves.left.and.right", title: "Two Phones, Two Crews",
-                                      detail: "Each crew carries one tracking iPhone. Teammates don’t need the app.")
-                        HowItWorksRow(symbol: "diamond.fill", title: "Pings, Not Live Location",
-                                      detail: "Seekers only see the hiders’ position at scheduled pings — the first when the head start ends.")
-                        HowItWorksRow(symbol: "camera.fill", title: "Catch With a Photo",
-                                      detail: "Seekers snap the catch; hiders confirm it. Then crews swap roles.")
-                    } header: {
-                        Text("How It Works")
-                    }
                 }
             }
             .listSectionSpacing(.compact)
@@ -179,27 +166,6 @@ private struct InvitationRow: View {
                 .controlSize(.small)
         }
         .padding(.vertical, 4)
-    }
-}
-
-private struct HowItWorksRow: View {
-    let symbol: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Image(systemName: symbol)
-                .foregroundStyle(.tint)
-                .frame(minWidth: 28)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.subheadline).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 2)
-        .accessibilityElement(children: .combine)
     }
 }
 

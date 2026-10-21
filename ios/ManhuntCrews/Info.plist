@@ -23,16 +23,16 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>During a round you start, Manhunt Crews records your crew phone's GPS route — including while the screen is locked — to release scheduled location pings to the other crew and to show both routes and distances after the round. Tracking stops when the round ends.</string>
+	<string>Manhunt Crews tracks your location only during rounds you start, even with the screen locked; other crews get only scheduled pings.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Manhunt Crews only tracks during a round you explicitly start. Your exact route stays hidden from the other crew while playing; they receive scheduled pings only. Both routes are shown to the two operators after the round.</string>
+	<string>Keeps tracking during a round you start while the screen is locked, and stops when the round ends; other crews get only scheduled pings.</string>
 	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
 	<dict>
 		<key>RoundTracking</key>
-		<string>Precise location is needed during a round so scheduled pings and route distances are accurate. Approximate locations are never released as precise pings.</string>
+		<string>Precise location keeps pings and distances accurate during a round.</string>
 	</dict>
 	<key>NSCameraUsageDescription</key>
-	<string>The seeking crew takes an in-app photo to claim a catch. The hiding crew's operator reviews it to confirm or reject. Photos may include bystanders; location metadata is removed.</string>
+	<string>Take a catch photo for the hiding crew to confirm; location metadata is removed.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Development builds connect to the Manhunt Crews server running on your local network.</string>
 	<key>UIBackgroundModes</key>

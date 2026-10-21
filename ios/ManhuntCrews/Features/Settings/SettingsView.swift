@@ -61,7 +61,7 @@ struct SettingsView: View {
             } header: {
                 Text("Location Diagnostics")
             } footer: {
-                Text("Tracking runs only during rounds. iOS can pause background location; force-quitting the app stops tracking until you reopen it.")
+                Text("Force-quitting the app stops tracking until you reopen it.")
             }
 
             Section("Notifications") {
@@ -69,16 +69,11 @@ struct SettingsView: View {
                 if !model.notifications.authorized {
                     Button("Turn On Notifications") { Task { await model.notifications.requestAuthorization() } }
                 }
-                LabeledContent("Remote push", value: model.env.pushEnabled ? "Enabled" : "Needs paid Apple Developer Program")
             }
 
-            Section {
+            Section("Privacy & Data") {
                 Button("Privacy Summary") { showPrivacy = true }
                 Button("Delete My Account", role: .destructive) { confirmDelete = true }
-            } header: {
-                Text("Privacy & Data")
-            } footer: {
-                Text("Raw GPS is deleted after 30 days. Simplified routes and stats stay until you delete them. Photos: 7 days if not confirmed, 30 days if confirmed (unless both operators keep them). Delete your data per night from History.")
             }
 
             Section {
@@ -120,7 +115,7 @@ struct SettingsView: View {
                     await model.signOut()
                 }
             }
-        } message: { Text("Removes your profile, friends, your operator tracks and photos. Other operators keep crew scores with your name anonymized.") }
+        } message: { Text("Removes your profile, friends, tracks and photos; crew scores stay with your name anonymized.") }
         .errorAlert($error)
     }
 }
