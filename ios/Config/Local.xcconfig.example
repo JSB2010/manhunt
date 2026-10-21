@@ -6,6 +6,8 @@
 // Deployed dev API (the `api` Cloud Function; URL printed by scripts/deploy-backend.sh):
 // MH_USE_EMULATORS = NO
 // MH_API_BASE_URL = https:/$()/api-xxxxxxxxxx-uc.a.run.app
+// Privacy and support pages linked from Settings:
+// MH_SITE_URL = https:/$()/your-project.web.app
 // Paid Apple Developer Program only:
 // MH_ENABLE_PUSH = YES
 // MH_ENABLE_APPLE_SIGN_IN = YES

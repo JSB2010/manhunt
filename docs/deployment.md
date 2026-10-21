@@ -1,6 +1,6 @@
 # Deployment & operations
 
-The production project `your-prod-project` exists with Firestore, Email/Password sign-in and security rules; nothing that needs billing is deployed. The step-by-step prod/TestFlight runbook is [`docs/release-prod.md`](release-prod.md). Every step below needs a **dedicated** Firebase project and your explicit approval for billing (Blaze plan). The backend runs on Cloud Functions for Firebase and ships with one `firebase deploy` ([ADR 0012](adr/0012-cloud-functions-for-firebase.md)).
+The step-by-step prod/TestFlight runbook is [`docs/release-prod.md`](release-prod.md). Every step below needs a **dedicated** Firebase project and your explicit approval for billing (Blaze plan). The backend runs on Cloud Functions for Firebase and ships with one `firebase deploy` ([ADR 0012](adr/0012-cloud-functions-for-firebase.md)).
 
 ## What runs where
 

@@ -1,0 +1,7 @@
+// Copy to Config/Prod.local.xcconfig (git-ignored) and fill in your production values.
+// scripts/ios-signing.sh adds MH_DEVELOPMENT_TEAM and MH_PROVISIONING_PROFILE here.
+// In xcconfig files `//` starts a comment, so URLs are written https:/$()/…
+MH_BUNDLE_ID = com.yourname.manhuntcrews
+MH_FIREBASE_PROJECT_ID = your-prod-project
+MH_API_BASE_URL = https:/$()/us-central1-your-prod-project.cloudfunctions.net/api
+MH_SITE_URL = https:/$()/your-prod-project.web.app

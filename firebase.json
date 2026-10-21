@@ -35,7 +35,10 @@
     "rules": "storage.rules"
   },
   "hosting": {
-    "public": "hosting/public",
+    "predeploy": [
+      "node \"$PROJECT_DIR/scripts/build-hosting.mjs\""
+    ],
+    "public": "hosting/dist",
     "cleanUrls": true,
     "trailingSlash": false,
     "ignore": [

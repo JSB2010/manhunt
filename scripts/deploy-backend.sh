@@ -22,8 +22,9 @@ if [[ "$PROJECT_ID" != *manhunt* && "${ALLOW_ANY_PROJECT:-}" != "1" ]]; then
   echo "Refusing: PROJECT_ID '$PROJECT_ID' does not look like a dedicated Manhunt project (set ALLOW_ANY_PROJECT=1 to override)."; exit 1
 fi
 
-if grep -rq '{{CONTACT_EMAIL}}' hosting/public; then
-  echo "Refusing: set your contact email in hosting/public/*.html (replace {{CONTACT_EMAIL}}) before publishing the privacy policy."; exit 1
+# The privacy policy's contact address is filled in at deploy time (scripts/build-hosting.mjs).
+if [[ -z "${CONTACT_EMAIL:-}" && ! -s hosting/contact-email.local ]]; then
+  echo "Refusing: set CONTACT_EMAIL or write your public contact email to hosting/contact-email.local (git-ignored) before publishing the privacy policy."; exit 1
 fi
 
 echo "About to deploy functions, Firestore rules/indexes/TTL, auth providers and the Hosting site to $PROJECT_ID."

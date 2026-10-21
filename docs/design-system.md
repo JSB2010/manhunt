@@ -1,6 +1,6 @@
 # Design system — Manhunt Crews (iOS)
 
-*2026-10-18. Applies to `ios/ManhuntCrews`. Decision record: [ADR 0011](adr/0011-native-ios-design.md). Evidence: `docs/evidence/design/`.*
+*2026-10-18. Applies to `ios/ManhuntCrews`. Decision record: [ADR 0011](adr/0011-native-ios-design.md).*
 
 The app follows Apple's Human Interface Guidelines and adopts the iOS 26 design (Liquid Glass) natively, with fallbacks on iOS 18–25. Where sources disagreed, the HIG won.
 

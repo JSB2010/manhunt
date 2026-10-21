@@ -51,8 +51,8 @@ describe('Cloud Functions deployed surface', async () => {
   });
 
   it('spells the account out in full when the CLI provides the project (Cloud Scheduler rejects the shorthand)', async () => {
-    const deployFns = await loadFunctions({ APP_ENV: undefined, GCLOUD_PROJECT: 'your-prod-project' });
-    const full = 'manhunt-backend@your-prod-project.iam.gserviceaccount.com';
+    const deployFns = await loadFunctions({ APP_ENV: undefined, GCLOUD_PROJECT: 'manhunt-example-prod' });
+    const full = 'manhunt-backend@manhunt-example-prod.iam.gserviceaccount.com';
     for (const name of ['api', 'tick', 'watchdog', 'retention']) {
       expect((deployFns[name] as { __endpoint: Endpoint }).__endpoint.serviceAccountEmail, name).toBe(full);
     }

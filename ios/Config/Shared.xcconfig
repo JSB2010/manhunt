@@ -13,4 +13,5 @@ MH_DEV_HOST = 127.0.0.1
 // Firebase client config for non-emulator builds: ManhuntCrews/<name>.plist (git-ignored).
 MH_FIREBASE_PLIST = GoogleService-Info
 // Privacy policy and support pages (Firebase Hosting, hosting/public), linked from Settings.
+// Set your site in Local.xcconfig / Prod.local.xcconfig.
 MH_SITE_URL = https:/$()/your-prod-project.web.app

@@ -21,12 +21,17 @@ OUT=ios/build-release
 LOCAL_CFG=ios/Config/Prod.local.xcconfig
 die() { echo "✗ $*" >&2; exit 1; }
 
-[[ -f ios/ManhuntCrews/GoogleService-Info-Prod.plist ]] ||
-  die "Missing ios/ManhuntCrews/GoogleService-Info-Prod.plist: firebase apps:sdkconfig IOS --project your-prod-project -o ios/ManhuntCrews/GoogleService-Info-Prod.plist"
-[[ -f "$LOCAL_CFG" ]] || die "Missing $LOCAL_CFG: run scripts/ios-signing.sh install <cer> <mobileprovision> first"
+[[ -f "$LOCAL_CFG" ]] || die "Missing $LOCAL_CFG: copy ios/Config/Prod.local.xcconfig.example, then run scripts/ios-signing.sh install <cer> <mobileprovision>"
 TEAM=$(sed -n 's/^MH_DEVELOPMENT_TEAM = //p' "$LOCAL_CFG")
 PROFILE=$(sed -n 's/^MH_PROVISIONING_PROFILE = //p' "$LOCAL_CFG")
-BUNDLE_ID=$(sed -n 's/^MH_BUNDLE_ID = //p' ios/Config/Prod.xcconfig)
+# Prod.local.xcconfig (git-ignored) overrides the placeholders in Prod.xcconfig.
+prod_cfg() { local v; v=$(sed -n "s/^$1 = //p" "$LOCAL_CFG" 2>/dev/null | tail -1); [[ -n "$v" ]] || v=$(sed -n "s/^$1 = //p" ios/Config/Prod.xcconfig | tail -1); printf '%s' "$v"; }
+BUNDLE_ID=$(prod_cfg MH_BUNDLE_ID)
+PROJECT=$(prod_cfg MH_FIREBASE_PROJECT_ID)
+[[ "$BUNDLE_ID" != com.example.* && "$PROJECT" != your-prod-project ]] ||
+  die "Set MH_BUNDLE_ID, MH_FIREBASE_PROJECT_ID, MH_API_BASE_URL and MH_SITE_URL in $LOCAL_CFG (see ios/Config/Prod.local.xcconfig.example)"
+[[ -f ios/ManhuntCrews/GoogleService-Info-Prod.plist ]] ||
+  die "Missing ios/ManhuntCrews/GoogleService-Info-Prod.plist: firebase apps:sdkconfig IOS --project $PROJECT -o ios/ManhuntCrews/GoogleService-Info-Prod.plist"
 [[ -n "$TEAM" && -n "$PROFILE" ]] || die "$LOCAL_CFG must set MH_DEVELOPMENT_TEAM and MH_PROVISIONING_PROFILE"
 security find-identity -v -p codesigning | grep -qE "(Apple|iPhone) Distribution.*\($TEAM\)" ||
   die "No trusted Apple Distribution identity for team $TEAM in your keychain (scripts/ios-signing.sh status)"

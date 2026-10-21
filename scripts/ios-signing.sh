@@ -12,7 +12,8 @@
 #       Imports the certificate and its private key into your login keychain,
 #       installs the App Store provisioning profile, checks that they match each
 #       other and MH_BUNDLE_ID, and writes ios/Config/Prod.local.xcconfig
-#       (git-ignored) with your team ID and the profile name.
+#       (git-ignored) with your team ID and the profile name, keeping the other
+#       values there.
 #
 #   scripts/ios-signing.sh status
 #       Shows the installed distribution identities and the Prod signing config.
@@ -27,7 +28,9 @@ KEY="$DIR/distribution.key"
 CSR="$DIR/distribution.csr"
 KEYCHAIN="${KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
 LOCAL_CFG=ios/Config/Prod.local.xcconfig
-BUNDLE_ID=$(sed -n 's/^MH_BUNDLE_ID = //p' ios/Config/Prod.xcconfig)
+# Prod.local.xcconfig (git-ignored) overrides the placeholders in Prod.xcconfig.
+prod_cfg() { local v; v=$(sed -n "s/^$1 = //p" "$LOCAL_CFG" 2>/dev/null | tail -1); [[ -n "$v" ]] || v=$(sed -n "s/^$1 = //p" ios/Config/Prod.xcconfig | tail -1); printf '%s' "$v"; }
+BUNDLE_ID=$(prod_cfg MH_BUNDLE_ID)
 
 die() { echo "✗ $*" >&2; exit 1; }
 
@@ -81,7 +84,9 @@ case "${1:-}" in
       mkdir -p "$d" && cp "$PROFILE" "$d/$UUID.mobileprovision"
     done
 
-    printf '// Written by scripts/ios-signing.sh — your paid team and App Store profile (git-ignored).\nMH_DEVELOPMENT_TEAM = %s\nMH_PROVISIONING_PROFILE = %s\n' "$TEAM" "$NAME" > "$LOCAL_CFG"
+    # Replace only the signing keys; keep your project values in the same file.
+    KEEP=$(grep -vE '^(MH_DEVELOPMENT_TEAM|MH_PROVISIONING_PROFILE) = ' "$LOCAL_CFG" 2>/dev/null || true)
+    printf '%s\nMH_DEVELOPMENT_TEAM = %s\nMH_PROVISIONING_PROFILE = %s\n' "${KEEP:-// Prod.local.xcconfig (git-ignored): your project values and signing team.}" "$TEAM" "$NAME" > "$LOCAL_CFG"
     IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -E "(Apple|iPhone) Distribution.*\($TEAM\)" | head -1 | sed 's/^ *[0-9]*) [0-9A-F]* //' || true)
     if [[ -n "$IDENTITY" ]]; then
       echo "✓ Signing identity: $IDENTITY"

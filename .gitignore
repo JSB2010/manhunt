@@ -38,9 +38,12 @@ ios/Config/*.local.xcconfig
 # macOS
 .DS_Store
 
-# Test artifacts that may contain coordinates
-test-artifacts/private/
-test-artifacts/e2e-*/
+# Test runs, screenshots and evidence (may contain coordinates)
+test-artifacts/
+
+# Hosting build output and the deploy-time contact address
+hosting/dist/
+hosting/contact-email.local
 
 # Release details kept out of the public repo (team, tester, App Store Connect IDs)
 docs/*.local.md
