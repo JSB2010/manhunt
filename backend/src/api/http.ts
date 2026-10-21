@@ -21,13 +21,15 @@ declare module 'fastify' {
   }
 }
 
-export type RateBucket = 'default' | 'location' | 'capture' | 'invite' | 'friend' | 'export' | 'account';
+export type RateBucket = 'default' | 'location' | 'capture' | 'invite' | 'join' | 'friend' | 'export' | 'account';
 
 const LIMITS: Record<RateBucket, { capacity: number; perMs: number }> = {
   default: { capacity: 300, perMs: 60_000 },
   location: { capacity: 60, perMs: 60_000 },
   capture: { capacity: 20, perMs: 60_000 },
   invite: { capacity: 20, perMs: 3_600_000 },
+  /** failed night-code lookups only (see FAILURE_ONLY_BUCKETS) */
+  join: { capacity: 12, perMs: 3_600_000 },
   friend: { capacity: 30, perMs: 3_600_000 },
   export: { capacity: 30, perMs: 3_600_000 },
   account: { capacity: 10, perMs: 3_600_000 },
@@ -38,8 +40,17 @@ const LIMITS: Record<RateBucket, { capacity: number; perMs: number }> = {
  * instances, so effective limits scale with instance count — acceptable for a
  * friends-only app (documented in docs/permissions-threat-model.md).
  */
+/** Buckets charged only when the request fails (brute-force guards); successes are free. */
+export const FAILURE_ONLY_BUCKETS: ReadonlySet<RateBucket> = new Set(['join']);
+
 export class RateLimiter {
   private buckets = new Map<string, { tokens: number; at: number }>();
+  /** True if a token is available, without consuming it. */
+  peek(key: string, bucket: RateBucket, now: number): boolean {
+    const { capacity, perMs } = LIMITS[bucket];
+    const b = this.buckets.get(`${bucket}:${key}`);
+    return !b || Math.min(capacity, b.tokens + ((now - b.at) / perMs) * capacity) >= 1;
+  }
   check(key: string, bucket: RateBucket, now: number): boolean {
     const { capacity, perMs } = LIMITS[bucket];
     const k = `${bucket}:${key}`;

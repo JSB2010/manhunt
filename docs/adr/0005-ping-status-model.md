@@ -1,6 +1,6 @@
 # ADR 0005 — Ping status values and pause handling
 
-**Status:** accepted · **Spec:** §9.2 `PingRelease.status: RELEASED | NO_FRESH_FIX | DELAYED | SKIPPED_PAUSED`
+**Status:** accepted; missing pings superseded by ADR 0015 (waiting pings) · **Spec:** §9.2 `PingRelease.status: RELEASED | NO_FRESH_FIX | DELAYED | SKIPPED_PAUSED`
 
 * `status` is `RELEASED` or `NO_FRESH_FIX`. Lateness is orthogonal, so it is a separate `delayed: boolean` + `dispatchLatencyMs` (a delayed release can still carry a valid point).
 * `SKIPPED_PAUSED` never occurs: pauses (manual, safety, claim review) shift every future deadline by the paused duration, as §3.2/§3.3 require, so no slot falls inside a pause.

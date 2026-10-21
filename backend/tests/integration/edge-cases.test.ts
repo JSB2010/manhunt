@@ -4,8 +4,9 @@ import { batch, clearEmulators, consentBody, harness, healthyPreflight, jpegWith
 /**
  * Edge cases over the real API + emulators: time cap (censored), claim expiry via the
  * worker, joint post-game dispute resolution, manual/safety pauses with both-side
- * resume, host role override, consent withdrawal aborting a round, and rule changes
- * making the night "not directly comparable".
+ * resume, any crew hiding next, consent withdrawal (dropping one phone vs aborting),
+ * rule changes, the night code's crew cap and regeneration, and phones moved or
+ * removed between rounds.
  */
 let h: Harness;
 let a: TestUser; // host, Crew A
@@ -53,11 +54,11 @@ beforeAll(async () => {
     scheduledDate: '2026-10-18',
     myTeam: 'A',
     teams: { A: { name: 'Owls', roster: [{ displayName: 'Ana' }] }, B: { name: 'Wolves', roster: [{ displayName: 'Bo' }] } },
-    rules: { headStartSeconds: 120, pingIntervalSeconds: 120, maxChaseSeconds: 600, confirmationTimeoutSeconds: 60, totalRounds: 4 },
+    rules: { headStartSeconds: 120, pingIntervalSeconds: 120, maxChaseSeconds: 600, confirmationTimeoutSeconds: 60 },
   });
   sid = s.body.sessionId;
   const inv = await h.call(a, 'POST', `/v1/sessions/${sid}/invites`, {});
-  await h.call(b, 'POST', '/v1/invites/redeem', { code: inv.body.code });
+  await h.call(b, 'POST', '/v1/invites/redeem', { code: inv.body.code, teamKey: 'B' });
   for (const u of [a, b]) await h.call(u, 'POST', `/v1/sessions/${sid}/consent`, consentBody);
 }, 60_000);
 
@@ -124,12 +125,12 @@ describe('edge cases', () => {
     expect(sum.body.result.resolvedByDispute).toBe(true);
   });
 
-  it('host role override is recorded; rule changes mark the night not directly comparable', async () => {
-    // Suggested: B hides round 2. Host overrides so A hides again.
-    const next = await h.call(a, 'POST', `/v1/sessions/${sid}/next-round`, { hidingTeam: 'A', overrideReason: 'Wolves car parked far away' });
+  it('any crew may hide next; rule edits reset readiness; consent withdrawal by a lone phone aborts', async () => {
+    // Suggested: B hides round 2. A hides again instead — no override bookkeeping, nights evolve.
+    expect((await view(b)).nextRound).toEqual({ index: 2, suggestedHidingTeam: 'B' });
+    const next = await h.call(b, 'POST', `/v1/sessions/${sid}/next-round`, { hidingTeam: 'A' });
     expect(next.status, JSON.stringify(next.body)).toBe(200);
     expect(next.body.round.hidingTeam).toBe('A');
-    expect(next.body.round.roleOverride).toEqual({ reason: 'Wolves car parked far away', suggestedHidingTeam: 'B' });
     // A stale worker wake-up for round 1 (its claim window) must not re-render the
     // phones' stored views with the finished round (they would flash its recap).
     const round1 = rid;
@@ -140,8 +141,10 @@ describe('edge cases', () => {
       expect(stored.round.id).toBe(next.body.round.id);
       expect(stored.round.state).toBe('READY');
     }
-    // Host edits the ping interval before starting → readiness resets, new fingerprint.
-    const edit = await h.call(a, 'PATCH', `/v1/sessions/${sid}/setup`, { rules: { pingIntervalSeconds: 180 } });
+    // Either crew edits the ping interval before starting → readiness resets, new fingerprint.
+    expect((await h.call(a, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: healthyPreflight() })).status).toBe(200);
+    expect((await view(a)).round.ready).toEqual({ A: true, B: false });
+    const edit = await h.call(b, 'PATCH', `/v1/sessions/${sid}/setup`, { rules: { pingIntervalSeconds: 180 } });
     expect(edit.status, JSON.stringify(edit.body)).toBe(200);
     expect((await view(a)).round.ready).toEqual({ A: false, B: false });
     const T0 = await readyStart(true);
@@ -164,7 +167,7 @@ describe('edge cases', () => {
 
     const an = await h.call(a, 'GET', `/v1/sessions/${sid}/analytics`);
     expect(an.body.scorecard.comparison.status).toBe('INSUFFICIENT'); // B never hid
-    expect(an.body.roleOverrides).toHaveLength(1);
+    expect(an.body).not.toHaveProperty('roleOverrides');
   });
 
   it('start is blocked when a phone has location permission off, and warns on stale GPS', async () => {
@@ -182,5 +185,114 @@ describe('edge cases', () => {
     expect(warn.body.error.details.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/GPS_STALE$/), expect.stringMatching(/PRECISE_LOCATION_OFF$/)]));
     const ok = await h.call(a, 'POST', `/v1/sessions/${sid}/rounds/${rid}/start`, { acknowledgeWarnings: true });
     expect(ok.status).toBe(200);
+  });
+});
+
+describe('crews, night code and phones', () => {
+  let org: TestUser;
+  let night: string;
+  let nightCode: string;
+  const phones: TestUser[] = [];
+
+  beforeAll(async () => {
+    org = await h.createUser('Organizer');
+    const s = await h.call(org, 'POST', '/v1/sessions', {
+      title: 'Crew night',
+      scheduledDate: '2026-10-19',
+      myTeam: 'A',
+      teams: { A: { name: 'Owls', roster: [] }, B: { name: 'Wolves', roster: [] }, C: { name: 'Foxes', roster: [] } },
+    });
+    expect(s.status, JSON.stringify(s.body)).toBe(200);
+    night = s.body.sessionId;
+    nightCode = s.body.session.joinCode;
+    expect(Object.keys(s.body.session.teams)).toEqual(['A', 'B', 'C']);
+    for (let i = 0; i < 5; i++) phones.push(await h.createUser(`Phone${i}`));
+  }, 60_000);
+
+  const nv = async (u: TestUser) => (await h.call(u, 'GET', `/v1/sessions/${night}`)).body;
+
+  it('a crew takes at most five phones', async () => {
+    for (const p of phones.slice(0, 4)) {
+      const r = await h.call(p, 'POST', '/v1/invites/redeem', { code: nightCode, teamKey: 'A' });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    }
+    const full = await h.call(phones[4]!, 'POST', '/v1/invites/redeem', { code: nightCode, teamKey: 'A' });
+    expect(full.status).toBe(409);
+    const prev = await h.call(phones[4]!, 'POST', '/v1/invites/preview', { code: nightCode });
+    expect(prev.body.teams.A).toMatchObject({ phoneCount: 5, full: true });
+    expect(prev.body.suggestedTeam).toBe('B');
+    // Without a crew choice the phone joins the crew with the fewest phones.
+    const ok = await h.call(phones[4]!, 'POST', '/v1/invites/redeem', { code: nightCode });
+    expect(ok.body.session.myTeam).toBe('B');
+  });
+
+  it('phones move between crews and can be removed; a removed phone loses the live view', async () => {
+    const move = await h.call(phones[0]!, 'PATCH', `/v1/sessions/${night}/setup`, {
+      moves: [
+        { uid: phones[1]!.uid, teamKey: 'C' },
+        { uid: phones[2]!.uid, teamKey: null },
+      ],
+    });
+    expect(move.status, JSON.stringify(move.body)).toBe(200);
+    const v = await nv(org);
+    expect(v.session.teams.A.operators).toHaveLength(3);
+    expect(v.session.teams.C.operators.map((o: any) => o.displayName)).toEqual(['Phone1']);
+    expect((await nv(phones[1]!)).session.myTeam).toBe('C');
+    expect((await h.call(phones[2]!, 'GET', `/v1/sessions/${night}`)).status).toBe(404);
+    // The organizer's phone cannot be removed by someone else.
+    const rm = await h.call(phones[0]!, 'PATCH', `/v1/sessions/${night}/setup`, { moves: [{ uid: org.uid, teamKey: null }] });
+    expect(rm.body.error.code).toBe('FORBIDDEN');
+    // A removed phone can rejoin with the code.
+    expect((await h.call(phones[2]!, 'POST', '/v1/invites/redeem', { code: nightCode, teamKey: 'C' })).status).toBe(200);
+  });
+
+  it('removing a crew moves its phones to the emptiest remaining crew; a night keeps at least two crews', async () => {
+    const r = await h.call(org, 'PATCH', `/v1/sessions/${night}/setup`, { teams: { C: null } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const v = await nv(org);
+    expect(Object.keys(v.session.teams)).toEqual(['A', 'B']);
+    expect(v.round.seekingTeams).toEqual(['B']);
+    expect(v.session.teams.B.operators.length).toBe(3);
+    const two = await h.call(org, 'PATCH', `/v1/sessions/${night}/setup`, { teams: { B: null } });
+    expect(two.body.error.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('operator lists cannot be smuggled through crew edits', async () => {
+    const r = await h.call(org, 'PATCH', `/v1/sessions/${night}/setup`, { teams: { A: { name: 'Owls', operatorUids: [phones[4]!.uid] } } });
+    expect(r.status).toBe(400);
+  });
+
+  it('regenerating the code revokes the old one', async () => {
+    const regen = await h.call(phones[3]!, 'POST', `/v1/sessions/${night}/invites`, { regenerate: true });
+    expect(regen.status, JSON.stringify(regen.body)).toBe(200);
+    expect(regen.body.code).not.toBe(nightCode);
+    const outsider = await h.createUser('Outsider2');
+    expect((await h.call(outsider, 'POST', '/v1/invites/redeem', { code: nightCode })).status).toBe(410);
+    expect((await h.call(outsider, 'POST', '/v1/invites/redeem', { code: regen.body.code })).status).toBe(200);
+    expect((await nv(org)).session.joinCode).toBe(regen.body.code);
+  });
+
+  it('consent withdrawn by one of two hider phones drops it; the round carries on', async () => {
+    const crewA = [org, phones[0]!];
+    for (const u of [...crewA, phones[4]!]) expect((await h.call(u, 'POST', `/v1/sessions/${night}/consent`, consentBody)).status).toBe(200);
+    for (const u of [org, phones[4]!]) await h.call(u, 'POST', `/v1/sessions/${night}/ready`, { ready: true, preflight: healthyPreflight() });
+    const v = await nv(org);
+    const start = await h.call(phones[4]!, 'POST', `/v1/sessions/${night}/rounds/${v.round.id}/start`, { acknowledgeWarnings: true });
+    expect(start.status, JSON.stringify(start.body)).toBe(200);
+    // Phones without consent are not part of the round (spectators).
+    const spectator = await nv(phones[3]!);
+    expect(spectator.round.myRole).toBeNull();
+    h.clock.advance(MIN);
+    expect((await h.call(phones[0]!, 'POST', `/v1/sessions/${night}/consent`, { ...consentBody, accepted: false })).status).toBe(200);
+    const after = await nv(org);
+    expect(after.round.state).toBe('HEAD_START');
+    expect(after.round.crewStatus.A.total).toBe(1);
+    // A spectator can't upload, claim or pause.
+    const up = await h.call(phones[3]!, 'POST', `/v1/sessions/${night}/rounds/${v.round.id}/location-batches`, batch(h.clock, [[h.clock.now(), 39.7, -104.9]]));
+    expect(up.status).toBe(403);
+    expect((await h.call(phones[3]!, 'POST', `/v1/sessions/${night}/rounds/${v.round.id}/pause`, { kind: 'SAFETY' })).status).toBe(403);
+    // The last hider phone leaving aborts.
+    expect((await h.call(org, 'POST', `/v1/sessions/${night}/consent`, { ...consentBody, accepted: false })).status).toBe(200);
+    expect((await nv(phones[4]!)).round.state).toBe('ABORTED');
   });
 });

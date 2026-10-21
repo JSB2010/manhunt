@@ -7,21 +7,23 @@ import {
   timeCapDeadline,
   totalPauseMs,
 } from './clock.js';
+import { hiderUids, roleOfTeam, roundTeams, roundUids, seekerUids, sideOfRole, snapshotTeamOf, teamKeysOf } from './crews.js';
 import { fail } from './errors.js';
 import { rulesFingerprint } from './rules.js';
 import {
   isActiveState,
-  otherTeam,
   type CaptureClaim,
   type DomainEvent,
   type GpsPoint,
   type NotificationIntent,
   type PauseInterval,
   type PauseKind,
+  type PingRelease,
+  type RoundBrief,
   type RoundDoc,
   type RoundOutcome,
   type RoundResult,
-  type Rules,
+  type SeekMode,
   type SessionDoc,
   type TeamKey,
 } from './types.js';
@@ -31,6 +33,9 @@ import {
  * round document plus server time and returns the next document, audit events
  * and notification intents. Nothing here performs I/O; the service layer runs
  * these inside Firestore transactions.
+ *
+ * Authority: any operator phone of a crew acts for that crew, and every
+ * in-round check uses the round's operator snapshot (`round.operatorsByTeam`).
  */
 
 export interface Transition {
@@ -62,37 +67,43 @@ const fmtClock = (seconds: number) => {
 };
 export { fmtClock };
 
-function bothUids(r: RoundDoc): string[] {
-  return [r.hiderUid, r.seekerUid].filter((u): u is string => !!u);
-}
-
 function notify(r: RoundDoc, toUids: (string | null)[], kind: string, title: string, body: string): NotificationIntent {
-  return { toUids: toUids.filter((u): u is string => !!u), kind, title, body, sessionId: r.sessionId, roundId: r.id };
+  return { toUids: [...new Set(toUids.filter((u): u is string => !!u))], kind, title, body, sessionId: r.sessionId, roundId: r.id };
 }
 
-export function teamForUid(session: SessionDoc, uid: string): TeamKey | null {
-  if (session.teams.A.operatorUid === uid) return 'A';
-  if (session.teams.B.operatorUid === uid) return 'B';
-  return null;
+const name = (r: Pick<RoundDoc, 'teamNames'>, k: TeamKey) => r.teamNames[k] ?? `Crew ${k}`;
+const joinNames = (r: Pick<RoundDoc, 'teamNames'>, ks: TeamKey[]) => ks.map((k) => name(r, k)).join(' and ');
+
+/**
+ * Suggested hiding crew for the next round: the crew that has hidden least so
+ * far; ties go to the crew whose last hide was longest ago (never hid first),
+ * then key order.
+ */
+export function suggestedHidingTeam(session: SessionDoc): TeamKey {
+  const keys = teamKeysOf(session);
+  const stats = keys.map((k) => {
+    const hides = session.roundBriefs.filter((b) => b.hidingTeam === k && b.outcome !== 'ABORTED');
+    return { k, count: hides.length, last: hides.length ? Math.max(...hides.map((b) => b.index)) : -1 };
+  });
+  stats.sort((a, b) => a.count - b.count || a.last - b.last || a.k.localeCompare(b.k));
+  return stats[0]!.k;
 }
 
-/** Suggested hiding crew for round `index` (1-based) given rules. */
-export function suggestedHidingTeam(rules: Rules, index: number, previousHidingTeam: TeamKey | null): TeamKey {
-  if (index === 1 || previousHidingTeam === null) return rules.initialHidingTeam;
-  return rules.alternateRoles ? otherTeam(previousHidingTeam) : previousHidingTeam;
-}
+/** Notification recipients before a round starts: every operator phone of the night. */
+const allOperators = (session: SessionDoc) => teamKeysOf(session).flatMap((k) => session.teams[k]!.operatorUids);
 
 export function createRound(params: {
   id: string;
   session: SessionDoc;
   index: number;
   hidingTeam: TeamKey;
-  suggestedHidingTeam: TeamKey;
-  overrideByUid: string | null;
-  overrideReason: string | null;
+  seekMode: SeekMode;
+  actorUid: string | null;
   now: number;
 }): Transition {
   const { session, now } = params;
+  const keys = teamKeysOf(session);
+  if (!keys.includes(params.hidingTeam)) fail('VALIDATION_FAILED', 'That crew is not part of this night');
   const round: RoundDoc = {
     id: params.id,
     sessionId: session.id,
@@ -100,17 +111,13 @@ export function createRound(params: {
     state: 'READY',
     pausedFromState: null,
     hidingTeam: params.hidingTeam,
-    seekingTeam: otherTeam(params.hidingTeam),
-    hiderUid: null,
-    seekerUid: null,
+    seekingTeams: keys.filter((k) => k !== params.hidingTeam),
+    seekMode: params.seekMode,
+    operatorsByTeam: {},
     rules: structuredClone(session.rules),
-    teamNames: { A: session.teams.A.name, B: session.teams.B.name },
-    rosterSnapshot: { A: structuredClone(session.teams.A.roster), B: structuredClone(session.teams.B.roster) },
-    roleOverride:
-      params.hidingTeam !== params.suggestedHidingTeam && params.overrideByUid
-        ? { byUid: params.overrideByUid, at: now, reason: params.overrideReason, suggestedHidingTeam: params.suggestedHidingTeam }
-        : null,
-    ready: { A: null, B: null },
+    teamNames: Object.fromEntries(keys.map((k) => [k, session.teams[k]!.name])),
+    rosterSnapshot: Object.fromEntries(keys.map((k) => [k, structuredClone(session.teams[k]!.roster)])),
+    ready: {},
     startWarningsAcknowledged: [],
     roundStartAt: null,
     chaseStartAt: null,
@@ -121,6 +128,8 @@ export function createRound(params: {
     resumeVotes: {},
     nextPingIndex: 0,
     pings: [],
+    waitingPing: null,
+    routeSourceUids: {},
     activeClaimId: null,
     claimSubmittedAt: null,
     claimExpiresAt: null,
@@ -136,25 +145,17 @@ export function createRound(params: {
     updatedAt: now,
     version: 1,
   };
-  const events: DomainEvent[] = [ev('ROUND_CREATED', now, round.id, params.overrideByUid, { index: round.index, hidingTeam: round.hidingTeam })];
-  if (round.roleOverride) {
-    events.push(
-      ev('ROLE_OVERRIDE', now, round.id, params.overrideByUid, {
-        suggestedHidingTeam: params.suggestedHidingTeam,
-        chosenHidingTeam: params.hidingTeam,
-        reason: params.overrideReason,
-      }),
-    );
-  }
-  const ops = [session.teams.A.operatorUid, session.teams.B.operatorUid];
+  const events: DomainEvent[] = [
+    ev('ROUND_CREATED', now, round.id, params.actorUid, { index: round.index, hidingTeam: round.hidingTeam, seekMode: round.seekMode }),
+  ];
   const notifications =
     params.index > 1
       ? [
           {
-            toUids: ops.filter((u): u is string => !!u),
+            toUids: allOperators(session),
             kind: 'NEXT_ROUND',
             title: `Get ready for Round ${params.index}`,
-            body: `${round.teamNames[round.hidingTeam]} hides, ${round.teamNames[round.seekingTeam]} seeks. Both operators must tap Ready.`,
+            body: `${name(round, round.hidingTeam)} hide, ${joinNames(round, round.seekingTeams)} seek. Tap Ready.`,
             sessionId: session.id,
             roundId: round.id,
           },
@@ -163,15 +164,38 @@ export function createRound(params: {
   return { round, events, notifications };
 }
 
-/** Refresh a not-yet-started round from the session's (edited) setup. */
-export function refreshReadyRound(round: RoundDoc, session: SessionDoc, now: number): RoundDoc {
+/**
+ * Refresh a not-yet-started round from the session's (edited) setup, optionally
+ * re-targeting who hides. Ready marks survive only for crews whose marking phone
+ * is still on that crew.
+ */
+export function refreshReadyRound(
+  round: RoundDoc,
+  session: SessionDoc,
+  now: number,
+  change: { hidingTeam?: TeamKey | undefined; seekMode?: SeekMode | undefined } = {},
+): RoundDoc {
   if (round.state !== 'READY') fail('GAME_CLOSED', 'Round already started; setup is frozen');
+  const keys = teamKeysOf(session);
   const r = clone(round);
+  const hidingTeam = change.hidingTeam ?? (keys.includes(r.hidingTeam) ? r.hidingTeam : keys[0]!);
+  if (!keys.includes(hidingTeam)) fail('VALIDATION_FAILED', 'That crew is not part of this night');
+  // Ready marks agree to roles and rules: either changing clears them.
+  const rolesChanged = hidingTeam !== r.hidingTeam || JSON.stringify(r.rules) !== JSON.stringify(session.rules);
+  r.hidingTeam = hidingTeam;
+  r.seekingTeams = keys.filter((k) => k !== hidingTeam);
+  if (change.seekMode) r.seekMode = change.seekMode;
   r.rules = structuredClone(session.rules);
-  r.teamNames = { A: session.teams.A.name, B: session.teams.B.name };
-  r.rosterSnapshot = { A: structuredClone(session.teams.A.roster), B: structuredClone(session.teams.B.roster) };
-  // Any setup change invalidates readiness: both operators must re-confirm.
-  r.ready = { A: null, B: null };
+  r.teamNames = Object.fromEntries(keys.map((k) => [k, session.teams[k]!.name]));
+  r.rosterSnapshot = Object.fromEntries(keys.map((k) => [k, structuredClone(session.teams[k]!.roster)]));
+  const ready: RoundDoc['ready'] = {};
+  if (!rolesChanged) {
+    for (const k of keys) {
+      const mark = r.ready[k];
+      if (mark && session.teams[k]!.operatorUids.includes(mark.uid)) ready[k] = mark;
+    }
+  }
+  r.ready = ready;
   r.updatedAt = now;
   r.version++;
   return r;
@@ -179,40 +203,50 @@ export function refreshReadyRound(round: RoundDoc, session: SessionDoc, now: num
 
 export function setReady(round: RoundDoc, team: TeamKey, uid: string, ready: boolean, now: number): Transition {
   if (round.state !== 'READY') fail('STALE_PHASE', 'Readiness can only change before the round starts');
+  if (!roundTeams(round).includes(team)) fail('VALIDATION_FAILED', 'That crew is not playing this round');
   const r = clone(round);
   r.ready[team] = ready ? { uid, at: now } : null;
   r.updatedAt = now;
   r.version++;
   const events = [ev('READY_CHANGED', now, r.id, uid, { team, ready })];
   const notifications: NotificationIntent[] = [];
-  if (r.ready.A && r.ready.B) {
-    notifications.push({
-      toUids: [r.ready.A.uid, r.ready.B.uid],
-      kind: 'BOTH_READY',
-      title: 'Both crews are ready',
-      body: `Round ${r.index} can start.`,
-      sessionId: r.sessionId,
-      roundId: r.id,
-    });
+  const marks = roundTeams(r).map((k) => r.ready[k]);
+  if (ready && marks.every((m) => !!m)) {
+    notifications.push(notify(r, marks.map((m) => m!.uid), 'ALL_READY', 'Every crew is ready', `Round ${r.index} can start.`));
   }
   return { round: r, events, notifications };
 }
 
-export function startRound(round: RoundDoc, session: SessionDoc, actorUid: string, warnings: string[], now: number): Transition {
+/**
+ * Start a READY round. Any operator of a playing crew may start it once every
+ * playing crew has a ready phone. Freezes the operator snapshot: each crew's
+ * phones that are active members with tracking consent (`eligibleUids`).
+ */
+export function startRound(
+  round: RoundDoc,
+  session: SessionDoc,
+  actorUid: string,
+  eligibleUids: ReadonlySet<string>,
+  warnings: string[],
+  now: number,
+): Transition {
   if (round.state !== 'READY') fail('STALE_PHASE', 'Round is not in READY state');
-  if (session.hostUid !== actorUid) fail('OPERATOR_NOT_AUTHORIZED', 'Only the session host can start a round');
-  const hiderUid = session.teams[round.hidingTeam].operatorUid;
-  const seekerUid = session.teams[round.seekingTeam].operatorUid;
-  if (!hiderUid || !seekerUid) fail('GAME_NOT_READY', 'Both crews need a signed-in operator');
-  if (hiderUid === seekerUid) fail('GAME_NOT_READY', 'The two operators must be distinct accounts');
-  if (!round.ready.A || !round.ready.B) fail('GAME_NOT_READY', 'Both operators must tap Ready');
-  if (round.ready[round.hidingTeam]!.uid !== hiderUid || round.ready[round.seekingTeam]!.uid !== seekerUid) {
-    fail('GAME_NOT_READY', 'Readiness was recorded by a different operator; both must re-confirm');
+  const teams = roundTeams(round);
+  const actorTeam = teams.find((k) => session.teams[k]?.operatorUids.includes(actorUid));
+  if (!actorTeam) fail('OPERATOR_NOT_AUTHORIZED', 'Only an operator of a playing crew can start the round');
+  const operatorsByTeam: RoundDoc['operatorsByTeam'] = {};
+  for (const k of teams) {
+    const crew = session.teams[k];
+    if (!crew) fail('GAME_NOT_READY', 'A playing crew is missing');
+    const phones = crew!.operatorUids.filter((u) => eligibleUids.has(u));
+    if (!phones.length) fail('GAME_NOT_READY', `${crew!.name} needs a phone in the game`);
+    const mark = round.ready[k];
+    if (!mark) fail('GAME_NOT_READY', 'Every crew must tap Ready');
+    if (!phones.includes(mark!.uid)) fail('GAME_NOT_READY', `${crew!.name}'s ready phone left the crew — tap Ready again`);
+    operatorsByTeam[k] = phones;
   }
-
   const r = clone(round);
-  r.hiderUid = hiderUid;
-  r.seekerUid = seekerUid;
+  r.operatorsByTeam = operatorsByTeam;
   r.state = 'HEAD_START';
   r.roundStartAt = now;
   r.phaseGeneration++;
@@ -227,13 +261,14 @@ export function startRound(round: RoundDoc, session: SessionDoc, actorUid: strin
       ev('ROUND_STARTED', now, r.id, actorUid, {
         index: r.index,
         hidingTeam: r.hidingTeam,
+        seekingTeams: r.seekingTeams.join(','),
+        seekMode: r.seekMode,
+        phones: roundUids(r).length,
         headStartSeconds: r.rules.headStartSeconds,
         warningsAcknowledged: warnings.join(',') || null,
       }),
     ],
-    notifications: [
-      notify(r, bothUids(r), 'ROUND_STARTED', `Round ${r.index} started`, `Hiding head start: ${fmtClock(r.rules.headStartSeconds)}`),
-    ],
+    notifications: [notify(r, roundUids(r), 'ROUND_STARTED', `Round ${r.index} started`, `Hiding head start: ${fmtClock(r.rules.headStartSeconds)}`)],
   };
 }
 
@@ -298,76 +333,142 @@ export function applyChaseStart(round: RoundDoc, at: number, now: number): Trans
   return {
     round: withWake(r),
     events: [ev('CHASE_STARTED', at, r.id, null, { processedLatencyMs: now - at })],
-    notifications: [notify(r, [r.hiderUid], 'CHASE_STARTED', 'The chase is on', 'Seekers are now moving. Your first location ping is being released.')],
+    notifications: [notify(r, hiderUids(r), 'CHASE_STARTED', 'The chase is on', 'Seekers are moving. Your first ping is going out.')],
   };
 }
 
-/** Release ping `index` (deadline `scheduledAt`) using the selected sample (or none). */
-export function applyPing(round: RoundDoc, index: number, scheduledAt: number, sample: GpsPoint | null, now: number): Transition {
-  if (round.state !== 'CHASE') fail('STALE_PHASE', 'Pings only release during the chase');
-  if (index !== round.nextPingIndex) fail('STALE_PHASE', 'Ping index already processed');
-  if (round.pings.some((p) => p.index === index)) fail('STALE_PHASE', 'Duplicate ping');
-  const r = clone(round);
+function pingRecord(
+  r: RoundDoc,
+  index: number,
+  scheduledAt: number,
+  sample: GpsPoint | null,
+  now: number,
+  ageFrom: number,
+): PingRelease {
   const latency = now - scheduledAt;
-  const delayed = latency > DELAYED_DISPATCH_MS;
-  r.pings.push({
+  return {
     index,
     scheduledAt,
     releasedAt: now,
     status: sample ? 'RELEASED' : 'NO_FRESH_FIX',
-    delayed,
+    delayed: latency > DELAYED_DISPATCH_MS,
     dispatchLatencyMs: latency,
     observedAt: sample?.recordedAt ?? null,
     latitude: sample?.latitude ?? null,
     longitude: sample?.longitude ?? null,
     accuracyMeters: sample ? Math.round(sample.horizontalAccuracyMeters * 10) / 10 : null,
-    ageSeconds: sample ? Math.max(0, Math.round((scheduledAt - sample.recordedAt) / 1000)) : null,
+    ageSeconds: sample ? Math.max(0, Math.round((ageFrom - sample.recordedAt) / 1000)) : null,
     sourcePointId: sample?.pointId ?? null,
+    sourceUid: sample?.operatorUid ?? null,
     phaseGeneration: r.phaseGeneration,
-  });
+  };
+}
+
+/**
+ * A waiting ping that never got a fix is closed as NO_FRESH_FIX (when the next
+ * deadline supersedes it, or when the round ends) so ping counts stay exact.
+ */
+function closeWaitingPing(r: RoundDoc, now: number, events: DomainEvent[]) {
+  const w = r.waitingPing;
+  if (!w) return;
+  r.pings.push(pingRecord(r, w.index, w.deadline, null, now, now));
+  r.waitingPing = null;
+  events.push(ev('PING_MISSING', now, r.id, null, { pingIndex: w.index, waitedMs: now - w.since }));
+}
+
+/**
+ * Process the deadline of ping `index`. With an eligible fix it is released
+ * immediately; otherwise it becomes the round's waiting ping (ADR 0015) and is
+ * released by `applyLateRelease` as soon as a fresh hider fix arrives. A still
+ * waiting earlier ping is superseded (closed as NO_FRESH_FIX) — pings never pile up.
+ */
+export function applyPing(round: RoundDoc, index: number, scheduledAt: number, sample: GpsPoint | null, now: number): Transition {
+  if (round.state !== 'CHASE') fail('STALE_PHASE', 'Pings only release during the chase');
+  if (index !== round.nextPingIndex) fail('STALE_PHASE', 'Ping index already processed');
+  if (round.pings.some((p) => p.index === index) || round.waitingPing?.index === index) fail('STALE_PHASE', 'Duplicate ping');
+  const r = clone(round);
+  const events: DomainEvent[] = [];
+  closeWaitingPing(r, now, events);
   r.nextPingIndex = index + 1;
   r.updatedAt = now;
   r.version++;
-  const events = [
-    ev(sample ? 'PING_RELEASED' : 'PING_MISSING', scheduledAt, r.id, null, {
-      pingIndex: index,
-      dispatchLatencyMs: latency,
-      ageSeconds: sample ? Math.max(0, Math.round((scheduledAt - sample.recordedAt) / 1000)) : null,
-    }),
-  ];
-  if (delayed) events.push(ev('PING_DELAYED', now, r.id, null, { pingIndex: index, dispatchLatencyMs: latency }));
-  const title = index === 0 ? 'The chase is on' : sample ? 'New location ping' : 'Ping unavailable';
-  const body =
-    index === 0
-      ? sample
-        ? 'New hiding-crew location available.'
-        : 'First ping unavailable — no fresh GPS fix from the hiding crew.'
-      : sample
-        ? 'New hiding-crew location ping available.'
-        : 'Ping unavailable — no fresh GPS fix.';
+  const latency = now - scheduledAt;
+  if (!sample) {
+    r.waitingPing = { index, deadline: scheduledAt, since: now };
+    events.push(ev('PING_WAITING', scheduledAt, r.id, null, { pingIndex: index, dispatchLatencyMs: latency }));
+    return {
+      round: withWake(r),
+      events,
+      notifications: [
+        notify(r, hiderUids(r), 'PING_WAITING', 'Seekers are waiting on your ping', 'No fresh GPS reached the server. Get a signal — the ping goes out as soon as it does.'),
+      ],
+    };
+  }
+  const rec = pingRecord(r, index, scheduledAt, sample, now, scheduledAt);
+  r.pings.push(rec);
+  events.push(ev('PING_RELEASED', scheduledAt, r.id, null, { pingIndex: index, dispatchLatencyMs: latency, ageSeconds: rec.ageSeconds }));
+  if (rec.delayed) events.push(ev('PING_DELAYED', now, r.id, null, { pingIndex: index, dispatchLatencyMs: latency }));
   return {
     round: withWake(r),
     events,
-    notifications: [notify(r, [r.seekerUid], sample ? 'PING_RELEASED' : 'PING_MISSING', title, body)],
+    notifications: [notify(r, seekerUids(r), 'PING_RELEASED', index === 0 ? 'The chase is on' : 'New ping', 'New hiding-crew location available.')],
   };
+}
+
+/**
+ * Release the waiting ping with the hiders' current fix (selected by
+ * `selectLateSample`). Only during an un-paused chase; the ping's age is
+ * measured against the release time, and it is labelled delayed.
+ */
+export function applyLateRelease(round: RoundDoc, sample: GpsPoint, now: number): Transition {
+  const w = round.waitingPing;
+  if (!w) fail('STALE_PHASE', 'No ping is waiting');
+  if (round.state !== 'CHASE' || hasOpenPause(round.pauses)) fail('STALE_PHASE', 'Pings release only during the chase');
+  const r = clone(round);
+  const rec = pingRecord(r, w!.index, w!.deadline, sample, now, now);
+  rec.delayed = true;
+  r.pings.push(rec);
+  r.waitingPing = null;
+  r.updatedAt = now;
+  r.version++;
+  return {
+    round: withWake(r),
+    events: [
+      ev('PING_RELEASED', now, r.id, null, { pingIndex: w!.index, dispatchLatencyMs: rec.dispatchLatencyMs, ageSeconds: rec.ageSeconds, late: true }),
+      ev('PING_DELAYED', now, r.id, null, { pingIndex: w!.index, dispatchLatencyMs: rec.dispatchLatencyMs }),
+    ],
+    notifications: [notify(r, seekerUids(r), 'PING_LATE', 'Late ping', 'The hiders’ GPS got through — new location available.')],
+  };
+}
+
+function endRound(r: RoundDoc, now: number, events: DomainEvent[]) {
+  closeWaitingPing(r, now, events);
+  for (const p of r.pauses) if (p.endAt === null) p.endAt = now;
+  r.pausedFromState = null;
+  r.active = false;
+  r.summaryReady = false;
+  r.pendingPauseRequest = null;
+  r.phaseGeneration++;
+  r.nextWakeAt = null;
+  r.updatedAt = now;
+  r.version++;
 }
 
 export function applyTimeCap(round: RoundDoc, at: number, now: number): Transition {
   if (round.state !== 'CHASE') fail('STALE_PHASE', 'Time cap only applies during chase');
   const r = clone(round);
+  const events: DomainEvent[] = [];
   r.state = 'TIMED_OUT';
   r.endedAt = at;
-  r.active = false;
-  r.summaryReady = false;
-  r.phaseGeneration++;
+  endRound(r, now, events);
   r.result = buildBaseResult(r, 'TIMED_OUT', at, null, now);
-  r.updatedAt = now;
-  r.version++;
-  r.nextWakeAt = null;
+  events.push(ev('ROUND_TIMED_OUT', at, r.id, null, { observedChaseSeconds: r.result.observedChaseSeconds }));
   return {
     round: r,
-    events: [ev('ROUND_TIMED_OUT', at, r.id, null, { observedChaseSeconds: r.result.observedChaseSeconds })],
-    notifications: [notify(r, bothUids(r), 'ROUND_TIMED_OUT', `Round ${r.index} timed out`, `Not caught — survived at least ${fmtClock(r.result.observedChaseSeconds)}. Recap is ready.`)],
+    events,
+    notifications: [
+      notify(r, roundUids(r), 'ROUND_TIMED_OUT', `Round ${r.index} timed out`, `Not caught — survived at least ${fmtClock(r.result.observedChaseSeconds)}.`),
+    ],
   };
 }
 
@@ -377,7 +478,8 @@ export function submitClaim(round: RoundDoc, claim: CaptureClaim, uid: string, n
   }
   if (round.state === 'CAPTURE_PENDING') fail('ALREADY_CLAIMED', 'Another catch claim is awaiting confirmation');
   if (round.state !== 'CHASE') fail('STALE_PHASE', 'Catch claims are accepted only during the chase');
-  if (uid !== round.seekerUid || claim.seekerUid !== uid) fail('OPERATOR_NOT_AUTHORIZED', 'Only the seeking operator can submit a catch');
+  if (!seekerUids(round).includes(uid) || claim.seekerUid !== uid) fail('OPERATOR_NOT_AUTHORIZED', 'Only a seeking crew can submit a catch');
+  if (claim.seekerTeam !== snapshotTeamOf(round, uid)) fail('OPERATOR_NOT_AUTHORIZED', 'Claim crew mismatch');
   if (!claim.photoStoredAt) fail('GAME_NOT_READY', 'Photo upload has not completed');
   const r = clone(round);
   r.state = 'CAPTURE_PENDING';
@@ -392,14 +494,28 @@ export function submitClaim(round: RoundDoc, claim: CaptureClaim, uid: string, n
   const chaseSeconds = effectiveChaseMs(r, now) / 1000;
   return {
     round: withWake(r),
-    events: [ev('CLAIM_SUBMITTED', now, r.id, uid, { claimId: claim.claimId, chaseSecondsAtClaim: Math.round(chaseSeconds) })],
-    notifications: [notify(r, [r.hiderUid], 'CLAIM_SUBMITTED', 'Photo catch submitted', `Review now — claimed at ${fmtClock(chaseSeconds)}.`)],
+    events: [ev('CLAIM_SUBMITTED', now, r.id, uid, { claimId: claim.claimId, team: claim.seekerTeam, chaseSecondsAtClaim: Math.round(chaseSeconds) })],
+    notifications: [
+      notify(r, hiderUids(r), 'CLAIM_SUBMITTED', 'Photo catch submitted', `${name(r, claim.seekerTeam)} claim a catch at ${fmtClock(chaseSeconds)}. Review now.`),
+      notify(
+        r,
+        seekerUids(r).filter((u) => u !== uid),
+        'CLAIM_SUBMITTED',
+        'Catch claimed',
+        `${name(r, claim.seekerTeam)} submitted a photo catch. The clock is frozen while the hiders review.`,
+      ),
+    ],
   };
 }
 
 function closeCapturePause(r: RoundDoc, claimId: string, endAt: number) {
   const p = r.pauses.find((x) => x.id === `cap-${claimId}`);
   if (p && p.endAt === null) p.endAt = endAt;
+}
+
+/** Crews credited with a confirmed catch: attribution, never a round winner. */
+export function catchCredit(r: Pick<RoundDoc, 'seekMode' | 'seekingTeams'>, claimTeam: TeamKey): TeamKey[] {
+  return r.seekMode === 'RACE' ? [claimTeam] : [...r.seekingTeams];
 }
 
 export function decideClaim(
@@ -410,11 +526,11 @@ export function decideClaim(
   reason: string | null,
   now: number,
 ): Transition {
-  if (uid !== round.hiderUid) fail('OPERATOR_NOT_AUTHORIZED', 'Only the hiding operator can confirm or reject a catch');
+  if (!hiderUids(round).includes(uid)) fail('OPERATOR_NOT_AUTHORIZED', 'Only the hiding crew can confirm or reject a catch');
   if (claim.seekerUid === uid) fail('OPERATOR_NOT_AUTHORIZED', 'An operator cannot review their own claim');
   const capturePending = round.state === 'CAPTURE_PENDING' || (round.state === 'PAUSED' && round.pausedFromState === 'CAPTURE_PENDING');
   if (!capturePending || round.activeClaimId !== claim.claimId || claim.status !== 'PENDING') {
-    fail('STALE_PHASE', 'This claim is no longer awaiting a decision');
+    fail('STALE_PHASE', 'This claim was already decided');
   }
   if (round.claimExpiresAt !== null && now > round.claimExpiresAt && round.state !== 'PAUSED') {
     fail('CAPTURE_EXPIRED', 'Confirmation window expired');
@@ -424,24 +540,17 @@ export function decideClaim(
   if (decision === 'CONFIRM') {
     const chaseMs = effectiveChaseMs(r, submittedAt);
     closeCapturePause(r, claim.claimId, now);
-    for (const p of r.pauses) if (p.endAt === null) p.endAt = now;
+    const events: DomainEvent[] = [];
     r.state = 'COMPLETED';
-    r.pausedFromState = null;
     r.endedAt = now;
-    r.active = false;
-    r.summaryReady = false;
-    r.phaseGeneration++;
+    endRound(r, now, events);
     r.lastClaimOutcome = { claimId: claim.claimId, status: 'CONFIRMED', at: now, reason: null };
-    r.result = buildBaseResult(r, 'CAUGHT', submittedAt, { claimId: claim.claimId, chaseMs, confirmedAt: now }, now);
-    r.nextWakeAt = null;
-    r.updatedAt = now;
-    r.version++;
+    r.result = buildBaseResult(r, 'CAUGHT', submittedAt, { claimId: claim.claimId, chaseMs, confirmedAt: now, claimTeam: claim.seekerTeam }, now);
+    events.unshift(ev('CLAIM_CONFIRMED', now, r.id, uid, { claimId: claim.claimId, team: claim.seekerTeam, foundAfterSeconds: Math.round(chaseMs / 1000) }));
     return {
       round: r,
-      events: [ev('CLAIM_CONFIRMED', now, r.id, uid, { claimId: claim.claimId, foundAfterSeconds: Math.round(chaseMs / 1000) })],
-      notifications: [
-        notify(r, bothUids(r), 'CLAIM_CONFIRMED', 'Catch confirmed', `Official chase time ${fmtClock(chaseMs / 1000)}. Round ${r.index} recap is ready.`),
-      ],
+      events,
+      notifications: [notify(r, roundUids(r), 'CLAIM_CONFIRMED', 'Catch confirmed', `Official chase time ${fmtClock(chaseMs / 1000)}.`)],
     };
   }
   return resumeAfterClaim(r, claim, 'REJECTED', reason, now, uid, now);
@@ -476,10 +585,10 @@ function resumeAfterClaim(
     notifications: [
       notify(
         r,
-        bothUids(r),
+        roundUids(r),
         type,
         status === 'REJECTED' ? 'Claim rejected' : 'Claim expired',
-        status === 'REJECTED' ? 'Round resumed — the chase clock is running again.' : 'No decision in time — round resumed.',
+        status === 'REJECTED' ? 'Round resumed — the clock is running again.' : 'No decision in time — round resumed.',
       ),
     ],
   };
@@ -512,13 +621,22 @@ function startPause(r: RoundDoc, kind: PauseKind, byUid: string, confirmedByUid:
   return p;
 }
 
+/** The crew and side a phone plays for in this round, or a 403. */
+function playerOf(round: RoundDoc, uid: string, action: string) {
+  const team = snapshotTeamOf(round, uid);
+  const role = roleOfTeam(round, team);
+  if (!team || !role) fail('OPERATOR_NOT_AUTHORIZED', `Only phones in this round can ${action}`);
+  return { team: team!, side: sideOfRole(role!) };
+}
+
 /**
- * Pause handling (spec §3.2): SAFETY pauses are immediate from either
- * operator. MANUAL pauses need both operators — the first call proposes,
- * the other operator's call confirms.
+ * Pause handling (spec §3.2). SAFETY pauses are immediate from any phone in
+ * the round. A MANUAL pause is proposed by one side (hiders or seekers) and
+ * starts when any phone on the other side accepts — two seeking crews can't
+ * freeze the hiders on their own.
  */
-export function requestPause(round: RoundDoc, uid: string, team: TeamKey, kind: 'MANUAL' | 'SAFETY', reason: string | null, now: number): Transition {
-  if (!bothUids(round).includes(uid)) fail('OPERATOR_NOT_AUTHORIZED', 'Only the two round operators can pause');
+export function requestPause(round: RoundDoc, uid: string, kind: 'MANUAL' | 'SAFETY', reason: string | null, now: number): Transition {
+  const { team, side } = playerOf(round, uid, 'pause');
   const pausable = round.state === 'HEAD_START' || round.state === 'CHASE' || (kind === 'SAFETY' && round.state === 'CAPTURE_PENDING');
   if (!pausable) fail('STALE_PHASE', `Cannot pause in ${round.state}`);
   const r = clone(round);
@@ -529,40 +647,42 @@ export function requestPause(round: RoundDoc, uid: string, team: TeamKey, kind: 
     return {
       round: r,
       events: [ev('PAUSE_STARTED', now, r.id, uid, { kind, team, reason })],
-      notifications: [notify(r, bothUids(r), 'SAFETY_PAUSE', 'SAFETY PAUSE', `${r.teamNames[team]} paused the round${reason ? `: ${reason}` : ''}. Clock and pings are frozen.`)],
+      notifications: [notify(r, roundUids(r), 'SAFETY_PAUSE', 'SAFETY PAUSE', `${name(r, team)} paused the round${reason ? `: ${reason}` : ''}. Clock and pings are frozen.`)],
     };
   }
   if (!r.rules.manualPausesEnabled) fail('FORBIDDEN', 'Manual pauses are disabled for this round');
   const pending = r.pendingPauseRequest && r.pendingPauseRequest.expiresAt > now ? r.pendingPauseRequest : null;
-  if (pending && pending.byTeam !== team) {
+  if (pending && pending.bySide !== side) {
     startPause(r, 'MANUAL', pending.byUid, uid, pending.reason, now);
     return {
       round: r,
       events: [ev('PAUSE_STARTED', now, r.id, uid, { kind, team, reason: pending.reason })],
-      notifications: [notify(r, bothUids(r), 'PAUSED', 'Round paused', 'Both operators agreed. Clock and pings are frozen.')],
+      notifications: [notify(r, roundUids(r), 'PAUSED', 'Round paused', 'Clock and pings are frozen.')],
     };
   }
-  r.pendingPauseRequest = { id: `pr-${now}`, byUid: uid, byTeam: team, at: now, expiresAt: now + PAUSE_REQUEST_TTL_MS, reason };
+  r.pendingPauseRequest = { id: `pr-${now}`, byUid: uid, byTeam: team, bySide: side, at: now, expiresAt: now + PAUSE_REQUEST_TTL_MS, reason };
+  const otherSide = side === 'HIDERS' ? seekerUids(r) : hiderUids(r);
   return {
     round: withWake(r),
     events: [ev('PAUSE_REQUESTED', now, r.id, uid, { team, reason })],
-    notifications: [notify(r, bothUids(r).filter((u) => u !== uid), 'PAUSE_REQUESTED', 'Pause requested', `${r.teamNames[team]} asked to pause. Confirm in the app.`)],
+    notifications: [notify(r, otherSide, 'PAUSE_REQUESTED', 'Pause requested', `${name(r, team)} asked to pause. Confirm in the app.`)],
   };
 }
 
-/** Both operators vote to resume; the pause ends when the second vote arrives. */
-export function voteResume(round: RoundDoc, uid: string, team: TeamKey, now: number): Transition {
+/** One vote from the hiders and one from the seekers ends a pause. */
+export function voteResume(round: RoundDoc, uid: string, now: number): Transition {
   if (round.state !== 'PAUSED') fail('STALE_PHASE', 'Round is not paused');
-  if (!bothUids(round).includes(uid)) fail('OPERATOR_NOT_AUTHORIZED', 'Only the two round operators can resume');
+  const { team, side } = playerOf(round, uid, 'resume');
   const r = clone(round);
-  r.resumeVotes[team] = now;
+  r.resumeVotes[side] = now;
   r.updatedAt = now;
   r.version++;
-  if (!(r.resumeVotes.A && r.resumeVotes.B)) {
+  if (!(r.resumeVotes.HIDERS && r.resumeVotes.SEEKERS)) {
+    const otherSide = side === 'HIDERS' ? seekerUids(r) : hiderUids(r);
     return {
       round: r,
-      events: [ev('RESUME_VOTE', now, r.id, uid, { team })],
-      notifications: [notify(r, bothUids(r).filter((u) => u !== uid), 'RESUME_VOTE', 'Ready to resume?', `${r.teamNames[team]} is ready to resume. Tap Resume when your crew is ready.`)],
+      events: [ev('RESUME_VOTE', now, r.id, uid, { team, side })],
+      notifications: [notify(r, otherSide, 'RESUME_VOTE', 'Ready to resume?', `${name(r, team)} are ready. Tap Resume when your crew is.`)],
     };
   }
   let pausedMs = 0;
@@ -581,41 +701,52 @@ export function voteResume(round: RoundDoc, uid: string, team: TeamKey, now: num
   return {
     round: withWake(r),
     events: [ev('RESUMED', now, r.id, uid, { pausedSeconds: Math.round(pausedMs / 1000), state: resumed })],
-    notifications: [notify(r, bothUids(r), 'RESUMED', 'Round resumed', 'The clock is running again.')],
+    notifications: [notify(r, roundUids(r), 'RESUMED', 'Round resumed', 'The clock is running again.')],
   };
 }
 
 export function abortRound(round: RoundDoc, uid: string | null, reason: string, now: number): Transition {
   if (!isActiveState(round.state)) fail('STALE_PHASE', 'Only an active round can be aborted');
-  if (uid !== null && !bothUids(round).includes(uid)) fail('OPERATOR_NOT_AUTHORIZED', 'Only the two round operators can abort');
+  if (uid !== null && !roundUids(round).includes(uid)) fail('OPERATOR_NOT_AUTHORIZED', 'Only phones in this round can abort it');
   const r = clone(round);
-  for (const p of r.pauses) if (p.endAt === null) p.endAt = now;
+  const events: DomainEvent[] = [];
   r.state = 'ABORTED';
-  r.pausedFromState = null;
   r.endedAt = now;
-  r.active = false;
-  r.summaryReady = false;
+  endRound(r, now, events);
   r.abortedReason = reason;
   r.abortedByUid = uid;
   r.activeClaimId = null;
   r.claimExpiresAt = null;
-  r.phaseGeneration++;
   r.result = buildBaseResult(r, 'ABORTED', now, null, now);
-  r.nextWakeAt = null;
-  r.updatedAt = now;
-  r.version++;
+  events.unshift(ev('ROUND_ABORTED', now, r.id, uid, { reason }));
   return {
     round: r,
-    events: [ev('ROUND_ABORTED', now, r.id, uid, { reason })],
-    notifications: [notify(r, bothUids(r), 'ROUND_ABORTED', `Round ${r.index} aborted`, reason)],
+    events,
+    notifications: [notify(r, roundUids(r), 'ROUND_ABORTED', `Round ${r.index} aborted`, reason)],
   };
+}
+
+/**
+ * Drop one phone from a round's snapshot (consent withdrawn mid-round). The
+ * round continues on the crew's other phones; it aborts only if the crew has
+ * no phone left.
+ */
+export function removePhoneFromRound(round: RoundDoc, uid: string, reason: string, now: number): Transition {
+  const team = snapshotTeamOf(round, uid);
+  if (!team) return { round, events: [], notifications: [] };
+  if (isActiveState(round.state) && (round.operatorsByTeam[team] ?? []).length <= 1) return abortRound(round, null, reason, now);
+  const r = clone(round);
+  r.operatorsByTeam[team] = (r.operatorsByTeam[team] ?? []).filter((u) => u !== uid);
+  r.updatedAt = now;
+  r.version++;
+  return { round: r, events: [ev('OPERATOR_REMOVED', now, r.id, uid, { team, reason })], notifications: [] };
 }
 
 export function buildBaseResult(
   r: RoundDoc,
   outcome: RoundOutcome,
   endAt: number,
-  catchInfo: { claimId: string; chaseMs: number; confirmedAt: number } | null,
+  catchInfo: { claimId: string; chaseMs: number; confirmedAt: number; claimTeam: TeamKey } | null,
   now: number,
 ): RoundResult {
   const headStartSeconds = Math.round(effectiveHeadStartMs(r, endAt) / 1000);
@@ -623,15 +754,26 @@ export function buildBaseResult(
   if (outcome === 'CAUGHT' && catchInfo) observedChaseSeconds = Math.round(catchInfo.chaseMs / 1000);
   else if (outcome === 'TIMED_OUT') observedChaseSeconds = r.rules.maxChaseSeconds ?? Math.round(effectiveChaseMs(r, endAt) / 1000);
   else observedChaseSeconds = Math.round(effectiveChaseMs(r, endAt) / 1000);
+  const crews: RoundResult['crews'] = {};
+  for (const k of roundTeams(r)) {
+    crews[k] = {
+      role: k === r.hidingTeam ? 'HIDING' : 'SEEKING',
+      distanceTotalMeters: null,
+      distanceChaseMeters: null,
+      gpsCoverageFraction: null,
+      routeQuality: 'INSUFFICIENT',
+      phones: r.operatorsByTeam[k]?.length ?? 0,
+    };
+  }
   return {
     roundId: r.id,
     roundIndex: r.index,
     hidingTeam: r.hidingTeam,
-    seekingTeam: r.seekingTeam,
-    hidingTeamName: r.teamNames[r.hidingTeam],
-    seekingTeamName: r.teamNames[r.seekingTeam],
-    hidingRosterSnapshot: r.rosterSnapshot[r.hidingTeam],
-    seekingRosterSnapshot: r.rosterSnapshot[r.seekingTeam],
+    seekingTeams: [...r.seekingTeams],
+    seekMode: r.seekMode,
+    teamNames: { ...r.teamNames },
+    rosterSnapshot: structuredClone(r.rosterSnapshot),
+    catchCreditTeams: outcome === 'CAUGHT' && catchInfo ? catchCredit(r, catchInfo.claimTeam) : [],
     outcome,
     headStartSeconds,
     observedChaseSeconds,
@@ -646,47 +788,63 @@ export function buildBaseResult(
     pingsReleased: r.pings.filter((p) => p.status === 'RELEASED').length,
     pingsMissing: r.pings.filter((p) => p.status === 'NO_FRESH_FIX').length,
     pingsDelayed: r.pings.filter((p) => p.delayed).length,
-    hidingDistanceTotalMeters: null,
-    hidingDistanceChaseMeters: null,
-    seekingDistanceChaseMeters: null,
-    gpsCoverageFractionHider: null,
-    gpsCoverageFractionSeeker: null,
-    routeQualityHider: 'INSUFFICIENT',
-    routeQualitySeeker: 'INSUFFICIENT',
-    rulesFingerprint: rulesFingerprint(r.rules),
+    crews,
+    rulesFingerprint: rulesFingerprint(r.rules, r.seekingTeams.length, r.seekMode),
     abortedReason: r.abortedReason,
     resolvedByDispute: false,
     finalizedAt: now,
   };
 }
 
-/** Post-game joint dispute resolution: both crews must propose the same outcome. */
+/** Brief of a finished round for the session document (no coordinates). */
+export function roundBrief(r: RoundDoc, hidingRosterFingerprint: string): RoundBrief | null {
+  if (!r.result) return null;
+  return {
+    roundId: r.id,
+    index: r.index,
+    hidingTeam: r.hidingTeam,
+    seekingTeams: [...r.seekingTeams],
+    seekMode: r.seekMode,
+    catchCreditTeams: [...r.result.catchCreditTeams],
+    outcome: r.result.outcome,
+    observedChaseSeconds: r.result.observedChaseSeconds,
+    isRightCensored: r.result.isRightCensored,
+    rulesFingerprint: r.result.rulesFingerprint,
+    hidingRosterFingerprint,
+  };
+}
+
+/**
+ * Post-game dispute resolution: the hiding crew and the claimant's crew must
+ * propose the same outcome. Another seeking crew neither votes nor blocks.
+ */
 export function proposeDisputeResolution(
   round: RoundDoc,
   claim: CaptureClaim,
   uid: string,
-  team: TeamKey,
   resolution: 'ACCEPT_AS_CATCH' | 'KEEP_REJECTED',
   now: number,
 ): { round: RoundDoc; claim: CaptureClaim; events: DomainEvent[]; resolved: boolean } {
   if (isActiveState(round.state) || round.state === 'READY') fail('STALE_PHASE', 'Disputes can be closed only after the round');
-  if (!bothUids(round).includes(uid)) fail('OPERATOR_NOT_AUTHORIZED', 'Only the two round operators can resolve disputes');
+  const team = snapshotTeamOf(round, uid);
+  const parties = [round.hidingTeam, claim.seekerTeam];
+  if (!team || !parties.includes(team)) fail('OPERATOR_NOT_AUTHORIZED', 'Only the hiding crew and the claiming crew can settle this claim');
   if (claim.status !== 'REJECTED' && claim.status !== 'EXPIRED') fail('CONFLICT', 'Only rejected or expired claims can be disputed');
   if (claim.dispute?.resolvedAt) fail('CONFLICT', 'Dispute already resolved');
   const c = structuredClone(claim);
   const r = clone(round);
   c.dispute = c.dispute ?? { proposals: {}, resolvedAt: null, resolution: null };
-  c.dispute.proposals[team] = { resolution, at: now, uid };
+  c.dispute.proposals[team!] = { resolution, at: now, uid };
   const events: DomainEvent[] = [ev('DISPUTE_PROPOSED', now, r.id, uid, { claimId: c.claimId, resolution, team })];
-  const a = c.dispute.proposals.A?.resolution;
-  const b = c.dispute.proposals.B?.resolution;
+  const hiders = c.dispute.proposals[round.hidingTeam]?.resolution;
+  const claimants = c.dispute.proposals[claim.seekerTeam]?.resolution;
   let resolved = false;
-  if (a && b && a === b) {
+  if (hiders && claimants && hiders === claimants) {
     c.dispute.resolvedAt = now;
-    c.dispute.resolution = a;
+    c.dispute.resolution = hiders;
     resolved = true;
-    events.push(ev('DISPUTE_RESOLVED', now, r.id, uid, { claimId: c.claimId, resolution: a }));
-    if (a === 'ACCEPT_AS_CATCH' && r.result && c.submittedAt !== null && c.officialChaseMsAtClaim !== null) {
+    events.push(ev('DISPUTE_RESOLVED', now, r.id, uid, { claimId: c.claimId, resolution: hiders }));
+    if (hiders === 'ACCEPT_AS_CATCH' && r.result && c.submittedAt !== null && c.officialChaseMsAtClaim !== null) {
       const earlier = r.result.outcome !== 'CAUGHT' || (r.result.officialFoundAt ?? Infinity) > c.submittedAt;
       if (earlier) {
         r.result = {
@@ -696,6 +854,7 @@ export function proposeDisputeResolution(
           isRightCensored: false,
           officialFoundAt: c.submittedAt,
           claimId: c.claimId,
+          catchCreditTeams: catchCredit(r, claim.seekerTeam),
           resolvedByDispute: true,
           finalizedAt: now,
         };

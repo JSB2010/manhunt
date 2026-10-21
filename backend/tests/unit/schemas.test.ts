@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HealthInput, LocationBatchBody, parse } from '../../src/schemas/api.js';
+import { CreateSessionBody, HealthInput, LocationBatchBody, NextRoundBody, parse, RedeemInviteBody, SetupPatchBody } from '../../src/schemas/api.js';
 
 /** iOS (Swift JSONEncoder) omits nil optionals; the API must accept that shape. */
 describe('request schemas accept the iOS client encoding', () => {
@@ -21,5 +21,33 @@ describe('request schemas accept the iOS client encoding', () => {
     };
     expect(parse(LocationBatchBody, body).samples).toHaveLength(1);
     expect(() => parse(LocationBatchBody, { ...body, role: 'HIDING' })).toThrow();
+  });
+});
+
+describe('crew request schemas', () => {
+  const team = { name: 'Crew', roster: [{ displayName: 'Ana' }] };
+
+  it('a night takes two or three crews; myTeam and the first hider must be one of them', () => {
+    expect(parse(CreateSessionBody, { title: 't', scheduledDate: '2026-10-20', myTeam: 'C', teams: { A: team, B: team, C: team }, seekMode: 'RACE' }).teams.C).toBeTruthy();
+    expect(() => parse(CreateSessionBody, { title: 't', scheduledDate: '2026-10-20', myTeam: 'C', teams: { A: team, B: team } })).toThrow();
+    expect(() => parse(CreateSessionBody, { title: 't', scheduledDate: '2026-10-20', myTeam: 'A', firstHidingTeam: 'C', teams: { A: team, B: team } })).toThrow();
+    expect(() => parse(CreateSessionBody, { title: 't', scheduledDate: '2026-10-20', myTeam: 'A', teams: { A: team, B: team, D: team } })).toThrow();
+    expect(() => parse(CreateSessionBody, { title: 't', scheduledDate: '2026-10-20', myTeam: 'A', teams: { A: team, B: team }, rules: { totalRounds: 4 } })).toThrow();
+  });
+
+  it('setup edits take crew removal and phone moves, never operator lists', () => {
+    expect(parse(SetupPatchBody, { teams: { C: null }, moves: [{ uid: 'u1', teamKey: 'B' }, { uid: 'u2', teamKey: null }] }).moves).toHaveLength(2);
+    expect(() => parse(SetupPatchBody, { teams: { A: { operatorUids: ['x'] } } })).toThrow();
+    expect(() => parse(SetupPatchBody, { moves: [{ uid: 'u1', teamKey: 'D' }] })).toThrow();
+  });
+
+  it('next round takes a hiding crew and a seek mode only', () => {
+    expect(parse(NextRoundBody, { hidingTeam: 'C', seekMode: 'TOGETHER' })).toEqual({ hidingTeam: 'C', seekMode: 'TOGETHER' });
+    expect(() => parse(NextRoundBody, { overrideReason: 'x' })).toThrow();
+  });
+
+  it('redeem takes a code or an invite id, plus an optional crew', () => {
+    expect(parse(RedeemInviteBody, { code: 'ABCD2345', teamKey: 'B' }).teamKey).toBe('B');
+    expect(() => parse(RedeemInviteBody, { code: 'ABCD2345', inviteId: 'x' })).toThrow();
   });
 });

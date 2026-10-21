@@ -27,12 +27,12 @@ const t0 = Date.now();
 onSnapshot(doc(db, 'sessions', sid, 'views', cred.user.uid), { includeMetadataChanges: true }, (snap) => {
   n++;
   const v = snap.data() as any;
-  console.log(`+${((Date.now() - t0) / 1000).toFixed(1)}s snapshot#${n} cache=${snap.metadata.fromCache} B.op=${v?.session?.teams?.B?.hasOperator} consentA=${v?.session?.teams?.A?.consentGiven} readyB=${v?.round?.ready?.B}`);
+  console.log(`+${((Date.now() - t0) / 1000).toFixed(1)}s snapshot#${n} cache=${snap.metadata.fromCache} B.phones=${v?.session?.teams?.B?.operators?.length} consentA=${v?.session?.teams?.A?.operators?.[0]?.consentGiven} readyB=${v?.round?.ready?.B}`);
 }, (e) => console.log('listener error', e.code, e.message));
 const step = async (label: string, f: () => Promise<unknown>) => { await new Promise((r) => setTimeout(r, 3000)); console.log(`+${((Date.now() - t0) / 1000).toFixed(1)}s -> ${label}`); await f(); };
 let code = '';
 await step('invite', async () => { code = (await call(hostTok, 'POST', `/v1/sessions/${sid}/invites`, {})).code; });
-await step('redeem', () => call(guestTok, 'POST', '/v1/invites/redeem', { code }));
+await step('redeem', () => call(guestTok, 'POST', '/v1/invites/redeem', { code, teamKey: 'B' }));
 await step('guest consent', () => call(guestTok, 'POST', `/v1/sessions/${sid}/consent`, { accepted: true, consentVersion: 'v1', routeSharingAfterRound: true, guestDisclosureAcknowledged: true }));
 await step('host consent', () => call(hostTok, 'POST', `/v1/sessions/${sid}/consent`, { accepted: true, consentVersion: 'v1', routeSharingAfterRound: true, guestDisclosureAcknowledged: true }));
 await step('guest ready', () => call(guestTok, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health }));

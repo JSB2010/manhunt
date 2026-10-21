@@ -6,7 +6,7 @@ import { DataService } from '../services/dataService.js';
 import { GameService } from '../services/gameService.js';
 import type { Deps } from '../services/repo.js';
 import { SocialService } from '../services/socialService.js';
-import { installErrorHandling, installIdempotency, installServerTime, RateLimiter } from './http.js';
+import { FAILURE_ONLY_BUCKETS, installErrorHandling, installIdempotency, installServerTime, RateLimiter } from './http.js';
 import { registerDataRoutes } from './routes/data.js';
 import { registerGameRoutes } from './routes/game.js';
 import { registerMeRoutes } from './routes/me.js';
@@ -65,8 +65,18 @@ export async function buildApiApp(deps: Deps, opts: ApiOptions): Promise<Fastify
       throw new AppError('UNAUTHENTICATED', 'Invalid or expired token');
     }
     const bucket = req.routeOptions.config?.rateLimit ?? 'default';
-    if (!limiter.check(req.auth.uid, bucket, deps.clock.now())) throw new AppError('RATE_LIMITED', 'Too many requests, slow down');
+    const allowed = FAILURE_ONLY_BUCKETS.has(bucket)
+      ? limiter.peek(req.auth.uid, bucket, deps.clock.now()) && limiter.check(req.auth.uid, 'default', deps.clock.now())
+      : limiter.check(req.auth.uid, bucket, deps.clock.now());
+    if (!allowed) throw new AppError('RATE_LIMITED', 'Too many requests, slow down');
     await services.social.ensureUser(req.auth.uid, { email: req.auth.email, name: req.auth.name });
+  });
+
+  app.addHook('onResponse', async (req, reply) => {
+    const bucket = req.routeOptions.config?.rateLimit;
+    if (req.auth && bucket && FAILURE_ONLY_BUCKETS.has(bucket) && reply.statusCode >= 400 && reply.statusCode < 500 && reply.statusCode !== 429) {
+      limiter.check(req.auth.uid, bucket, deps.clock.now());
+    }
   });
 
   installErrorHandling(app, deps);

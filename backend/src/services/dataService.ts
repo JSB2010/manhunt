@@ -1,8 +1,9 @@
+import { crewOfUid, hiderUids, operatorUidsOf, roundUids, snapshotTeamOf, teamKeysOf } from '../domain/crews.js';
+import { removePhoneFromRound } from '../domain/engine.js';
 import { fail } from '../domain/errors.js';
 import { buildScorecard, personAnalytics, type SessionResults } from '../domain/scoring.js';
-import { isFinishedState, type CaptureClaim, type DomainEvent, type MemberDoc, type RoundDoc, type RoundResult, type SessionDoc, type TeamKey } from '../domain/types.js';
-import { teamForUid } from '../domain/engine.js';
-import type { RouteDoc } from './finalize.js';
+import { isActiveState, isFinishedState, TEAM_KEYS, type CaptureClaim, type DomainEvent, type MemberDoc, type RoundDoc, type RoundResult, type SessionDoc, type TeamKey } from '../domain/types.js';
+import { finalizeRound, phoneKey, type RouteDoc } from './finalize.js';
 import { paths, writeEvents, writeViews, type Deps } from './repo.js';
 import { SocialService, type PersonDoc, type UserDoc } from './socialService.js';
 
@@ -36,57 +37,88 @@ export class DataService {
     return r!;
   }
 
+  /** Post-round artifacts of a round are for the phones that played it (its snapshot). */
+  private requireRoundPhone(uid: string, r: RoundDoc) {
+    if (!roundUids(r).includes(uid)) fail('NOT_FOUND', 'Round not found');
+  }
+
+  /** Route sharing needs consent from every phone that played the round — not from phones that joined later. */
+  private async routeConsent(sid: string, r: RoundDoc) {
+    const refs = roundUids(r).map((u) => this.p.member(sid, u));
+    if (!refs.length) return false;
+    const snaps = await this.d.db.getAll(...refs);
+    return snaps.every((d) => (d.data() as MemberDoc | undefined)?.consent?.routeSharingAfterRound === true);
+  }
+
   async roundSummary(uid: string, sid: string, rid: string) {
     const s = await this.memberSession(uid, sid);
     const r = await this.finishedRound(sid, rid);
+    this.requireRoundPhone(uid, r);
     const sum = (await this.p.summary(sid, rid).get()).data();
-    const members = await this.p.members(sid).get();
-    const routeConsent = members.docs.every((d) => (d.data() as MemberDoc).consent?.routeSharingAfterRound === true);
+    const myTeam = snapshotTeamOf(r, uid);
+    // Photos: hiders (reviewers), the claiming crew, and in TOGETHER mode every seeking crew.
+    const canSeePhoto = (team: TeamKey) => myTeam === r.hidingTeam || myTeam === team || (r.seekMode === 'TOGETHER' && !!myTeam && r.seekingTeams.includes(myTeam));
     return {
       roundId: rid,
       index: r.index,
       state: r.state,
       summaryReady: r.summaryReady === true,
       hidingTeam: r.hidingTeam,
-      seekingTeam: r.seekingTeam,
+      seekingTeams: r.seekingTeams,
+      seekMode: r.seekMode,
+      myTeam,
       teamNames: r.teamNames,
-      teamColors: { A: s.teams.A.color, B: s.teams.B.color },
+      teamColors: Object.fromEntries(TEAM_KEYS.filter((k) => r.teamNames[k]).map((k) => [k, s.teams[k]?.color ?? null])),
       rules: r.rules,
       result: r.result,
       roundStartAt: iso(r.roundStartAt),
       chaseStartAt: iso(r.chaseStartAt),
       endedAt: iso(r.endedAt),
-      pings: r.pings.map((p) => ({ ...p, scheduledAt: iso(p.scheduledAt), releasedAt: iso(p.releasedAt), observedAt: iso(p.observedAt) })),
-      claims: ((sum?.claims ?? []) as { claimId: string; status: string; submittedAt: number | null; reviewedAt: number | null; rejectionReason: string | null; chaseSecondsAtClaim: number | null; hasPhoto: boolean }[]).map((c) => ({
-        ...c,
+      // Released pins only, without server-only source fields.
+      pings: r.pings.map((p) => ({
+        index: p.index,
+        status: p.status,
+        delayed: p.delayed,
+        scheduledAt: iso(p.scheduledAt),
+        releasedAt: iso(p.releasedAt),
+        observedAt: iso(p.observedAt),
+        latitude: p.latitude,
+        longitude: p.longitude,
+        accuracyMeters: p.accuracyMeters,
+        ageSeconds: p.ageSeconds,
+      })),
+      claims: ((sum?.claims ?? []) as { claimId: string; team: TeamKey; status: string; submittedAt: number | null; reviewedAt: number | null; rejectionReason: string | null; chaseSecondsAtClaim: number | null; hasPhoto: boolean }[]).map((c) => ({
+        claimId: c.claimId,
+        team: c.team,
+        status: c.status,
+        rejectionReason: c.rejectionReason,
+        chaseSecondsAtClaim: c.chaseSecondsAtClaim,
         submittedAt: iso(c.submittedAt),
         reviewedAt: iso(c.reviewedAt),
-        photoPath: c.hasPhoto ? `/v1/sessions/${sid}/rounds/${rid}/captures/${c.claimId}/photo` : null,
+        photoPath: c.hasPhoto && canSeePhoto(c.team) ? `/v1/sessions/${sid}/rounds/${rid}/captures/${c.claimId}/photo` : null,
       })),
       timeline: ((sum?.timeline ?? []) as { type: string; at: number; details: Record<string, unknown> }[]).map((e) => ({ ...e, at: iso(e.at) })),
       pauses: r.pauses.map((p) => ({ kind: p.kind, startAt: iso(p.startAt), endAt: iso(p.endAt), reason: p.reason, phase: p.phase })),
       routeStats: sum?.routeStats ?? null,
-      routesAvailable: routeConsent,
-      roleOverride: r.roleOverride,
+      routesAvailable: await this.routeConsent(sid, r),
     };
   }
 
   async routes(uid: string, sid: string, rid: string, format: 'json' | 'geojson') {
     await this.memberSession(uid, sid);
-    await this.finishedRound(sid, rid);
-    const members = await this.p.members(sid).get();
-    if (!members.docs.every((d) => (d.data() as MemberDoc).consent?.routeSharingAfterRound === true)) {
-      fail('CONSENT_REQUIRED', 'Both operators must have agreed to post-round route sharing');
-    }
+    const r = await this.finishedRound(sid, rid);
+    this.requireRoundPhone(uid, r);
+    if (!(await this.routeConsent(sid, r))) fail('CONSENT_REQUIRED', 'Every phone in the round must have agreed to post-round route sharing');
     const route = (await this.p.route(sid, rid).get()).data() as RouteDoc | undefined;
     if (!route) fail('RETRYABLE_TEMPORARY', 'Route recap is still being computed');
+    const keys = TEAM_KEYS.filter((k) => route!.teams[k]);
     if (format === 'geojson') {
       return {
         type: 'FeatureCollection',
-        features: (['A', 'B'] as const).flatMap((k) =>
-          route!.teams[k].segments.map((seg, i) => ({
+        features: keys.flatMap((k) =>
+          route!.teams[k]!.segments.map((seg, i) => ({
             type: 'Feature',
-            properties: { team: k, role: route!.teams[k].role, segment: i, quality: route!.teams[k].quality },
+            properties: { team: k, role: route!.teams[k]!.role, segment: i, quality: route!.teams[k]!.quality },
             geometry: { type: 'LineString', coordinates: seg.points.map((p) => [p.lon, p.lat]) },
           })),
         ),
@@ -96,13 +128,20 @@ export class DataService {
       roundId: rid,
       revision: route!.revision,
       teams: Object.fromEntries(
-        (['A', 'B'] as const).map((k) => [
-          k,
-          {
-            ...route!.teams[k],
-            segments: route!.teams[k].segments.map((s) => ({ points: s.points.map((p) => ({ latitude: p.lat, longitude: p.lon, t: iso(p.t) })) })),
-          },
-        ]),
+        keys.map((k) => {
+          const t = route!.teams[k]!;
+          return [
+            k,
+            {
+              team: t.team,
+              role: t.role,
+              deleted: t.deleted,
+              quality: t.quality,
+              sampleCount: t.sampleCount,
+              segments: t.segments.map((seg) => ({ points: seg.points.map((p) => ({ latitude: p.lat, longitude: p.lon, t: iso(p.t) })) })),
+            },
+          ];
+        }),
       ),
       markers: {
         roundStartAt: iso(route!.markers.roundStartAt),
@@ -121,21 +160,16 @@ export class DataService {
 
   async sessionAnalytics(uid: string, sid: string) {
     const s = await this.memberSession(uid, sid);
-    const { rounds, results } = await this.sessionResults(sid);
+    const { results } = await this.sessionResults(sid);
     const sc = buildScorecard(s, results);
     return {
       sessionId: sid,
       title: s.title,
       scheduledDate: s.scheduledDate,
       status: s.status,
-      plannedRounds: s.rules.totalRounds,
       playedRounds: results.length,
-      teams: {
-        A: { name: s.teams.A.name, color: s.teams.A.color, roster: s.teams.A.roster },
-        B: { name: s.teams.B.name, color: s.teams.B.color, roster: s.teams.B.roster },
-      },
+      teams: Object.fromEntries(teamKeysOf(s).map((k) => [k, { name: s.teams[k]!.name, color: s.teams[k]!.color, roster: s.teams[k]!.roster }])),
       scorecard: sc,
-      roleOverrides: rounds.filter((r) => r.roleOverride).map((r) => ({ roundIndex: r.index, ...r.roleOverride, at: iso(r.roleOverride!.at) })),
       notDirectlyComparable: !sc.rulesConsistent,
     };
   }
@@ -155,7 +189,7 @@ export class DataService {
       data.push({
         session: s,
         results,
-        operatorUidsByRound: Object.fromEntries(rounds.map((r) => [r.id, { hider: r.hiderUid, seeker: r.seekerUid }])),
+        operatorUidsByRound: Object.fromEntries(rounds.map((r) => [r.id, roundUids(r)])),
       });
     }
     return {
@@ -174,7 +208,7 @@ export class DataService {
         contentType: 'application/json',
         body: JSON.stringify(
           {
-            session: { id: s.id, title: s.title, scheduledDate: s.scheduledDate, teams: { A: { name: s.teams.A.name, roster: s.teams.A.roster }, B: { name: s.teams.B.name, roster: s.teams.B.roster } }, rules: s.rules },
+            session: { id: s.id, title: s.title, scheduledDate: s.scheduledDate, teams: Object.fromEntries(teamKeysOf(s).map((k) => [k, { name: s.teams[k]!.name, roster: s.teams[k]!.roster }])), rules: s.rules },
             scorecard: sc,
             exportedAt: new Date(this.d.clock.now()).toISOString(),
           },
@@ -184,8 +218,8 @@ export class DataService {
       };
     }
     const header = [
-      'session_title', 'date', 'round', 'hiding_crew', 'seeking_crew', 'hiding_roster', 'seeking_roster', 'outcome', 'head_start_s',
-      'chase_s', 'right_censored', 'pause_s', 'ping_slots', 'pings_released', 'pings_missing', 'hider_foot_total_m', 'hider_foot_chase_m',
+      'session_title', 'date', 'round', 'hiding_crew', 'seeking_crews', 'seek_mode', 'catch_credit', 'hiding_roster', 'seeking_rosters', 'outcome',
+      'head_start_s', 'chase_s', 'right_censored', 'pause_s', 'ping_slots', 'pings_released', 'pings_missing', 'hider_foot_total_m', 'hider_foot_chase_m',
       'seeker_vehicle_chase_m', 'hider_gps_coverage', 'seeker_gps_coverage', 'rules_fingerprint',
     ];
     const q = (v: unknown) => {
@@ -194,14 +228,20 @@ export class DataService {
       const safe = /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
       return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
     };
-    const rows = results.map((r) =>
-      [
-        s.title, s.scheduledDate, r.roundIndex, r.hidingTeamName, r.seekingTeamName,
-        r.hidingRosterSnapshot.map((p) => p.displayName).join('; '), r.seekingRosterSnapshot.map((p) => p.displayName).join('; '),
+    const crewName = (r: RoundResult, k: TeamKey) => r.teamNames[k] ?? `Crew ${k}`;
+    const roster = (r: RoundResult, k: TeamKey) => (r.rosterSnapshot[k] ?? []).map((p) => p.displayName).join('; ');
+    // Several seeking crews: one "crew: value" entry per crew, attributed to crews, never people.
+    const perSeeker = (r: RoundResult, f: (k: TeamKey) => unknown) => r.seekingTeams.map((k) => `${crewName(r, k)}: ${f(k) ?? ''}`).join(' | ');
+    const rows = results.map((r) => {
+      const h = r.crews[r.hidingTeam];
+      return [
+        s.title, s.scheduledDate, r.roundIndex, crewName(r, r.hidingTeam), r.seekingTeams.map((k) => crewName(r, k)).join(' | '), r.seekMode,
+        r.catchCreditTeams.map((k) => crewName(r, k)).join(' | '), roster(r, r.hidingTeam), perSeeker(r, (k) => roster(r, k)),
         r.outcome, r.headStartSeconds, r.observedChaseSeconds, r.isRightCensored, r.totalPauseSeconds, r.pingSlots, r.pingsReleased, r.pingsMissing,
-        r.hidingDistanceTotalMeters, r.hidingDistanceChaseMeters, r.seekingDistanceChaseMeters, r.gpsCoverageFractionHider, r.gpsCoverageFractionSeeker, r.rulesFingerprint,
-      ].map(q).join(','),
-    );
+        h?.distanceTotalMeters, h?.distanceChaseMeters, perSeeker(r, (k) => r.crews[k]?.distanceChaseMeters), h?.gpsCoverageFraction,
+        perSeeker(r, (k) => r.crews[k]?.gpsCoverageFraction), r.rulesFingerprint,
+      ].map(q).join(',');
+    });
     return { contentType: 'text/csv', body: [header.join(','), ...rows].join('\n') + '\n' };
   }
 
@@ -224,13 +264,16 @@ export class DataService {
     return { deleted: true, objectsDeleted: objects };
   }
 
-  /** Either operator deletes their own operator tracks and photos from shared history. */
+  /**
+   * A phone deletes its own tracks and photos from shared history. Each crew's
+   * route is then recomputed from its other phones (or marked deleted), and only
+   * the pins released from this phone's fixes are redacted.
+   */
   async deleteMyData(uid: string, sid: string) {
     const s = (await this.p.session(sid).get()).data() as SessionDoc | undefined;
     if (!s || !s.memberUids.includes(uid)) fail('NOT_FOUND', 'Session not found');
-    const team = teamForUid(s!, uid);
     const rounds = (await this.p.rounds(sid).get()).docs.map((d) => d.data() as RoundDoc);
-    if (rounds.some((r) => ['HEAD_START', 'CHASE', 'CAPTURE_PENDING', 'PAUSED'].includes(r.state))) fail('STALE_PHASE', 'Abort or finish the active round first');
+    if (rounds.some((r) => isActiveState(r.state) && roundUids(r).includes(uid))) fail('STALE_PHASE', 'Abort or finish the active round first');
     let points = 0;
     let photos = 0;
     const now = this.d.clock.now();
@@ -242,21 +285,11 @@ export class DataService {
         await batch.commit();
       }
       points += mine.size;
-      const myTeam = r.hiderUid === uid ? r.hidingTeam : r.seekerUid === uid ? r.seekingTeam : team;
-      if (myTeam) {
-        const teamId = s!.teams[myTeam].teamId;
-        await this.d.store.deletePrefix(`sessions/${sid}/rounds/${r.id}/tracks/${teamId}/`);
-        const routeRef = this.p.route(sid, r.id);
-        const route = (await routeRef.get()).data() as RouteDoc | undefined;
-        if (route) {
-          route.teams[myTeam] = { ...route.teams[myTeam], deleted: true, quality: 'DELETED', sampleCount: 0, segments: [] };
-          route.deletedTeams = [...new Set([...route.deletedTeams, myTeam])];
-          if (route.markers.claimPoint && r.seekerUid === uid) route.markers.claimPoint = null;
-          await routeRef.set(route);
-        } else if (isFinishedState(r.state)) {
-          await routeRef.set({ sessionId: sid, roundId: r.id, revision: 0, computedAt: now, teams: {}, markers: {}, deletedTeams: [myTeam] }, { merge: true });
-        }
-      }
+      if (!roundUids(r).includes(uid) || !isFinishedState(r.state)) continue;
+      await this.d.store.deletePrefix(`sessions/${sid}/rounds/${r.id}/tracks/${phoneKey(uid)}/`);
+      const routeRef = this.p.route(sid, r.id);
+      const route = (await routeRef.get()).data() as RouteDoc | undefined;
+      await routeRef.set({ sessionId: sid, roundId: r.id, deletedUids: [...new Set([...(route?.deletedUids ?? []), uid])] }, { merge: true });
       const claims = await this.p.claims(sid, r.id).where('seekerUid', '==', uid).get();
       for (const c of claims.docs) {
         const claim = c.data() as CaptureClaim;
@@ -265,18 +298,22 @@ export class DataService {
         await c.ref.update({ photoDeletedAt: now });
         photos++;
       }
-      // Released pins are positions of the hiding operator: redact their coordinates too
+      // Released pins are hider positions: redact the ones that came from this phone's fixes
       // (timestamps/status stay so the round's ping counts remain intact).
-      if (r.hiderUid === uid && r.pings.some((p) => p.latitude !== null)) {
-        const redacted = r.pings.map((p) => ({ ...p, latitude: null, longitude: null, sourcePointId: null }));
+      const lone = hiderUids(r).length === 1 && hiderUids(r)[0] === uid;
+      const fromMe = (p: RoundDoc['pings'][number]) => p.latitude !== null && (p.sourceUid === uid || (p.sourceUid === null && lone));
+      if (r.pings.some(fromMe)) {
+        const redacted = r.pings.map((p) => (fromMe(p) ? { ...p, latitude: null, longitude: null, sourcePointId: null } : p));
         await this.p.round(sid, r.id).update({ pings: redacted, updatedAt: now, version: r.version + 1 });
         const pingDocs = await this.p.round(sid, r.id).collection('pings').get();
-        await Promise.all(pingDocs.docs.map((d) => d.ref.update({ latitude: null, longitude: null, sourcePointId: null })));
-        await this.p.summary(sid, r.id).set({ pings: redacted }, { merge: true });
+        await Promise.all(
+          pingDocs.docs.filter((d) => fromMe(d.data() as RoundDoc['pings'][number])).map((d) => d.ref.update({ latitude: null, longitude: null, sourcePointId: null })),
+        );
       }
-      await this.p.summary(sid, r.id).set({ routeDeletedTeams: myTeam ? [myTeam] : [] }, { merge: true });
+      // Recompute crew routes and distances without this phone (also re-renders views).
+      await finalizeRound(this.d, sid, r.id, { force: true }).catch((err) => this.d.log.warn({ err, roundId: r.id }, 're-finalize after data deletion failed'));
     }
-    // Re-render views so redacted pins disappear from both operators' read models.
+    // Re-render views so redacted pins disappear from every phone's read model.
     await this.d.db.runTransaction(async (tx) => {
       const sess = (await tx.get(this.p.session(sid))).data() as SessionDoc;
       const membersSnap = await tx.get(this.p.members(sid));
@@ -300,32 +337,47 @@ export class DataService {
     let sessionsDeleted = 0;
     for (const d of sessions.docs) {
       const s = d.data() as SessionDoc;
-      const otherOperator = (['A', 'B'] as TeamKey[]).map((k) => s.teams[k].operatorUid).find((u) => u && u !== uid);
-      const rounds = (await this.p.rounds(s.id).get()).docs.map((x) => x.data() as RoundDoc);
-      for (const r of rounds.filter((x) => ['HEAD_START', 'CHASE', 'CAPTURE_PENDING', 'PAUSED'].includes(x.state))) {
-        await this.p.round(s.id, r.id).update({ state: 'ABORTED', active: false, abortedReason: 'Operator account deleted', endedAt: now, summaryReady: false });
-      }
-      if (s.hostUid === uid && !otherOperator) {
+      const others = operatorUidsOf(s).filter((u) => u !== uid);
+      if (s.hostUid === uid && !others.length) {
         await this.deleteSessionUnchecked(s.id);
         sessionsDeleted++;
         continue;
       }
+      // Leave any round in progress: the round goes on with the crew's other phones (or aborts if none are left).
+      const rounds = (await this.p.rounds(s.id).get()).docs.map((x) => x.data() as RoundDoc);
+      for (const r of rounds.filter((x) => isActiveState(x.state) && roundUids(x).includes(uid))) {
+        await this.d.db.runTransaction(async (tx) => {
+          const cur = (await tx.get(this.p.round(s.id, r.id))).data() as RoundDoc | undefined;
+          if (!cur || !isActiveState(cur.state)) return;
+          const t = removePhoneFromRound(cur, uid, 'Operator account deleted', now);
+          tx.set(this.p.round(s.id, r.id), { ...t.round, ...(isFinishedState(t.round.state) ? { summaryReady: false } : {}) });
+          writeEvents(tx, this.d.db, s.id, t.events);
+        });
+      }
       await this.deleteMyData(uid, s.id).catch((err) => this.d.log.warn({ err }, 'deleteMyData during account deletion failed'));
-      // Keep the other operator's history; anonymize this account's operator label and deactivate membership.
+      // Keep everyone else's history; take this phone off its crew, hand the organizer role on, deactivate membership.
       await this.d.db.runTransaction(async (tx) => {
-        const sessSnap = await tx.get(this.p.session(s.id));
-        const sess = sessSnap.data() as SessionDoc;
+        const sess = (await tx.get(this.p.session(s.id))).data() as SessionDoc;
         const membersSnap = await tx.get(this.p.members(s.id));
         const members: Record<string, MemberDoc> = {};
         membersSnap.docs.forEach((m) => (members[m.id] = m.data() as MemberDoc));
-        for (const k of ['A', 'B'] as TeamKey[]) {
-          if (sess.teams[k].operatorUid === uid) sess.teams[k].operatorDisplayName = 'Deleted account';
-        }
-        if (members[uid]) members[uid] = { ...members[uid]!, active: false, displayName: 'Deleted account' };
-        tx.set(this.p.session(s.id), sess);
-        if (members[uid]) tx.set(this.p.member(s.id, uid), members[uid]!);
         const current = sess.currentRoundId ? ((await tx.get(this.p.round(s.id, sess.currentRoundId))).data() as RoundDoc) : null;
-        writeViews(tx, this.d.db, sess, current, members, null, now);
+        const team = crewOfUid(sess, uid);
+        if (team) sess.teams[team]!.operatorUids = sess.teams[team]!.operatorUids.filter((u) => u !== uid);
+        const edited: string[] = [];
+        if (sess.hostUid === uid) {
+          const next = operatorUidsOf(sess).find((u) => members[u]?.active) ?? others[0]!;
+          sess.hostUid = next;
+          if (members[next]) members[next] = { ...members[next]!, isHost: true };
+          if (members[next]) edited.push(next);
+        }
+        sess.version++;
+        sess.updatedAt = now;
+        if (members[uid]) members[uid] = { ...members[uid]!, active: false, isHost: false, displayName: 'Deleted account', selfPersonId: null };
+        if (members[uid]) edited.push(uid);
+        tx.set(this.p.session(s.id), sess);
+        writeViews(tx, this.d.db, sess, current, members, null, now, { except: edited });
+        for (const u of edited) tx.set(this.p.member(s.id, u), members[u]!);
       });
     }
     // Social graph and profile.
@@ -338,7 +390,8 @@ export class DataService {
     await del(this.p.friendRequests().where('toUid', '==', uid));
     await del(this.p.groups().where('ownerUid', '==', uid));
     await del(this.p.linkRequests().where('requesterUid', '==', uid));
-    await del(this.p.invites().where('createdByUid', '==', uid));
+    await del(this.p.invites().where('createdByUid', '==', uid).where('kind', '==', 'DIRECT'));
+    await del(this.p.invites().where('targetUid', '==', uid));
     const linked = await this.p.people().where('linkedUid', '==', uid).get();
     // The person record stays (other nights reference it) but the account link is removed.
     await Promise.all(linked.docs.map((x) => x.ref.update({ linkedUid: null, isSelf: false })));
@@ -367,7 +420,7 @@ export class DataService {
     const views = await this.p.session(sid).collection('views').get();
     await Promise.all(views.docs.map((d) => d.ref.delete()));
     const members = await this.p.members(sid).get();
-    await Promise.all(members.docs.map((d) => d.ref.update({ active: false })));
+    await Promise.all(members.docs.map((d) => d.ref.update({ active: false, viewHash: null })));
     await this.p.session(sid).update({ revokedAt: now, version: s.version + 1 });
     await this.d.db.runTransaction(async (tx) =>
       writeEvents(tx, this.d.db, sid, [{ type: 'SESSION_REVOKED', at: now, actorUid: uid, roundId: null, details: {} }]),
@@ -399,7 +452,7 @@ export class DataService {
       if (c.status === 'CONFIRMED') {
         if (!keepCache.has(c.sessionId)) {
           const s = (await this.p.session(c.sessionId).get()).data() as SessionDoc | undefined;
-          keepCache.set(c.sessionId, !!s && s.keepPhotos.A && s.keepPhotos.B);
+          keepCache.set(c.sessionId, !!s && teamKeysOf(s).every((k) => s.keepPhotos[k] === true));
         }
         expired = !keepCache.get(c.sessionId) && now - (c.submittedAt ?? c.createdAt) > PHOTO_RETENTION_CONFIRMED_MS;
       } else if (c.status !== 'PENDING') {

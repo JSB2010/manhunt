@@ -28,35 +28,51 @@ export const TeamInput = z
   })
   .strict();
 
+const teamKey = z.enum(['A', 'B', 'C']);
+const seekMode = z.enum(['TOGETHER', 'RACE']);
+const TeamPatch = TeamInput.partial().strict();
+
 export const CreateSessionBody = z
   .object({
     title: z.string().trim().min(1).max(80),
     scheduledDate: isoDate,
-    myTeam: z.enum(['A', 'B']),
-    teams: z.object({ A: TeamInput, B: TeamInput }).strict(),
+    myTeam: teamKey,
+    teams: z.object({ A: TeamInput, B: TeamInput, C: TeamInput.optional() }).strict(),
+    firstHidingTeam: teamKey.optional(),
+    seekMode: seekMode.optional(),
     rules: RulesPatchSchema.optional(),
     groupId: id.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .refine((b) => !!b.teams[b.myTeam], 'myTeam must be one of the crews')
+  .refine((b) => !b.firstHidingTeam || !!b.teams[b.firstHidingTeam], 'firstHidingTeam must be one of the crews');
 
+/**
+ * Between-rounds editor. A crew set to null is removed (its phones move to the
+ * crew with the fewest phones); a crew that does not exist yet is added (needs a
+ * name). `moves` re-assigns phones; teamKey null removes the phone from the night.
+ * Operator lists can only change through `moves` — never by sending uids in a team.
+ */
 export const SetupPatchBody = z
   .object({
     title: z.string().trim().min(1).max(80).optional(),
     scheduledDate: isoDate.optional(),
     rules: RulesPatchSchema.optional(),
-    teams: z
-      .object({
-        A: TeamInput.partial().strict().optional(),
-        B: TeamInput.partial().strict().optional(),
-      })
-      .strict()
+    teams: z.object({ A: TeamPatch.nullable().optional(), B: TeamPatch.nullable().optional(), C: TeamPatch.nullable().optional() }).strict().optional(),
+    moves: z
+      .array(z.object({ uid: id, teamKey: teamKey.nullable() }).strict())
+      .max(15)
       .optional(),
   })
   .strict();
 
-export const CreateInviteBody = z.object({ targetUid: id.optional() }).strict();
-export const RedeemInviteBody = z
+export const CreateInviteBody = z.object({ targetUid: id.optional(), regenerate: z.boolean().optional() }).strict();
+export const PreviewInviteBody = z
   .object({ code: z.string().trim().min(6).max(16).optional(), inviteId: id.optional() })
+  .strict()
+  .refine((b) => !!b.code !== !!b.inviteId, 'Provide exactly one of code or inviteId');
+export const RedeemInviteBody = z
+  .object({ code: z.string().trim().min(6).max(16).optional(), inviteId: id.optional(), teamKey: teamKey.optional() })
   .strict()
   .refine((b) => !!b.code !== !!b.inviteId, 'Provide exactly one of code or inviteId');
 
@@ -115,7 +131,7 @@ export const CaptureCompleteBody = z.object({ claimId: id }).strict();
 export const DecisionBody = z.object({ decision: z.enum(['CONFIRM', 'REJECT']), reason: z.string().trim().max(200).nullable().optional() }).strict();
 export const PauseBody = z.object({ kind: z.enum(['MANUAL', 'SAFETY']), reason: z.string().trim().max(200).nullable().optional() }).strict();
 export const AbortBody = z.object({ reason: z.string().trim().min(1).max(200), safety: z.boolean().default(false) }).strict();
-export const NextRoundBody = z.object({ hidingTeam: z.enum(['A', 'B']).optional(), overrideReason: z.string().trim().max(200).nullable().optional() }).strict();
+export const NextRoundBody = z.object({ hidingTeam: teamKey.optional(), seekMode: seekMode.optional() }).strict();
 export const DisputeBody = z.object({ resolution: z.enum(['ACCEPT_AS_CATCH', 'KEEP_REJECTED']) }).strict();
 export const KeepPhotosBody = z.object({ keep: z.boolean() }).strict();
 

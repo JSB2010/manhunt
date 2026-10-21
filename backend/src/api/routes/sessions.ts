@@ -7,6 +7,7 @@ import {
   KeepPhotosBody,
   NextRoundBody,
   parse,
+  PreviewInviteBody,
   ReadyBody,
   RedeemInviteBody,
   SetupPatchBody,
@@ -23,17 +24,25 @@ export function registerSessionRoutes(app: FastifyInstance, s: Services) {
     return s.game.listSessions(uidOf(req), q);
   });
 
-  app.get('/v1/sessions/:id', async (req) => s.game.getView(uidOf(req), parse(Sid, req.params).id));
+  // Conditional GET: the view's content hash is its ETag, so an unchanged view costs a 304 with no body.
+  app.get('/v1/sessions/:id', async (req, reply) => {
+    const v = await s.game.getView(uidOf(req), parse(Sid, req.params).id);
+    if (v.viewHash) {
+      const etag = `"${v.viewHash}"`;
+      reply.header('etag', etag);
+      if (req.headers['if-none-match'] === etag) return reply.status(304).send();
+    }
+    return v;
+  });
 
-  app.post('/v1/sessions/:id/invites', { config: { rateLimit: 'invite' } }, async (req) =>
+  app.post('/v1/sessions/:id/invites', async (req) =>
     s.game.createInvite(uidOf(req), parse(Sid, req.params).id, parse(CreateInviteBody, req.body)),
   );
 
-  app.post('/v1/invites/preview', { config: { rateLimit: 'invite' } }, async (req) =>
-    s.game.previewInvite(uidOf(req), parse(z.object({ code: z.string().min(6).max(16) }).strict(), req.body).code),
-  );
+  // Code lookups: only failed attempts count toward the brute-force limit.
+  app.post('/v1/invites/preview', { config: { rateLimit: 'join' } }, async (req) => s.game.previewInvite(uidOf(req), parse(PreviewInviteBody, req.body)));
 
-  app.post('/v1/invites/redeem', { config: { rateLimit: 'invite' } }, async (req) => s.game.redeemInvite(uidOf(req), parse(RedeemInviteBody, req.body)));
+  app.post('/v1/invites/redeem', { config: { rateLimit: 'join' } }, async (req) => s.game.redeemInvite(uidOf(req), parse(RedeemInviteBody, req.body)));
 
   app.patch('/v1/sessions/:id/setup', async (req) => s.game.editSetup(uidOf(req), parse(Sid, req.params).id, parse(SetupPatchBody, req.body)));
 

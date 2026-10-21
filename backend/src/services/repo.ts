@@ -2,7 +2,7 @@ import type { DocumentReference, Firestore, Transaction } from 'firebase-admin/f
 import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../config.js';
 import type { CaptureClaim, DomainEvent, MemberDoc, RoundDoc, SessionDoc } from '../domain/types.js';
-import { renderView } from '../domain/views.js';
+import { renderView, viewHash } from '../domain/views.js';
 import type { Notifier } from './notifier.js';
 import type { Scheduler } from './scheduler.js';
 import type { ObjectStore } from './storage.js';
@@ -75,7 +75,14 @@ export async function txMembers(tx: Transaction, db: Firestore, sid: string): Pr
   return out;
 }
 
-/** Write every active member's sanitized view in the same transaction as the state change. */
+/**
+ * Write each active member's sanitized view in the same transaction as the
+ * state change — but only when its content changed (hash kept on the member
+ * doc), so an unchanged view never reaches the phone. Updates `members` in
+ * place with the new hashes and returns the uids whose member doc changed.
+ * With `writeMembers: false` the caller writes those member docs itself
+ * (a document may be written once per transaction here).
+ */
 export function writeViews(
   tx: Transaction,
   db: Firestore,
@@ -84,15 +91,26 @@ export function writeViews(
   members: Record<string, MemberDoc>,
   activeClaim: CaptureClaim | null,
   now: number,
-) {
+  opts: { except?: Iterable<string> } = {},
+): string[] {
   const p = paths(db);
+  const except = new Set(opts.except ?? []);
+  const changed: string[] = [];
   for (const m of Object.values(members)) {
-    if (!m.active) {
+    let hash: string | null = null;
+    if (m.active) {
+      const view = renderView({ uid: m.uid, session, round, members, activeClaim, now });
+      hash = viewHash(view);
+      if (hash !== m.viewHash) tx.set(p.view(session.id, m.uid), { ...view, viewHash: hash });
+    } else if (m.viewHash !== null) {
       tx.delete(p.view(session.id, m.uid));
-      continue;
     }
-    tx.set(p.view(session.id, m.uid), renderView({ uid: m.uid, session, round, members, activeClaim, now }));
+    if (hash === (m.viewHash ?? null) && m.viewHash !== undefined) continue;
+    members[m.uid] = { ...m, viewHash: hash };
+    changed.push(m.uid);
+    if (!except.has(m.uid)) tx.set(p.member(session.id, m.uid), { viewHash: hash }, { merge: true });
   }
+  return changed;
 }
 
 export function writeEvents(tx: Transaction, db: Firestore, sessionId: string, events: DomainEvent[]) {

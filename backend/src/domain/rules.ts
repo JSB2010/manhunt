@@ -1,14 +1,11 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import type { Rules } from './types.js';
+import type { Rules, SeekMode } from './types.js';
 
 export const DEFAULT_RULES: Rules = {
   headStartSeconds: 600,
   pingIntervalSeconds: 600,
   visiblePingHistoryCount: 1,
-  totalRounds: 4,
-  initialHidingTeam: 'A',
-  alternateRoles: true,
   maxChaseSeconds: null,
   confirmationTimeoutSeconds: 120,
   manualPausesEnabled: true,
@@ -22,9 +19,6 @@ export const RulesSchema = z
     headStartSeconds: z.number().int().min(0).max(3600),
     pingIntervalSeconds: z.number().int().min(60).max(3600),
     visiblePingHistoryCount: z.number().int().min(1).max(50).nullable(),
-    totalRounds: z.number().int().min(1).max(20),
-    initialHidingTeam: z.enum(['A', 'B']),
-    alternateRoles: z.boolean(),
     maxChaseSeconds: z
       .number()
       .int()
@@ -46,10 +40,11 @@ export function mergeRules(base: Rules, patch: Partial<Rules> | undefined): Rule
 }
 
 /**
- * Fingerprint of the rules that affect score comparability. Round counts and
- * first-hider choice do not change how a single chase time is measured.
+ * Fingerprint of everything that affects whether two chase times are
+ * comparable: the timing rules, plus how many crews were seeking and whether
+ * they raced (two cars racing find hiders differently from one).
  */
-export function rulesFingerprint(r: Rules): string {
+export function rulesFingerprint(r: Rules, seekingCrews = 1, seekMode: SeekMode = 'TOGETHER'): string {
   const material = [
     r.headStartSeconds,
     r.pingIntervalSeconds,
@@ -57,6 +52,8 @@ export function rulesFingerprint(r: Rules): string {
     r.maxChaseSeconds ?? 'none',
     r.maxPingGpsAgeSeconds,
     r.maxPingAccuracyMeters,
+    // Single-seeker rounds keep the v1 material so their fingerprints are unchanged.
+    ...(seekingCrews > 1 ? [`seekers:${seekingCrews}`, seekMode] : []),
   ].join('|');
   return createHash('sha256').update(material).digest('hex').slice(0, 16);
 }

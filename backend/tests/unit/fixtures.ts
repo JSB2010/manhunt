@@ -1,14 +1,29 @@
 import { createRound } from '../../src/domain/engine.js';
 import { DEFAULT_RULES } from '../../src/domain/rules.js';
-import type { CaptureClaim, DeviceHealth, GpsPoint, MemberDoc, Rules, SessionDoc } from '../../src/domain/types.js';
+import { operatorUidsOf, roundTeams } from '../../src/domain/crews.js';
+import type { CaptureClaim, DeviceHealth, GpsPoint, MemberDoc, Rules, SeekMode, SessionDoc, TeamKey } from '../../src/domain/types.js';
 
 export const HIDER = 'uid-hider-morgan';
+export const HIDER2 = 'uid-hider-casey';
 export const SEEKER = 'uid-seeker-taylor';
+export const SEEKER2 = 'uid-seeker-riley';
+export const SEEKER_C = 'uid-seeker-c-alex';
 export const T0 = Date.UTC(2026, 9, 17, 20, 0, 0); // 8:00 PM UTC
 export const MIN = 60_000;
 
-export function session(rules: Partial<Rules> = {}): SessionDoc {
-  return {
+export interface NightOpts {
+  /** add a third crew C (one phone, SEEKER_C) */
+  three?: boolean;
+  /** crew A's phones (default [HIDER]) */
+  phonesA?: string[];
+  /** crew B's phones (default [SEEKER]) */
+  phonesB?: string[];
+}
+
+export function session(rules: Partial<Rules> = {}, opts: NightOpts = {}): SessionDoc {
+  const phonesA = opts.phonesA ?? [HIDER];
+  const phonesB = opts.phonesB ?? [SEEKER];
+  const s: SessionDoc = {
     id: 'sess1',
     title: 'Friday Manhunt',
     scheduledDate: '2026-10-17',
@@ -21,8 +36,7 @@ export function session(rules: Partial<Rules> = {}): SessionDoc {
         key: 'A',
         name: 'Crew A',
         color: '#1E88E5',
-        operatorUid: HIDER,
-        operatorDisplayName: 'Morgan',
+        operatorUids: phonesA,
         roster: [
           { personId: 'p-morgan', displayName: 'Morgan' },
           { personId: 'p-casey', displayName: 'Casey' },
@@ -34,8 +48,7 @@ export function session(rules: Partial<Rules> = {}): SessionDoc {
         key: 'B',
         name: 'Crew B',
         color: '#F4511E',
-        operatorUid: SEEKER,
-        operatorDisplayName: 'Taylor',
+        operatorUids: phonesB,
         roster: [
           { personId: 'p-taylor', displayName: 'Taylor' },
           { personId: 'p-riley', displayName: 'Riley' },
@@ -43,27 +56,38 @@ export function session(rules: Partial<Rules> = {}): SessionDoc {
         ],
       },
     },
-    memberUids: [HIDER, SEEKER],
+    memberUids: [...phonesA, ...phonesB],
     participantPersonIds: ['p-morgan', 'p-casey', 'p-jules', 'p-taylor', 'p-riley', 'p-sam'],
     groupId: null,
     currentRoundId: null,
     roundIds: [],
     completedRoundCount: 0,
-    keepPhotos: { A: false, B: false },
+    keepPhotos: {},
+    joinCode: 'NIGHTCODE',
     roundBriefs: [],
     revokedAt: null,
     createdAt: T0 - 10 * MIN,
     updatedAt: T0 - 10 * MIN,
     version: 1,
   };
+  if (opts.three) {
+    s.teams.C = { teamId: 'teamC', key: 'C', name: 'Crew C', color: '#43A047', operatorUids: [SEEKER_C], roster: [{ personId: 'p-alex', displayName: 'Alex' }] };
+    s.memberUids.push(SEEKER_C);
+    s.participantPersonIds.push('p-alex');
+  }
+  return s;
 }
 
-export function readyRound(rules: Partial<Rules> = {}) {
-  const s = session(rules);
-  const { round } = createRound({ id: 'round1', session: s, index: 1, hidingTeam: 'A', suggestedHidingTeam: 'A', overrideByUid: null, overrideReason: null, now: T0 - MIN });
-  round.ready = { A: { uid: HIDER, at: T0 - 30_000 }, B: { uid: SEEKER, at: T0 - 20_000 } };
+/** A READY round with every crew marked ready (first phone of each crew). */
+export function readyRound(rules: Partial<Rules> = {}, opts: NightOpts & { seekMode?: SeekMode; hidingTeam?: TeamKey } = {}) {
+  const s = session(rules, opts);
+  const { round } = createRound({ id: 'round1', session: s, index: 1, hidingTeam: opts.hidingTeam ?? 'A', seekMode: opts.seekMode ?? 'TOGETHER', actorUid: HIDER, now: T0 - MIN });
+  round.ready = Object.fromEntries(roundTeams(round).map((k, i) => [k, { uid: s.teams[k]!.operatorUids[0]!, at: T0 - 30_000 + i * 1000 }]));
   return { session: s, round };
 }
+
+/** Every operator phone of the night, as start eligibility. */
+export const allPhones = (s: SessionDoc) => new Set(operatorUidsOf(s));
 
 let seq = 0;
 export function point(over: Partial<GpsPoint> & { recordedAt: number }): GpsPoint {
@@ -132,18 +156,24 @@ export function health(over: Partial<DeviceHealth> = {}): DeviceHealth {
   };
 }
 
-export function members(): Record<string, MemberDoc> {
-  const base = (uid: string, teamKey: 'A' | 'B', isHost: boolean): MemberDoc => ({
-    uid,
-    sessionId: 'sess1',
-    teamKey,
-    isHost,
-    active: true,
-    joinedAt: T0 - 10 * MIN,
-    consent: { acceptedAt: T0 - 9 * MIN, version: 'v1', routeSharingAfterRound: true, guestDisclosureAcknowledged: true },
-    consentRevokedAt: null,
-    health: health(),
-    displayName: uid,
-  });
-  return { [HIDER]: base(HIDER, 'A', true), [SEEKER]: base(SEEKER, 'B', false) };
+export function members(s: SessionDoc = session()): Record<string, MemberDoc> {
+  const out: Record<string, MemberDoc> = {};
+  for (const k of ['A', 'B', 'C'] as const) {
+    for (const uid of s.teams[k]?.operatorUids ?? []) {
+      out[uid] = {
+        uid,
+        sessionId: 'sess1',
+        teamKey: k,
+        isHost: uid === s.hostUid,
+        active: true,
+        joinedAt: T0 - 10 * MIN,
+        consent: { acceptedAt: T0 - 9 * MIN, version: 'v1', routeSharingAfterRound: true, guestDisclosureAcknowledged: true },
+        consentRevokedAt: null,
+        health: health(),
+        displayName: uid.replace(/^uid-/, '').replace(/-/g, ' '),
+        selfPersonId: null,
+      };
+    }
+  }
+  return out;
 }

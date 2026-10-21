@@ -1,14 +1,17 @@
 import { createHash } from 'node:crypto';
-import type { PersonRef, RoundResult, SessionDoc, TeamKey } from './types.js';
+import { rosterFingerprint } from './crews.js';
+import { TEAM_KEYS, type PersonRef, type RoundResult, type SessionDoc, type TeamKey } from './types.js';
 
 /**
  * Night scorecard and cross-night analytics (spec §6).
  *
- * - There is never a single-round winner.
+ * - There is never a single-round winner. Catch credit (`catchCreditTeams`) is
+ *   attribution only: RACE credits the claimant's crew, TOGETHER every seeking crew.
  * - Hide survival is computed only over rounds a crew hid; timed-out rounds are
  *   right-censored (observed >= cap) and flagged, never presented as a catch.
  * - A night comparison names a stronger hiding crew only when the comparison is
- *   balanced (equal valid hide rounds, identical rules, no censored/aborted rounds).
+ *   balanced (every crew hid equally often, identical rules, the same roster in
+ *   each crew's own hiding rounds, no censored/aborted rounds).
  * - Person-level stats are always crew-attributed.
  */
 
@@ -24,8 +27,12 @@ export interface TeamScore {
   hideSurvivalAverageIncludesCensored: boolean;
   caughtOnlyHideAverageSeconds: number | null;
   seekRoundCount: number;
+  /** rounds this crew sought that ended in a catch credited to it */
+  seekCreditedCatches: number;
   seekCaptureAverageSeconds: number | null;
   seekUncaughtCount: number;
+  /** RACE rounds where the other seeking crew made the catch */
+  seekCaughtByOtherCrew: number;
   hiderFootMetersTotal: number;
   hiderFootMetersChase: number;
   seekerVehicleMetersChase: number;
@@ -38,13 +45,14 @@ export type ComparisonStatus = 'COMPARABLE' | 'PROVISIONAL' | 'INSUFFICIENT';
 export interface NightComparison {
   status: ComparisonStatus;
   strongerHidingTeam: TeamKey | null;
+  /** lead over the runner-up crew */
   marginSeconds: number | null;
   reasons: string[];
   explanation: string;
 }
 
 export interface Scorecard {
-  teams: Record<TeamKey, TeamScore>;
+  teams: Partial<Record<TeamKey, TeamScore>>;
   comparison: NightComparison;
   rulesConsistent: boolean;
   rounds: RoundResult[];
@@ -52,9 +60,9 @@ export interface Scorecard {
 }
 
 const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
-const sum = (xs: (number | null)[]) => Math.round(xs.reduce<number>((a, b) => a + (b ?? 0), 0));
-const meanOrNull = (xs: (number | null)[]) => {
-  const v = xs.filter((x): x is number => x !== null);
+const sum = (xs: (number | null | undefined)[]) => Math.round(xs.reduce<number>((a, b) => a + (b ?? 0), 0));
+const meanOrNull = (xs: (number | null | undefined)[]) => {
+  const v = xs.filter((x): x is number => x !== null && x !== undefined);
   return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 1000) / 1000 : null;
 };
 
@@ -62,8 +70,8 @@ function teamScore(team: TeamKey, name: string, results: RoundResult[]): TeamSco
   const hid = results.filter((r) => r.hidingTeam === team);
   const validHid = hid.filter((r) => r.outcome !== 'ABORTED');
   const caught = validHid.filter((r) => r.outcome === 'CAUGHT');
-  const sought = results.filter((r) => r.seekingTeam === team && r.outcome !== 'ABORTED');
-  const soughtCaught = sought.filter((r) => r.outcome === 'CAUGHT');
+  const sought = results.filter((r) => r.seekingTeams.includes(team) && r.outcome !== 'ABORTED');
+  const credited = sought.filter((r) => r.outcome === 'CAUGHT' && r.catchCreditTeams.includes(team));
   return {
     team,
     name,
@@ -76,65 +84,97 @@ function teamScore(team: TeamKey, name: string, results: RoundResult[]): TeamSco
     hideSurvivalAverageIncludesCensored: validHid.some((r) => r.isRightCensored),
     caughtOnlyHideAverageSeconds: avg(caught.map((r) => r.observedChaseSeconds)),
     seekRoundCount: sought.length,
-    seekCaptureAverageSeconds: avg(soughtCaught.map((r) => r.observedChaseSeconds)),
-    seekUncaughtCount: sought.length - soughtCaught.length,
-    hiderFootMetersTotal: sum(validHid.map((r) => r.hidingDistanceTotalMeters)),
-    hiderFootMetersChase: sum(validHid.map((r) => r.hidingDistanceChaseMeters)),
-    seekerVehicleMetersChase: sum(sought.map((r) => r.seekingDistanceChaseMeters)),
-    meanHiderCoverage: meanOrNull(validHid.map((r) => r.gpsCoverageFractionHider)),
-    meanSeekerCoverage: meanOrNull(sought.map((r) => r.gpsCoverageFractionSeeker)),
+    seekCreditedCatches: credited.length,
+    seekCaptureAverageSeconds: avg(credited.map((r) => r.observedChaseSeconds)),
+    seekUncaughtCount: sought.filter((r) => r.outcome !== 'CAUGHT').length,
+    seekCaughtByOtherCrew: sought.filter((r) => r.outcome === 'CAUGHT' && !r.catchCreditTeams.includes(team)).length,
+    hiderFootMetersTotal: sum(validHid.map((r) => r.crews[team]?.distanceTotalMeters)),
+    hiderFootMetersChase: sum(validHid.map((r) => r.crews[team]?.distanceChaseMeters)),
+    seekerVehicleMetersChase: sum(sought.map((r) => r.crews[team]?.distanceChaseMeters)),
+    meanHiderCoverage: meanOrNull(validHid.map((r) => r.crews[team]?.gpsCoverageFraction)),
+    meanSeekerCoverage: meanOrNull(sought.map((r) => r.crews[team]?.gpsCoverageFraction)),
   };
 }
 
-export function compareNight(teams: Record<TeamKey, TeamScore>, results: RoundResult[]): NightComparison {
+/** Crews that played at least one non-aborted round, in key order. */
+function playingCrews(results: RoundResult[]): TeamKey[] {
+  const seen = new Set<TeamKey>();
+  for (const r of results) {
+    if (r.outcome === 'ABORTED') continue;
+    seen.add(r.hidingTeam);
+    for (const k of r.seekingTeams) seen.add(k);
+  }
+  return TEAM_KEYS.filter((k) => seen.has(k));
+}
+
+/** True when some crew hid with different rosters across its own hiding rounds. */
+function rostersChanged(valid: RoundResult[]): boolean {
+  const byCrew = new Map<TeamKey, Set<string>>();
+  for (const r of valid) {
+    const set = byCrew.get(r.hidingTeam) ?? new Set<string>();
+    set.add(rosterFingerprint(r.rosterSnapshot[r.hidingTeam]));
+    byCrew.set(r.hidingTeam, set);
+  }
+  return [...byCrew.values()].some((s) => s.size > 1);
+}
+
+const REASON_TEXT: Record<string, string> = {
+  UNEQUAL_HIDE_ROUNDS: 'crews hid an unequal number of times',
+  RULES_DIFFER: 'rules changed between rounds',
+  ROSTERS_CHANGED: 'a crew hid with different people',
+  CENSORED_ROUNDS: 'a round timed out',
+  ABORTED_ROUNDS: 'a round was aborted',
+};
+
+export function compareNight(teams: Partial<Record<TeamKey, TeamScore>>, results: RoundResult[]): NightComparison {
   const valid = results.filter((r) => r.outcome !== 'ABORTED');
-  const reasons: string[] = [];
-  if (teams.A.hideRoundCount === 0 || teams.B.hideRoundCount === 0) {
+  const crews = playingCrews(results);
+  const scores = crews.map((k) => teams[k]).filter((t): t is TeamScore => !!t);
+  if (scores.length < 2 || scores.some((t) => t.hideRoundCount === 0)) {
     return {
       status: 'INSUFFICIENT',
       strongerHidingTeam: null,
       marginSeconds: null,
-      reasons: ['BOTH_CREWS_MUST_HIDE'],
-      explanation: 'Each crew needs at least one valid hiding round before crews can be compared.',
+      reasons: ['EVERY_CREW_MUST_HIDE'],
+      explanation: 'Every crew needs a hiding round before crews can be compared.',
     };
   }
-  if (teams.A.hideRoundCount !== teams.B.hideRoundCount) reasons.push('UNEQUAL_HIDE_ROUNDS');
+  const reasons: string[] = [];
+  if (new Set(scores.map((t) => t.hideRoundCount)).size > 1) reasons.push('UNEQUAL_HIDE_ROUNDS');
   if (new Set(valid.map((r) => r.rulesFingerprint)).size > 1) reasons.push('RULES_DIFFER');
+  if (rostersChanged(valid)) reasons.push('ROSTERS_CHANGED');
   if (valid.some((r) => r.isRightCensored)) reasons.push('CENSORED_ROUNDS');
   if (results.some((r) => r.outcome === 'ABORTED')) reasons.push('ABORTED_ROUNDS');
-  const a = teams.A.hideSurvivalAverageSeconds ?? 0;
-  const b = teams.B.hideSurvivalAverageSeconds ?? 0;
   if (reasons.length) {
-    const text: Record<string, string> = {
-      UNEQUAL_HIDE_ROUNDS: 'crews hid an unequal number of times',
-      RULES_DIFFER: 'rules changed between rounds',
-      CENSORED_ROUNDS: 'at least one round timed out (survival time is a lower bound)',
-      ABORTED_ROUNDS: 'at least one round was aborted',
-    };
     return {
       status: 'PROVISIONAL',
       strongerHidingTeam: null,
       marginSeconds: null,
       reasons,
-      explanation: `Provisional comparison: ${reasons.map((r) => text[r]).join('; ')}. Descriptive statistics only — no stronger crew is declared.`,
+      explanation: `Provisional: ${reasons.map((r) => REASON_TEXT[r]).join('; ')}.`,
     };
   }
-  if (a === b) {
-    return { status: 'COMPARABLE', strongerHidingTeam: null, marginSeconds: 0, reasons: ['TIED'], explanation: 'Both crews averaged the same survival time while hiding.' };
+  const ranked = [...scores].sort((x, y) => (y.hideSurvivalAverageSeconds ?? 0) - (x.hideSurvivalAverageSeconds ?? 0));
+  const top = ranked[0]!.hideSurvivalAverageSeconds ?? 0;
+  const second = ranked[1]!.hideSurvivalAverageSeconds ?? 0;
+  if (top === second) {
+    return { status: 'COMPARABLE', strongerHidingTeam: null, marginSeconds: 0, reasons: ['TIED'], explanation: 'Tied on average hiding time.' };
   }
-  const stronger: TeamKey = a > b ? 'A' : 'B';
+  const stronger = ranked[0]!;
   return {
     status: 'COMPARABLE',
-    strongerHidingTeam: stronger,
-    marginSeconds: Math.abs(a - b),
+    strongerHidingTeam: stronger.team,
+    marginSeconds: top - second,
     reasons: [],
-    explanation: `${teams[stronger].name} survived longer on average while hiding (balanced night, identical rules). No individual round has a winner.`,
+    explanation: `${stronger.name} lasted longest on average while hiding.`,
   };
 }
 
 export function buildScorecard(session: Pick<SessionDoc, 'teams'>, results: RoundResult[]): Scorecard {
   const sorted = [...results].sort((x, y) => x.roundIndex - y.roundIndex);
-  const teams = { A: teamScore('A', session.teams.A.name, sorted), B: teamScore('B', session.teams.B.name, sorted) };
+  const keys = TEAM_KEYS.filter((k) => session.teams[k] || sorted.some((r) => r.hidingTeam === k || r.seekingTeams.includes(k)));
+  const nameOf = (k: TeamKey) => session.teams[k]?.name ?? [...sorted].reverse().find((r) => r.teamNames[k])?.teamNames[k] ?? `Crew ${k}`;
+  const teams: Partial<Record<TeamKey, TeamScore>> = Object.fromEntries(keys.map((k) => [k, teamScore(k, nameOf(k), sorted)]));
   const valid = sorted.filter((r) => r.outcome !== 'ABORTED');
   return {
     teams,
@@ -163,7 +203,8 @@ export function compositionFingerprint(roster: readonly PersonRef[], resolve: (i
 export interface SessionResults {
   session: Pick<SessionDoc, 'id' | 'title' | 'scheduledDate' | 'teams'>;
   results: RoundResult[];
-  operatorUidsByRound: Record<string, { hider: string | null; seeker: string | null }>;
+  /** round id → every operator phone in that round's snapshot */
+  operatorUidsByRound: Record<string, string[]>;
 }
 
 export interface PersonAnalytics {
@@ -173,7 +214,7 @@ export interface PersonAnalytics {
   roundsCrewHid: number;
   roundsCrewSought: number;
   crewHideSurvival: { rounds: number; averageSeconds: number | null; caught: number; censored: number; includesCensored: boolean };
-  crewSeekCapture: { rounds: number; averageSeconds: number | null; uncaught: number };
+  crewSeekCapture: { rounds: number; averageSeconds: number | null; uncaught: number; caughtByOtherCrew: number };
   pairedNights: { stronger: number; weaker: number; tied: number; provisional: number; insufficient: number };
   compositions: { fingerprint: string; members: PersonRef[]; rounds: number; hideRounds: number; hideAverageSeconds: number | null; censoredHideRounds: number }[];
   coPlayers: { personId: string; displayName: string; sessionsTogether: number }[];
@@ -188,13 +229,14 @@ export interface PersonAnalytics {
  * has an account) enables operator-instrumentation counts, labelled as such.
  */
 export function personAnalytics(personIds: Set<string>, linkedUid: string | null, data: SessionResults[], resolve: (id: string) => string = (x) => x): PersonAnalytics {
-  const inRoster = (roster: readonly PersonRef[]) => roster.some((p) => personIds.has(p.personId) || personIds.has(resolve(p.personId)));
+  const isMe = (p: PersonRef) => personIds.has(p.personId) || personIds.has(resolve(p.personId));
   const hideTimes: number[] = [];
   let censored = 0;
   let caught = 0;
   const seekTimes: number[] = [];
   let seekRounds = 0;
   let uncaught = 0;
+  let caughtByOther = 0;
   let roundsHid = 0;
   let operatorRounds = 0;
   const paired = { stronger: 0, weaker: 0, tied: 0, provisional: 0, insufficient: 0 };
@@ -208,17 +250,16 @@ export function personAnalytics(personIds: Set<string>, linkedUid: string | null
     const crewNames = new Set<string>();
     const myCrewKeys = new Set<TeamKey>();
     for (const r of valid) {
-      const hidRoster = r.hidingRosterSnapshot;
-      const seekRoster = r.seekingRosterSnapshot;
-      const onHiding = inRoster(hidRoster);
-      const onSeeking = inRoster(seekRoster);
-      if (!onHiding && !onSeeking) continue;
+      const myKey = TEAM_KEYS.find((k) => (r.rosterSnapshot[k] ?? []).some(isMe));
+      if (!myKey) continue;
+      const onHiding = myKey === r.hidingTeam;
+      if (!onHiding && !r.seekingTeams.includes(myKey)) continue;
       played = true;
-      const roster = onHiding ? hidRoster : seekRoster;
-      crewNames.add(onHiding ? r.hidingTeamName : r.seekingTeamName);
-      myCrewKeys.add(onHiding ? r.hidingTeam : r.seekingTeam);
+      const roster = r.rosterSnapshot[myKey] ?? [];
+      crewNames.add(r.teamNames[myKey] ?? `Crew ${myKey}`);
+      myCrewKeys.add(myKey);
       for (const p of roster) {
-        if (personIds.has(p.personId) || personIds.has(resolve(p.personId))) continue;
+        if (isMe(p)) continue;
         const key = resolve(p.personId);
         const cp = coPlayers.get(key) ?? { displayName: p.displayName, sessions: new Set<string>() };
         cp.sessions.add(session.id);
@@ -238,12 +279,12 @@ export function personAnalytics(personIds: Set<string>, linkedUid: string | null
         } else caught++;
       } else {
         seekRounds++;
-        if (r.outcome === 'CAUGHT') seekTimes.push(r.observedChaseSeconds);
+        if (r.outcome === 'CAUGHT' && r.catchCreditTeams.includes(myKey)) seekTimes.push(r.observedChaseSeconds);
+        else if (r.outcome === 'CAUGHT') caughtByOther++;
         else uncaught++;
       }
       compositions.set(fp, comp);
-      const ops = operatorUidsByRound[r.roundId];
-      if (linkedUid && ops && (ops.hider === linkedUid || ops.seeker === linkedUid)) operatorRounds++;
+      if (linkedUid && operatorUidsByRound[r.roundId]?.includes(linkedUid)) operatorRounds++;
     }
     if (!played) continue;
     sessions.push({ sessionId: session.id, title: session.title, scheduledDate: session.scheduledDate, crewNames: [...crewNames] });
@@ -268,7 +309,7 @@ export function personAnalytics(personIds: Set<string>, linkedUid: string | null
     roundsCrewHid: roundsHid,
     roundsCrewSought: seekRounds,
     crewHideSurvival: { rounds: roundsHid, averageSeconds: avg(hideTimes), caught, censored, includesCensored: censored > 0 },
-    crewSeekCapture: { rounds: seekRounds, averageSeconds: avg(seekTimes), uncaught },
+    crewSeekCapture: { rounds: seekRounds, averageSeconds: avg(seekTimes), uncaught, caughtByOtherCrew: caughtByOther },
     pairedNights: paired,
     compositions: [...compositions.entries()]
       .map(([fingerprint, c]) => ({ fingerprint, members: c.members, rounds: c.rounds, hideRounds: c.hideRounds, hideAverageSeconds: avg(c.hideTimes), censoredHideRounds: c.censored }))
@@ -278,9 +319,6 @@ export function personAnalytics(personIds: Set<string>, linkedUid: string | null
       .sort((a, b) => b.sessionsTogether - a.sessionsTogether),
     operatorRounds: linkedUid ? operatorRounds : null,
     sessions: sessions.sort((a, b) => b.scheduledDate.localeCompare(a.scheduledDate)),
-    sampleNote:
-      totalRounds < 8
-        ? `Small sample (${totalRounds} rounds). Figures are crew-level observations, not individual performance, and can change a lot with more nights.`
-        : `Crew-level observational statistics over ${totalRounds} rounds. Correlation only — not individual performance.`,
+    sampleNote: totalRounds < 8 ? `Small sample (${totalRounds} rounds). Crew-level, not individual.` : `Crew-level stats over ${totalRounds} rounds. Not individual performance.`,
   };
 }

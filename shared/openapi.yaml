@@ -65,7 +65,8 @@ components:
             details: { type: [object, 'null'], description: 'e.g. {warnings:[...], blocking:[...]} for GPS_UNAVAILABLE/PERMISSION_REQUIRED' }
         requestId: { type: string }
         serverTime: { type: string, format: date-time }
-    TeamKey: { type: string, enum: [A, B] }
+    TeamKey: { type: string, enum: [A, B, C], description: A night has two or three crews }
+    SeekMode: { type: string, enum: [TOGETHER, RACE], description: 'With two seeking crews: share the catch, or credit the crew that made it' }
     Rules:
       type: object
       additionalProperties: false
@@ -73,9 +74,6 @@ components:
         headStartSeconds: { type: integer, minimum: 0, maximum: 3600, default: 600 }
         pingIntervalSeconds: { type: integer, minimum: 60, maximum: 3600, default: 600 }
         visiblePingHistoryCount: { type: [integer, 'null'], minimum: 1, maximum: 50, default: 1, description: null = all }
-        totalRounds: { type: integer, minimum: 1, maximum: 20, default: 4 }
-        initialHidingTeam: { $ref: '#/components/schemas/TeamKey' }
-        alternateRoles: { type: boolean, default: true }
         maxChaseSeconds: { type: [integer, 'null'], minimum: 300, maximum: 21600, default: null }
         confirmationTimeoutSeconds: { type: integer, minimum: 30, maximum: 600, default: 120 }
         manualPausesEnabled: { type: boolean, default: true }
@@ -144,16 +142,28 @@ components:
         accuracyMeters: { type: [number, 'null'] }
         ageSeconds: { type: [integer, 'null'], description: scheduledAt − observedAt }
         delayed: { type: boolean }
+    CrewRouteStats:
+      type: object
+      description: Per-crew distances from the crew's best-covered phone. Crew-level, never per person.
+      properties:
+        role: { type: string, enum: [HIDING, SEEKING] }
+        distanceTotalMeters: { type: [number, 'null'], description: hiders only (head start + chase on foot) }
+        distanceChaseMeters: { type: [number, 'null'] }
+        gpsCoverageFraction: { type: [number, 'null'] }
+        routeQuality: { type: string, enum: [GOOD, ESTIMATED, INSUFFICIENT, DELETED] }
+        phones: { type: integer, description: phones the crew tracked this round }
     RoundResult:
       type: object
-      description: Coordinate-free outcome. No winner field exists by design.
+      description: Coordinate-free outcome. No winner field exists by design; catchCreditTeams is attribution only.
       properties:
         roundId: { type: string }
         roundIndex: { type: integer }
         hidingTeam: { $ref: '#/components/schemas/TeamKey' }
-        seekingTeam: { $ref: '#/components/schemas/TeamKey' }
-        hidingRosterSnapshot: { type: array, items: { $ref: '#/components/schemas/PersonRef' } }
-        seekingRosterSnapshot: { type: array, items: { $ref: '#/components/schemas/PersonRef' } }
+        seekingTeams: { type: array, items: { $ref: '#/components/schemas/TeamKey' } }
+        seekMode: { $ref: '#/components/schemas/SeekMode' }
+        teamNames: { type: object, additionalProperties: { type: string } }
+        rosterSnapshot: { type: object, additionalProperties: { type: array, items: { $ref: '#/components/schemas/PersonRef' } } }
+        catchCreditTeams: { type: array, items: { $ref: '#/components/schemas/TeamKey' }, description: 'RACE: the claiming crew; TOGETHER: every seeking crew; empty unless caught' }
         outcome: { type: string, enum: [CAUGHT, TIMED_OUT, ABORTED] }
         headStartSeconds: { type: integer }
         observedChaseSeconds: { type: integer }
@@ -166,28 +176,32 @@ components:
         pingsReleased: { type: integer }
         pingsMissing: { type: integer }
         pingsDelayed: { type: integer }
-        hidingDistanceTotalMeters: { type: [number, 'null'] }
-        hidingDistanceChaseMeters: { type: [number, 'null'] }
-        seekingDistanceChaseMeters: { type: [number, 'null'] }
-        gpsCoverageFractionHider: { type: [number, 'null'] }
-        gpsCoverageFractionSeeker: { type: [number, 'null'] }
-        routeQualityHider: { type: string, enum: [GOOD, ESTIMATED, INSUFFICIENT, DELETED] }
-        routeQualitySeeker: { type: string, enum: [GOOD, ESTIMATED, INSUFFICIENT, DELETED] }
+        crews: { type: object, additionalProperties: { $ref: '#/components/schemas/CrewRouteStats' } }
         rulesFingerprint: { type: string }
         resolvedByDispute: { type: boolean }
+    CrewStatus:
+      type: object
+      description: Coarse phone status of a crew. No timestamps, no positions.
+      properties:
+        live: { type: integer }
+        total: { type: integer }
+        state: { type: string, enum: [ACTIVE, STALE, NO_SIGNAL, STOPPED, PERMISSION_ISSUE, UNKNOWN] }
+        issues: { type: array, items: { type: string } }
     RoundView:
       type: object
-      description: Role-scoped round state. Seeker receives released pins only; hider receives captureRequest only.
+      description: Role-scoped round state from the round's phone snapshot. Seekers receive released pins only; hiders receive captureRequest only; phones not in the round get neither.
       properties:
         id: { type: string }
         index: { type: integer }
         state: { type: string, enum: [READY, HEAD_START, CHASE, CAPTURE_PENDING, PAUSED, COMPLETED, TIMED_OUT, ABORTED] }
         pausedFromState: { type: [string, 'null'] }
-        myRole: { type: [string, 'null'], enum: [HIDING, SEEKING, null] }
+        myRole: { type: [string, 'null'], enum: [HIDING, SEEKING, null], description: null for spectators (joined after the start) }
+        myTeam: { type: [string, 'null'] }
         hidingTeam: { $ref: '#/components/schemas/TeamKey' }
-        seekingTeam: { $ref: '#/components/schemas/TeamKey' }
+        seekingTeams: { type: array, items: { $ref: '#/components/schemas/TeamKey' } }
+        seekMode: { $ref: '#/components/schemas/SeekMode' }
         rules: { $ref: '#/components/schemas/Rules' }
-        ready: { type: object, properties: { A: { type: boolean }, B: { type: boolean } } }
+        ready: { type: object, additionalProperties: { type: boolean }, description: one flag per crew in the round }
         roundStartAt: { type: [string, 'null'], format: date-time }
         headStartEndsAt: { type: [string, 'null'], format: date-time }
         chaseStartAt: { type: [string, 'null'], format: date-time }
@@ -195,16 +209,19 @@ components:
         chaseClock: { oneOf: [{ $ref: '#/components/schemas/Clock' }, { type: 'null' }] }
         nextPingAt: { type: [string, 'null'], format: date-time }
         nextPingIndex: { type: integer }
+        waitingPing: { type: [object, 'null'], description: 'A ping whose deadline passed with no hider fix: {index, deadline, since}. Releases the current position as soon as one arrives. No coordinates.' }
         timeCapAt: { type: [string, 'null'], format: date-time }
         pins: { type: array, items: { $ref: '#/components/schemas/Pin' } }
+        pingCount: { type: integer, description: pingLog holds only the latest 10 }
         pingLog: { type: array, items: { type: object, properties: { index: { type: integer }, scheduledAt: { type: string }, releasedAt: { type: string }, status: { type: string, enum: [RELEASED, NO_FRESH_FIX] }, ageSeconds: { type: [integer, 'null'] }, accuracyMeters: { type: [number, 'null'] }, delayed: { type: boolean } } } }
-        pause: { type: [object, 'null'] }
-        pendingPauseRequest: { type: [object, 'null'] }
-        myClaim: { type: [object, 'null'], description: seeker only }
-        captureRequest: { type: [object, 'null'], description: 'hider only: {claimId, submittedAt, expiresAt, chaseSecondsAtClaim, photoPath}' }
+        pause: { type: [object, 'null'], description: '{kind, reason, startedAt, byTeam, resumeVotes: {HIDERS, SEEKERS}, mySide}' }
+        pendingPauseRequest: { type: [object, 'null'], description: '{byTeam, bySide, at, expiresAt, reason, mine}' }
+        claimByTeam: { type: [string, 'null'], description: crew whose claim is under review }
+        myClaim: { type: [object, 'null'], description: "the claiming crew's phones only" }
+        captureRequest: { type: [object, 'null'], description: 'every hiding-crew phone: {claimId, byTeam, submittedAt, expiresAt, chaseSecondsAtClaim, photoPath}' }
         lastClaimOutcome: { type: [object, 'null'] }
         myHealth: { type: [object, 'null'] }
-        opponentHealth: { type: object, description: 'Coarse integrity only: {state, lastHeartbeatAt (30 s buckets), issues}', properties: { state: { type: string, enum: [ACTIVE, STALE, NO_SIGNAL, STOPPED, PERMISSION_ISSUE, UNKNOWN] } } }
+        crewStatus: { type: object, additionalProperties: { $ref: '#/components/schemas/CrewStatus' } }
         result: { oneOf: [{ $ref: '#/components/schemas/RoundResult' }, { type: 'null' }] }
         endedAt: { type: [string, 'null'], format: date-time }
         phaseGeneration: { type: integer }
@@ -212,11 +229,12 @@ components:
       type: object
       description: Same document as Firestore `sessions/{sessionId}/views/{uid}`.
       properties:
-        schemaVersion: { type: integer, const: 1 }
+        schemaVersion: { type: integer, const: 2 }
         uid: { type: string }
         sessionId: { type: string }
         renderedAt: { type: string, format: date-time }
-        stateVersion: { type: number }
+        stateVersion: { type: number, description: Grows with every committed change; order snapshots by it }
+        viewHash: { type: string, description: 'Content hash; the view is rewritten only when it changes' }
         session:
           type: object
           properties:
@@ -225,14 +243,14 @@ components:
             status: { type: string, enum: [LOBBY, IN_ROUND, BETWEEN_ROUNDS, COMPLETED] }
             isHost: { type: boolean }
             myTeam: { type: [string, 'null'] }
-            totalRounds: { type: integer }
             completedRoundCount: { type: integer }
             rules: { $ref: '#/components/schemas/Rules' }
-            teams: { type: object }
+            teams: { type: object, description: 'Per crew: {teamId, key, name, color, roster, operators: [{personId, displayName, isMe, consentGiven}], isMine}' }
+            joinCode: { type: [string, 'null'], description: reusable night code; null once the night ends }
             revoked: { type: boolean }
         round: { oneOf: [{ $ref: '#/components/schemas/RoundView' }, { type: 'null' }] }
         previousRounds: { type: array, items: { type: object } }
-        nextRound: { type: [object, 'null'] }
+        nextRound: { type: [object, 'null'], description: '{index, suggestedHidingTeam} whenever the night is open and no round is set up' }
 
 paths:
   /healthz:
@@ -322,7 +340,7 @@ paths:
         - { name: before, in: query, schema: { type: integer }, description: createdAt cursor (epoch ms) }
       responses: { '200': { description: '{items, nextBefore}' } }
     post:
-      summary: Create a two-crew multi-round night (host operates myTeam); round 1 is created in READY
+      summary: Create an open-ended night with two or three crews (the creator's phone joins myTeam); round 1 is created in READY
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         content:
@@ -335,77 +353,92 @@ paths:
                 title: { type: string }
                 scheduledDate: { type: string, format: date }
                 myTeam: { $ref: '#/components/schemas/TeamKey' }
-                teams: { type: object, properties: { A: { $ref: '#/components/schemas/TeamInput' }, B: { $ref: '#/components/schemas/TeamInput' } } }
+                teams: { type: object, additionalProperties: false, required: [A, B], properties: { A: { $ref: '#/components/schemas/TeamInput' }, B: { $ref: '#/components/schemas/TeamInput' }, C: { $ref: '#/components/schemas/TeamInput' } } }
+                firstHidingTeam: { $ref: '#/components/schemas/TeamKey' }
+                seekMode: { $ref: '#/components/schemas/SeekMode' }
                 rules: { $ref: '#/components/schemas/Rules' }
                 groupId: { type: [string, 'null'] }
       responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK }, default: { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}:
     get:
-      summary: My sanitized view of the night (identical to the Firestore view document)
-      parameters: [{ $ref: '#/components/parameters/SessionId' }]
-      responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK }, '404': { $ref: '#/components/responses/Error' } }
+      summary: 'My stored view of the night (the same document as the Firestore view). ETag = viewHash; send If-None-Match to get 304 when nothing changed.'
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { name: If-None-Match, in: header, schema: { type: string } }]
+      responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK }, '304': { description: Unchanged since the given ETag }, '404': { $ref: '#/components/responses/Error' } }
     delete: { summary: Organizer deletes the whole night (Firestore subtree + GCS objects), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
   /v1/sessions/{id}/invites:
     post:
-      summary: Host creates an expiring single-use code for the open crew (optionally targeted to a friend)
+      summary: Any operator gets the night's reusable code (regenerate revokes the old one); with targetUid also sends a friend a direct invite
       parameters: [{ $ref: '#/components/parameters/SessionId' }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { targetUid: { type: string } } } } } }
-      responses: { '200': { description: '{inviteId, code, teamKey, expiresAt, deepLink}' } }
+      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { targetUid: { type: string }, regenerate: { type: boolean } } } } } }
+      responses: { '200': { description: '{code, inviteId (direct invite or null), expiresAt, deepLink}' } }
   /v1/invites/preview:
     post:
-      requestBody: { content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string } } } } } }
-      responses: { '200': { description: Session summary for the invite }, '410': { $ref: '#/components/responses/Error' } }
+      summary: Night summary for a code or direct invite, with each crew's phone count. Only failed lookups count toward the brute-force limit.
+      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { code: { type: string }, inviteId: { type: string } } } } } }
+      responses: { '200': { description: '{sessionId, title, scheduledDate, teams, suggestedTeam, myTeam, hostDisplayName, rules, expiresAt}' }, '410': { $ref: '#/components/responses/Error' } }
   /v1/invites/redeem:
     post:
-      summary: Join as the second operator. Prevents duplicate roles and any third operator.
-      requestBody: { content: { application/json: { schema: { type: object, properties: { code: { type: string }, inviteId: { type: string } } } } } }
+      summary: 'Join the night as an operator phone of a crew (default: the crew with the fewest phones; at most 5 per crew). Re-joining is a no-op.'
+      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { code: { type: string }, inviteId: { type: string }, teamKey: { $ref: '#/components/schemas/TeamKey' } } } } } }
       responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK }, '410': { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}/setup:
     patch:
-      summary: Host edits title/rules/crews before a round starts; resets readiness
+      summary: Any operator edits the night between rounds — title, default rules, crews (add/rename/remove, rosters) and which crew each phone is on. A READY round is refreshed.
       parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                title: { type: string }
+                scheduledDate: { type: string, format: date }
+                rules: { $ref: '#/components/schemas/Rules' }
+                teams: { type: object, description: 'Per crew A/B/C: partial TeamInput, or null to remove the crew' }
+                moves: { type: array, maxItems: 15, items: { type: object, required: [uid, teamKey], properties: { uid: { type: string }, teamKey: { type: [string, 'null'], description: null removes the phone from the night } } } }
       responses: { '200': { $ref: '#/components/responses/Ok' } }
   /v1/sessions/{id}/consent:
     post:
-      summary: Accept (or withdraw) tracking + post-round route sharing disclosure. Withdrawal aborts an active round.
+      summary: Accept (or withdraw) tracking + post-round route sharing disclosure. Withdrawal drops the phone from an active round, which aborts only if its crew has no phone left.
       parameters: [{ $ref: '#/components/parameters/SessionId' }]
       requestBody: { content: { application/json: { schema: { type: object, required: [accepted, consentVersion, routeSharingAfterRound, guestDisclosureAcknowledged], properties: { accepted: { type: boolean }, consentVersion: { type: string }, routeSharingAfterRound: { type: boolean }, guestDisclosureAcknowledged: { type: boolean } } } } } }
       responses: { '200': { $ref: '#/components/responses/Ok' } }
   /v1/sessions/{id}/ready:
     post:
-      summary: Operator ready/unready with device preflight health (no coordinates)
+      summary: Mark my crew ready/unready (any of its phones) with device preflight health (no coordinates)
       parameters: [{ $ref: '#/components/parameters/SessionId' }]
       requestBody: { content: { application/json: { schema: { type: object, required: [ready, preflight], properties: { ready: { type: boolean }, preflight: { $ref: '#/components/schemas/Health' } } } } } }
       responses: { '200': { $ref: '#/components/responses/Ok' } }
   /v1/sessions/{id}/next-round:
     post:
-      summary: Host creates the next round with alternated roles (override recorded). Never auto-starts.
+      summary: Any operator sets up the next round — any crew may hide (default the crew that hid least). Re-targets a READY round. Never auto-starts.
       parameters: [{ $ref: '#/components/parameters/SessionId' }]
-      requestBody: { content: { application/json: { schema: { type: object, properties: { hidingTeam: { $ref: '#/components/schemas/TeamKey' }, overrideReason: { type: [string, 'null'] } } } } } }
+      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { hidingTeam: { $ref: '#/components/schemas/TeamKey' }, seekMode: { $ref: '#/components/schemas/SeekMode' } } } } } }
       responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK } }
   /v1/sessions/{id}/complete:
-    post: { summary: Host ends the night, parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+    post: { summary: Any operator ends the night (an unstarted READY round is discarded; the night code stops working), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
   /v1/sessions/{id}/keep-photos:
-    post: { summary: Operator opts in to keeping confirmed photos past 30 days (both must opt in), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
+    post: { summary: Operator opts in to keeping confirmed photos past 30 days (every crew must opt in), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
   /v1/sessions/{id}/my-data:
-    delete: { summary: Delete my operator tracks, released pins of me, and photos I took from this night, parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: '{pointsDeleted, photosDeleted}' } } }
+    delete: { summary: "Delete this phone's tracks, the pins released from its fixes, and photos it took; crew routes are recomputed from the crew's other phones", parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: '{pointsDeleted, photosDeleted}' } } }
   /v1/sessions/{id}/revoke:
     post: { summary: Organizer revokes the night (incident response) — deny all access, invalidate invites, parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
 
   /v1/sessions/{id}/rounds/{rid}/start:
     post:
-      summary: Host starts the round (server time). Returns GPS_UNAVAILABLE with warnings unless acknowledged; PERMISSION_REQUIRED is blocking.
+      summary: Any operator of a playing crew starts the round once every crew is ready (server time). Returns GPS_UNAVAILABLE with warnings unless acknowledged; PERMISSION_REQUIRED is blocking.
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }]
       requestBody: { content: { application/json: { schema: { type: object, properties: { acknowledgeWarnings: { type: boolean } } } } } }
       responses: { '200': { description: '{ok, warnings}' }, '412': { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}/rounds/{rid}/pause:
     post:
-      summary: SAFETY pause (immediate, either operator) or MANUAL pause request/confirmation (both operators)
+      summary: SAFETY pause (immediate, any phone in the round) or MANUAL pause — proposed by one side, accepted by a phone on the other side (hiders vs seekers)
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }]
       requestBody: { content: { application/json: { schema: { type: object, required: [kind], properties: { kind: { type: string, enum: [MANUAL, SAFETY] }, reason: { type: [string, 'null'] } } } } } }
       responses: { '200': { description: '{state, pendingRequest}' } }
   /v1/sessions/{id}/rounds/{rid}/resume:
-    post: { summary: Resume vote; the pause ends when both operators have voted, parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: '{state}' } } }
+    post: { summary: Resume vote; the pause ends with one hider vote and one seeker vote, parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: '{state}' } } }
   /v1/sessions/{id}/rounds/{rid}/abort:
     post:
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }]
@@ -413,14 +446,14 @@ paths:
       responses: { '200': { description: '{state}' } }
   /v1/sessions/{id}/rounds/{rid}/location-batches:
     post:
-      summary: Private, idempotent GPS samples from the caller (role derived server-side). Empty batches are heartbeats.
+      summary: Private, idempotent GPS samples from the caller (crew and role from the round's phone snapshot). Empty batches are heartbeats. A hider fix releases a waiting ping.
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, required: [batchId, sentAt, samples, health], properties: { batchId: { type: string, format: uuid }, sentAt: { type: string, format: date-time }, samples: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Sample' } }, health: { $ref: '#/components/schemas/Health' } } } } } }
       responses: { '200': { description: '{accepted, duplicates, rejected[], clockSkewMs}' }, default: { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}/rounds/{rid}/my-track:
     get: { summary: The caller's OWN samples for this round (self-only), parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: '{points}' } } }
   /v1/sessions/{id}/rounds/{rid}/captures/init:
-    post: { summary: Seeking operator obtains a short-lived upload ticket (CHASE only), parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: '{claimId, uploadPath, maxBytes, expiresAt}' } } }
+    post: { summary: Any seeking-crew phone obtains a short-lived upload ticket (CHASE only; claims capped per crew), parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: '{claimId, uploadPath, maxBytes, expiresAt}' } } }
   /v1/sessions/{id}/rounds/{rid}/captures/{cid}/photo:
     put:
       summary: Upload the JPEG (≤8 MB). EXIF/GPS/comment segments are stripped before private storage.
@@ -428,7 +461,7 @@ paths:
       requestBody: { content: { image/jpeg: { schema: { type: string, format: binary } } } }
       responses: { '200': { description: '{stored, bytes, sha256}' }, '415': { $ref: '#/components/responses/Error' } }
     get:
-      summary: Authorized photo read (operators of this round; hider while pending). Private, no-store.
+      summary: Authorized photo read (hiding crew, claiming crew, and in TOGETHER mode the other seeking crew). Private, no-store.
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/ClaimId' }]
       responses: { '200': { content: { image/jpeg: { schema: { type: string, format: binary } } }, description: JPEG } }
   /v1/sessions/{id}/rounds/{rid}/captures/complete:
@@ -439,21 +472,21 @@ paths:
       responses: { '200': { description: '{claimId, status, submittedAt}' }, '409': { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}/rounds/{rid}/captures/{cid}/decision:
     post:
-      summary: Hiding operator confirms (round completes at submission time) or rejects (round resumes)
+      summary: Any hiding-crew phone confirms (round completes at submission time) or rejects (round resumes); a second decision gets STALE_PHASE
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/ClaimId' }]
       requestBody: { content: { application/json: { schema: { type: object, required: [decision], properties: { decision: { type: string, enum: [CONFIRM, REJECT] }, reason: { type: [string, 'null'] } } } } } }
       responses: { '200': { description: '{claimId, status, roundState, result}' }, '410': { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}/rounds/{rid}/captures/{cid}/dispute:
     post:
-      summary: After the round, both operators jointly resolve a rejected/expired claim
+      summary: After the round, the hiding crew and the claiming crew jointly resolve a rejected/expired claim
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/ClaimId' }]
       requestBody: { content: { application/json: { schema: { type: object, required: [resolution], properties: { resolution: { type: string, enum: [ACCEPT_AS_CATCH, KEEP_REJECTED] } } } } } }
       responses: { '200': { description: '{resolved, resolution}' } }
   /v1/sessions/{id}/rounds/{rid}/summary:
-    get: { summary: Post-round recap (only after the round ends; both operators), parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: OK }, '409': { $ref: '#/components/responses/Error' } } }
+    get: { summary: Post-round recap (only after the round ends; only phones that played it), parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: OK }, '409': { $ref: '#/components/responses/Error' } } }
   /v1/sessions/{id}/rounds/{rid}/routes:
     get:
-      summary: Both crews' simplified routes — only after completion and with both operators' route-sharing consent
+      summary: "Every crew's simplified route (from its best-covered phone) — only after completion and with route-sharing consent from every phone in the round"
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { name: format, in: query, schema: { type: string, enum: [json, geojson] } }]
       responses: { '200': { description: Routes (JSON or application/geo+json) }, '409': { $ref: '#/components/responses/Error' }, '412': { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}/analytics:

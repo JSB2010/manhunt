@@ -1,6 +1,6 @@
 # ADR 0010 — Firestore listener plus REST reconciliation
 
-**Status:** accepted · **Spec:** §8.1 (role-scoped Firestore listeners, "reliable reconnect"), §14 reconnect behavior
+**Status:** accepted; cadence and ordering updated by ADR 0016 · **Spec:** §8.1 (role-scoped Firestore listeners, "reliable reconnect"), §14 reconnect behavior
 
 **Context.** The two-simulator E2E showed the iOS Firestore SDK's watch stream to the emulator being half-closed and then reset by the peer (`READ_CLOSE`, then `Connection reset by peer`) about a minute after connecting. The SDK did not reconnect and kept reporting a healthy, non-cached listener, so the host's lobby froze while the server kept updating its view. The same silent failure mode occurs on real mobile networks (NAT timeouts, Wi-Fi ↔ cellular handoffs, captive proxies). A JS-SDK probe and an isolated iOS XCTest against the same emulator received every update, so the server, rules and view rendering were correct.
 

@@ -4,59 +4,63 @@ import type { RoundResult } from '../../src/domain/types.js';
 import { session } from './fixtures.js';
 
 const s = session();
-const result = (over: Partial<RoundResult>): RoundResult => ({
-  roundId: `r${over.roundIndex}`,
-  roundIndex: 1,
-  hidingTeam: 'A',
-  seekingTeam: 'B',
-  hidingTeamName: 'Crew A',
-  seekingTeamName: 'Crew B',
-  hidingRosterSnapshot: s.teams.A.roster,
-  seekingRosterSnapshot: s.teams.B.roster,
-  outcome: 'CAUGHT',
-  headStartSeconds: 600,
-  observedChaseSeconds: 0,
-  isRightCensored: false,
-  officialFoundAt: 0,
-  confirmedAt: 0,
-  claimId: 'c',
-  totalPauseSeconds: 0,
-  roundElapsedSeconds: 0,
-  pingSlots: 3,
-  pingsReleased: 3,
-  pingsMissing: 0,
-  pingsDelayed: 0,
-  hidingDistanceTotalMeters: 1000,
-  hidingDistanceChaseMeters: 600,
-  seekingDistanceChaseMeters: 5000,
-  gpsCoverageFractionHider: 0.9,
-  gpsCoverageFractionSeeker: 0.95,
-  routeQualityHider: 'GOOD',
-  routeQualitySeeker: 'GOOD',
-  rulesFingerprint: 'same',
-  abortedReason: null,
-  resolvedByDispute: false,
-  finalizedAt: 0,
-  ...over,
+const s3 = session({}, { three: true });
+const rosters = { A: s3.teams.A!.roster, B: s3.teams.B!.roster, C: s3.teams.C!.roster };
+const names = { A: 'Crew A', B: 'Crew B', C: 'Crew C' };
+
+const crew = (role: 'HIDING' | 'SEEKING', meters: number, coverage = 0.9) => ({
+  role,
+  distanceTotalMeters: role === 'HIDING' ? meters : null,
+  distanceChaseMeters: role === 'HIDING' ? Math.round(meters * 0.6) : meters,
+  gpsCoverageFraction: coverage,
+  routeQuality: 'GOOD' as const,
+  phones: 1,
 });
 
-const swap = (r: Partial<RoundResult>): Partial<RoundResult> => ({
-  hidingTeam: 'B',
-  seekingTeam: 'A',
-  hidingTeamName: 'Crew B',
-  seekingTeamName: 'Crew A',
-  hidingRosterSnapshot: s.teams.B.roster,
-  seekingRosterSnapshot: s.teams.A.roster,
-  ...r,
-});
+/** A two-crew round: `hidingTeam` hides, the other seeks. */
+const result = (over: Partial<RoundResult>): RoundResult => {
+  const hidingTeam = over.hidingTeam ?? 'A';
+  const seekingTeams = over.seekingTeams ?? [hidingTeam === 'A' ? 'B' : 'A'];
+  return {
+    roundId: `r${over.roundIndex}`,
+    roundIndex: 1,
+    hidingTeam,
+    seekingTeams,
+    seekMode: 'TOGETHER',
+    teamNames: Object.fromEntries([hidingTeam, ...seekingTeams].map((k) => [k, names[k]])),
+    rosterSnapshot: Object.fromEntries([hidingTeam, ...seekingTeams].map((k) => [k, rosters[k]])),
+    catchCreditTeams: over.outcome && over.outcome !== 'CAUGHT' ? [] : seekingTeams,
+    outcome: 'CAUGHT',
+    headStartSeconds: 600,
+    observedChaseSeconds: 0,
+    isRightCensored: false,
+    officialFoundAt: 0,
+    confirmedAt: 0,
+    claimId: 'c',
+    totalPauseSeconds: 0,
+    roundElapsedSeconds: 0,
+    pingSlots: 3,
+    pingsReleased: 3,
+    pingsMissing: 0,
+    pingsDelayed: 0,
+    crews: Object.fromEntries([[hidingTeam, crew('HIDING', 1000)], ...seekingTeams.map((k) => [k, crew('SEEKING', 5000, 0.95)])]),
+    rulesFingerprint: 'same',
+    abortedReason: null,
+    resolvedByDispute: false,
+    finalizedAt: 0,
+    ...over,
+  };
+};
+
+const swap = (r: Partial<RoundResult>): Partial<RoundResult> => ({ hidingTeam: 'B', seekingTeams: ['A'], ...r });
 
 describe('night scorecard (spec §6.4)', () => {
   it('A hides 26:00, B hides 18:00 with identical settings → A stronger, no round winner', () => {
     const sc = buildScorecard(s, [result({ roundIndex: 1, observedChaseSeconds: 26 * 60 }), result(swap({ roundIndex: 2, observedChaseSeconds: 18 * 60 }))]);
-    expect(sc.teams.A.hideSurvivalAverageSeconds).toBe(1560);
-    expect(sc.teams.B.seekCaptureAverageSeconds).toBe(1560);
-    expect(sc.teams.B.hideSurvivalAverageSeconds).toBe(1080);
-    expect(sc.teams.A.seekCaptureAverageSeconds).toBe(1080);
+    expect(sc.teams.A!.hideSurvivalAverageSeconds).toBe(1560);
+    expect(sc.teams.B!.seekCaptureAverageSeconds).toBe(1560);
+    expect(sc.teams.B!.hideSurvivalAverageSeconds).toBe(1080);
+    expect(sc.teams.A!.seekCaptureAverageSeconds).toBe(1080);
     expect(sc.comparison).toMatchObject({ status: 'COMPARABLE', strongerHidingTeam: 'A', marginSeconds: 480 });
     expect(JSON.stringify(sc)).not.toMatch(/"[a-zA-Z]*winner[a-zA-Z]*":/i); // no winner fields anywhere
   });
@@ -73,9 +77,9 @@ describe('night scorecard (spec §6.4)', () => {
       result({ roundIndex: 1, outcome: 'TIMED_OUT', isRightCensored: true, observedChaseSeconds: 3600 }),
       result(swap({ roundIndex: 2, observedChaseSeconds: 1200 })),
     ]);
-    expect(sc.teams.A.uncaughtCount).toBe(1);
-    expect(sc.teams.A.hideSurvivalAverageIncludesCensored).toBe(true);
-    expect(sc.teams.A.caughtOnlyHideAverageSeconds).toBeNull();
+    expect(sc.teams.A!.uncaughtCount).toBe(1);
+    expect(sc.teams.A!.hideSurvivalAverageIncludesCensored).toBe(true);
+    expect(sc.teams.A!.caughtOnlyHideAverageSeconds).toBeNull();
     expect(sc.comparison.reasons).toContain('CENSORED_ROUNDS');
     expect(sc.comparison.strongerHidingTeam).toBeNull();
   });
@@ -85,13 +89,64 @@ describe('night scorecard (spec §6.4)', () => {
     expect(sc.comparison.reasons).toContain('RULES_DIFFER');
     const ab = buildScorecard(s, [result({ roundIndex: 1, observedChaseSeconds: 100 }), result(swap({ roundIndex: 2, observedChaseSeconds: 50 })), result({ roundIndex: 3, outcome: 'ABORTED' })]);
     expect(ab.comparison.reasons).toContain('ABORTED_ROUNDS');
-    expect(ab.teams.A.hideRoundCount).toBe(1);
+    expect(ab.teams.A!.hideRoundCount).toBe(1);
   });
 
   it('reports walking and driving distance separately', () => {
     const sc = buildScorecard(s, [result({ roundIndex: 1, observedChaseSeconds: 100 }), result(swap({ roundIndex: 2, observedChaseSeconds: 50 }))]);
-    expect(sc.teams.A.hiderFootMetersTotal).toBe(1000);
-    expect(sc.teams.A.seekerVehicleMetersChase).toBe(5000);
+    expect(sc.teams.A!.hiderFootMetersTotal).toBe(1000);
+    expect(sc.teams.A!.seekerVehicleMetersChase).toBe(5000);
+  });
+});
+
+describe('three crews and open nights', () => {
+  const three = (over: Partial<RoundResult>) => {
+    const h = over.hidingTeam ?? 'A';
+    return result({ seekingTeams: (['A', 'B', 'C'] as const).filter((k) => k !== h), ...over });
+  };
+
+  it('compares three crews once each hid equally often', () => {
+    const sc = buildScorecard(s3, [
+      three({ roundIndex: 1, hidingTeam: 'A', observedChaseSeconds: 900 }),
+      three({ roundIndex: 2, hidingTeam: 'B', observedChaseSeconds: 1500 }),
+      three({ roundIndex: 3, hidingTeam: 'C', observedChaseSeconds: 1200 }),
+    ]);
+    expect(sc.comparison).toMatchObject({ status: 'COMPARABLE', strongerHidingTeam: 'B', marginSeconds: 300 });
+    expect(sc.teams.C!.seekRoundCount).toBe(2);
+  });
+
+  it('a crew that never hid makes the night insufficient', () => {
+    const sc = buildScorecard(s3, [three({ roundIndex: 1, hidingTeam: 'A', observedChaseSeconds: 900 }), three({ roundIndex: 2, hidingTeam: 'B', observedChaseSeconds: 1500 })]);
+    expect(sc.comparison).toMatchObject({ status: 'INSUFFICIENT', strongerHidingTeam: null });
+  });
+
+  it('RACE credits only the catching crew; the other is "caught by another crew", not a miss', () => {
+    const sc = buildScorecard(s3, [three({ roundIndex: 1, hidingTeam: 'A', seekMode: 'RACE', catchCreditTeams: ['C'], observedChaseSeconds: 900 })]);
+    expect(sc.teams.C!).toMatchObject({ seekCreditedCatches: 1, seekCaptureAverageSeconds: 900, seekCaughtByOtherCrew: 0 });
+    expect(sc.teams.B!).toMatchObject({ seekCreditedCatches: 0, seekCaptureAverageSeconds: null, seekCaughtByOtherCrew: 1, seekUncaughtCount: 0 });
+  });
+
+  it('a crew hiding with different people across its hiding rounds is provisional', () => {
+    const moved = [...rosters.A, { personId: 'p-new', displayName: 'New' }];
+    const sc = buildScorecard(s, [
+      result({ roundIndex: 1, observedChaseSeconds: 100 }),
+      result(swap({ roundIndex: 2, observedChaseSeconds: 50 })),
+      result({ roundIndex: 3, observedChaseSeconds: 80, rosterSnapshot: { A: moved, B: rosters.B } }),
+      result(swap({ roundIndex: 4, observedChaseSeconds: 60 })),
+    ]);
+    expect(sc.comparison.reasons).toEqual(['ROSTERS_CHANGED']);
+    // a roster change on the seeking side alone does not matter
+    const seekOnly = buildScorecard(s, [
+      result({ roundIndex: 1, observedChaseSeconds: 100, rosterSnapshot: { A: rosters.A, B: [...rosters.B, { personId: 'p-x', displayName: 'X' }] } }),
+      result(swap({ roundIndex: 2, observedChaseSeconds: 50 })),
+    ]);
+    expect(seekOnly.comparison.status).toBe('COMPARABLE');
+  });
+
+  it('keeps a removed crew in the scorecard by its round names', () => {
+    const sc = buildScorecard(s, [three({ roundIndex: 1, hidingTeam: 'C', observedChaseSeconds: 300 })]);
+    expect(sc.teams.C!.name).toBe('Crew C');
+    expect(sc.teams.C!.hideRoundCount).toBe(1);
   });
 });
 
@@ -104,8 +159,8 @@ describe('person analytics (crew-attributed)', () => {
     const night2 = {
       session: { ...s, id: 's2', scheduledDate: '2026-10-17' },
       results: [
-        result({ roundIndex: 1, observedChaseSeconds: 600, hidingRosterSnapshot: rosterA2, seekingRosterSnapshot: rosterB2 }),
-        result(swap({ roundIndex: 2, observedChaseSeconds: 1200, hidingRosterSnapshot: rosterB2, seekingRosterSnapshot: rosterA2 })),
+        result({ roundIndex: 1, observedChaseSeconds: 600, rosterSnapshot: { A: rosterA2, B: rosterB2 } }),
+        result(swap({ roundIndex: 2, observedChaseSeconds: 1200, rosterSnapshot: { A: rosterA2, B: rosterB2 } })),
       ],
       operatorUidsByRound: {},
     };

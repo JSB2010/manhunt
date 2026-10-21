@@ -1,10 +1,12 @@
-import { applyChaseStart, applyClaimExpiry, applyPing, applyTimeCap, expirePauseRequest, nextDueEvent, type Transition } from './engine.js';
-import { selectPingSample } from './pingSelection.js';
+import { hasOpenPause } from './clock.js';
+import { hiderUids } from './crews.js';
+import { applyChaseStart, applyClaimExpiry, applyLateRelease, applyPing, applyTimeCap, expirePauseRequest, nextDueEvent, type Transition } from './engine.js';
+import { selectLateSample, selectPingSample } from './pingSelection.js';
 import type { CaptureClaim, DomainEvent, GpsPoint, NotificationIntent, RoundDoc } from './types.js';
 
 export interface TickDeps {
-  /** Candidate hider samples around a deadline (window filtering is re-applied by selectPingSample). */
-  candidatesForDeadline: (deadline: number, maxAgeSeconds: number) => Promise<GpsPoint[]>;
+  /** Hiding-crew samples in [from, to] (window filtering is re-applied by the selectors). */
+  hiderSamples: (from: number, to: number) => Promise<GpsPoint[]>;
   activeClaim: CaptureClaim | null;
 }
 
@@ -14,10 +16,32 @@ export interface TickResult extends Transition {
 }
 
 /**
+ * Release a waiting ping if the hiders' current position has reached the
+ * server (ADR 0015). No-op (returns null) when nothing is waiting, the chase
+ * is paused or under review, or no fresh fix qualifies yet.
+ */
+export async function tryLateRelease(round: RoundDoc, now: number, hiderSamples: TickDeps['hiderSamples']): Promise<Transition | null> {
+  const w = round.waitingPing;
+  if (!w || round.state !== 'CHASE' || hasOpenPause(round.pauses)) return null;
+  const maxAgeMs = round.rules.maxPingGpsAgeSeconds * 1000;
+  const candidates = await hiderSamples(Math.max(w.deadline, now - maxAgeMs) - 5 * 60_000, now);
+  const sample = selectLateSample(candidates, {
+    deadline: w.deadline,
+    hiderUids: hiderUids(round),
+    now,
+    maxAgeSeconds: round.rules.maxPingGpsAgeSeconds,
+    maxAccuracyMeters: round.rules.maxPingAccuracyMeters,
+    pauses: round.pauses,
+  });
+  return sample ? applyLateRelease(round, sample, now) : null;
+}
+
+/**
  * Advance a round through every scheduled event that is due at `now`, in
- * chronological order. Idempotent: re-running with the same state and time is a
- * no-op because each event mutates the state it was derived from (nextPingIndex,
- * state, claim). Safe under Cloud Tasks retries and watchdog repair.
+ * chronological order, then try to release a waiting ping. Idempotent:
+ * re-running with the same state and time is a no-op because each event mutates
+ * the state it was derived from (nextPingIndex, state, claim). Safe under Cloud
+ * Tasks retries and watchdog repair.
  */
 export async function tickRound(round: RoundDoc, now: number, deps: TickDeps, maxEvents = 500): Promise<TickResult> {
   let r = round;
@@ -35,10 +59,12 @@ export async function tickRound(round: RoundDoc, now: number, deps: TickDeps, ma
         t = applyChaseStart(r, due.at, now);
         break;
       case 'PING': {
-        const candidates = await deps.candidatesForDeadline(due.at, r.rules.maxPingGpsAgeSeconds);
+        const maxAgeMs = r.rules.maxPingGpsAgeSeconds * 1000;
+        // Spike checks look back up to 5 minutes before the eligibility window.
+        const candidates = await deps.hiderSamples(due.at - maxAgeMs - 5 * 60_000, due.at);
         const sample = selectPingSample(candidates, {
           deadline: due.at,
-          hiderUid: r.hiderUid!,
+          hiderUids: hiderUids(r),
           roundStartAt: r.roundStartAt!,
           maxAgeSeconds: r.rules.maxPingGpsAgeSeconds,
           maxAccuracyMeters: r.rules.maxPingAccuracyMeters,
@@ -65,6 +91,13 @@ export async function tickRound(round: RoundDoc, now: number, deps: TickDeps, ma
     r = t.round;
     events.push(...t.events);
     notifications.push(...t.notifications);
+  }
+  const late = await tryLateRelease(r, now, deps.hiderSamples);
+  if (late) {
+    processed.push({ kind: 'LATE_PING', at: now, pingIndex: late.round.pings[late.round.pings.length - 1]!.index });
+    r = late.round;
+    events.push(...late.events);
+    notifications.push(...late.notifications);
   }
   if (processed.length) {
     r = { ...r, lastTickAt: now };

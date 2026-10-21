@@ -1,6 +1,6 @@
 # ADR 0008 — Pause, resume and abort authority
 
-**Status:** accepted · **Spec:** §3.2 pause behavior, §10.1 abort
+**Status:** updated by ADR 0013 (pause/resume are hiders vs seekers; any phone of a side acts) · **Spec:** §3.2 pause behavior, §10.1 abort
 
 * **Manual pause:** either operator proposes (90 s window); the *other* operator's confirmation starts it. (Spec says "host can propose"; we let either operator propose since the host has no special role.)
 * **Safety pause:** immediate from either operator, conspicuous to both (time-sensitive push + full-screen overlay).

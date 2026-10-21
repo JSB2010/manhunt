@@ -2,11 +2,19 @@
 // milliseconds (number) so clock math is exact and cheap. API/view payloads
 // convert to ISO-8601 UTC strings at the edge.
 
-export type TeamKey = 'A' | 'B';
-export const TEAM_KEYS: readonly TeamKey[] = ['A', 'B'] as const;
-export const otherTeam = (t: TeamKey): TeamKey => (t === 'A' ? 'B' : 'A');
+/** A night has two or three crews. */
+export type TeamKey = 'A' | 'B' | 'C';
+export const TEAM_KEYS: readonly TeamKey[] = ['A', 'B', 'C'] as const;
+export const MIN_TEAMS = 2;
+export const MAX_TEAMS = 3;
+/** Equal operator phones a crew may carry; any one of them acts for the crew. */
+export const MAX_OPERATORS_PER_TEAM = 5;
 
 export type Role = 'HIDING' | 'SEEKING';
+/** Pause/resume authority is between the two sides of a round, not individual crews. */
+export type Side = 'HIDERS' | 'SEEKERS';
+/** With two seeking crews: share the catch (TOGETHER) or credit the crew that made it (RACE). */
+export type SeekMode = 'TOGETHER' | 'RACE';
 
 export type SessionStatus = 'LOBBY' | 'IN_ROUND' | 'BETWEEN_ROUNDS' | 'COMPLETED';
 
@@ -30,9 +38,6 @@ export interface Rules {
   pingIntervalSeconds: number;
   /** null = show all released pins */
   visiblePingHistoryCount: number | null;
-  totalRounds: number;
-  initialHidingTeam: TeamKey;
-  alternateRoles: boolean;
   /** null = no chase time cap */
   maxChaseSeconds: number | null;
   confirmationTimeoutSeconds: number;
@@ -51,8 +56,8 @@ export interface Team {
   key: TeamKey;
   name: string;
   color: string;
-  operatorUid: string | null;
-  operatorDisplayName: string | null;
+  /** Operator phones (account uids) on this crew. A uid is on at most one crew. */
+  operatorUids: string[];
   roster: PersonRef[];
 }
 
@@ -62,15 +67,19 @@ export interface SessionDoc {
   scheduledDate: string; // YYYY-MM-DD
   hostUid: string;
   status: SessionStatus;
+  /** Default rules for the next round (each round snapshots its own copy). */
   rules: Rules;
-  teams: Record<TeamKey, Team>;
+  /** Two or three crews, keyed A, B[, C]. */
+  teams: Partial<Record<TeamKey, Team>>;
   memberUids: string[];
   participantPersonIds: string[];
   groupId: string | null;
   currentRoundId: string | null;
   roundIds: string[];
   completedRoundCount: number;
-  keepPhotos: Record<TeamKey, boolean>;
+  keepPhotos: Partial<Record<TeamKey, boolean>>;
+  /** Reusable night code (server-only); members see it in their view. Null after the night ends. */
+  joinCode: string | null;
   /** Small denormalized list of finished rounds for views/history (no coordinates). */
   roundBriefs: RoundBrief[];
   revokedAt: number | null;
@@ -83,10 +92,16 @@ export interface RoundBrief {
   roundId: string;
   index: number;
   hidingTeam: TeamKey;
+  seekingTeams: TeamKey[];
+  seekMode: SeekMode;
+  /** Crews credited with the catch (attribution only — there is no round winner). */
+  catchCreditTeams: TeamKey[];
   outcome: RoundOutcome;
   observedChaseSeconds: number;
   isRightCensored: boolean;
   rulesFingerprint: string;
+  /** Fingerprint of the hiding crew's roster this round (detects roster changes between a crew's own hiding rounds). */
+  hidingRosterFingerprint: string;
 }
 
 export type PermissionStatus = 'NOT_DETERMINED' | 'DENIED' | 'RESTRICTED' | 'WHEN_IN_USE' | 'ALWAYS';
@@ -124,6 +139,10 @@ export interface MemberDoc {
   consentRevokedAt: number | null;
   health: DeviceHealth;
   displayName: string;
+  /** the account's own roster person, linking the phone to a roster name */
+  selfPersonId: string | null;
+  /** content hash of the phone's stored view; views are rewritten only when it changes */
+  viewHash?: string | null;
 }
 
 export type PauseKind = 'MANUAL' | 'SAFETY' | 'CAPTURE' | 'TECHNICAL';
@@ -143,6 +162,7 @@ export interface PendingPauseRequest {
   id: string;
   byUid: string;
   byTeam: TeamKey;
+  bySide: Side;
   at: number;
   expiresAt: number;
   reason: string | null;
@@ -164,6 +184,8 @@ export interface PingRelease {
   accuracyMeters: number | null;
   ageSeconds: number | null;
   sourcePointId: string | null;
+  /** Server-only: which phone the released fix came from (never rendered into views). */
+  sourceUid: string | null;
   phaseGeneration: number;
 }
 
@@ -193,6 +215,7 @@ export interface CaptureClaim {
 }
 
 export interface DisputeState {
+  /** Settled when the hiding crew and the claimant's crew propose the same resolution. */
   proposals: Partial<Record<TeamKey, { resolution: 'ACCEPT_AS_CATCH' | 'KEEP_REJECTED'; at: number; uid: string }>>;
   resolvedAt: number | null;
   resolution: 'ACCEPT_AS_CATCH' | 'KEEP_REJECTED' | null;
@@ -205,15 +228,28 @@ export interface ReadyMark {
 
 export type RoundOutcome = 'CAUGHT' | 'TIMED_OUT' | 'ABORTED';
 
+/** Per-crew route statistics for a round. The crew's route is its best-covered phone (a proxy for the crew). */
+export interface CrewRouteStats {
+  role: Role;
+  /** hiders: head start + chase on foot; null for seekers */
+  distanceTotalMeters: number | null;
+  distanceChaseMeters: number | null;
+  gpsCoverageFraction: number | null;
+  routeQuality: RouteQuality;
+  /** how many of the crew's phones were tracked this round */
+  phones: number;
+}
+
 export interface RoundResult {
   roundId: string;
   roundIndex: number;
   hidingTeam: TeamKey;
-  seekingTeam: TeamKey;
-  hidingTeamName: string;
-  seekingTeamName: string;
-  hidingRosterSnapshot: PersonRef[];
-  seekingRosterSnapshot: PersonRef[];
+  seekingTeams: TeamKey[];
+  seekMode: SeekMode;
+  teamNames: Partial<Record<TeamKey, string>>;
+  rosterSnapshot: Partial<Record<TeamKey, PersonRef[]>>;
+  /** Crews credited with the catch: RACE → the claimant's crew; TOGETHER → every seeking crew; none if not caught. */
+  catchCreditTeams: TeamKey[];
   outcome: RoundOutcome;
   headStartSeconds: number;
   observedChaseSeconds: number;
@@ -227,13 +263,7 @@ export interface RoundResult {
   pingsReleased: number;
   pingsMissing: number;
   pingsDelayed: number;
-  hidingDistanceTotalMeters: number | null;
-  hidingDistanceChaseMeters: number | null;
-  seekingDistanceChaseMeters: number | null;
-  gpsCoverageFractionHider: number | null;
-  gpsCoverageFractionSeeker: number | null;
-  routeQualityHider: RouteQuality;
-  routeQualitySeeker: RouteQuality;
+  crews: Partial<Record<TeamKey, CrewRouteStats>>;
   rulesFingerprint: string;
   abortedReason: string | null;
   resolvedByDispute: boolean;
@@ -249,14 +279,20 @@ export interface RoundDoc {
   state: RoundState;
   pausedFromState: RoundState | null;
   hidingTeam: TeamKey;
-  seekingTeam: TeamKey;
-  hiderUid: string | null;
-  seekerUid: string | null;
+  /** every other crew of the night seeks */
+  seekingTeams: TeamKey[];
+  seekMode: SeekMode;
+  /**
+   * Operator phones per crew, frozen at start. All in-round authority (uploads,
+   * claims, decisions, pauses, ping sources) comes from this snapshot — a phone
+   * that joins or moves mid-round is a spectator until the next round.
+   */
+  operatorsByTeam: Partial<Record<TeamKey, string[]>>;
   rules: Rules;
-  teamNames: Record<TeamKey, string>;
-  rosterSnapshot: Record<TeamKey, PersonRef[]>;
-  roleOverride: { byUid: string; at: number; reason: string | null; suggestedHidingTeam: TeamKey } | null;
-  ready: Record<TeamKey, ReadyMark | null>;
+  teamNames: Partial<Record<TeamKey, string>>;
+  rosterSnapshot: Partial<Record<TeamKey, PersonRef[]>>;
+  /** one ready mark per crew (any of its phones) */
+  ready: Partial<Record<TeamKey, ReadyMark | null>>;
   startWarningsAcknowledged: string[];
   roundStartAt: number | null;
   chaseStartAt: number | null;
@@ -264,9 +300,17 @@ export interface RoundDoc {
   phaseGeneration: number;
   pauses: PauseInterval[];
   pendingPauseRequest: PendingPauseRequest | null;
-  resumeVotes: Partial<Record<TeamKey, number>>;
+  /** one vote from the hiders and one from the seekers resumes */
+  resumeVotes: Partial<Record<Side, number>>;
   nextPingIndex: number;
   pings: PingRelease[];
+  /**
+   * A ping whose deadline passed with no eligible hider fix. It keeps waiting and
+   * releases the hiders' current position as soon as a fresh fix arrives (ADR 0015).
+   */
+  waitingPing: { index: number; deadline: number; since: number } | null;
+  /** Server-only: the phone each crew's route/distance was computed from. */
+  routeSourceUids: Partial<Record<TeamKey, string | null>>;
   activeClaimId: string | null;
   claimSubmittedAt: number | null;
   claimExpiresAt: number | null;
@@ -324,12 +368,15 @@ export type AuditEventType =
   | 'SETUP_EDITED'
   | 'READY_CHANGED'
   | 'ROUND_CREATED'
-  | 'ROLE_OVERRIDE'
   | 'ROUND_STARTED'
   | 'CHASE_STARTED'
   | 'PING_RELEASED'
   | 'PING_MISSING'
   | 'PING_DELAYED'
+  | 'PING_WAITING'
+  | 'OPERATOR_MOVED'
+  | 'OPERATOR_REMOVED'
+  | 'HIDER_PHONES_APART'
   | 'CLAIM_SUBMITTED'
   | 'CLAIM_CONFIRMED'
   | 'CLAIM_REJECTED'

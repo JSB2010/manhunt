@@ -4,7 +4,7 @@
  * The simulator signs in as Morgan (Crew A, host); this script drives Taylor
  * (Crew B) through the real API. Emulator/demo project only.
  *
- *   npx tsx scripts/ui-fixture.ts <state> [seek|hide]
+ *   npx tsx scripts/ui-fixture.ts <state> [seek|hide] [two|three]
  *     lobby      Morgan hosts; Taylor joined and is Ready; Morgan hasn't accepted the disclosure
  *     headstart  round 1 running, 10 min head start
  *     chase      head start over, released pings (keeps uploading Taylor's GPS until stopped)
@@ -13,6 +13,8 @@
  *     recap      round 1 caught and confirmed (both routes recorded)
  *     night      a finished two-round night
  *   seek (default): Morgan's crew seeks round 1. hide: Morgan's crew hides.
+ *   two: Casey joins Morgan's crew as a second phone. three: Casey plays a third crew
+ *   (two seeking crews, RACE). Default: two crews, one phone each.
  */
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -23,6 +25,7 @@ const AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9099';
 const seed = JSON.parse(readFileSync(new URL('./seed-accounts.json', import.meta.url), 'utf8')).accounts as { email: string; password: string }[];
 const state = process.argv[2] ?? 'chase';
 const morganSeeks = (process.argv[3] ?? 'seek') === 'seek';
+const crewMode = process.argv[4] as 'two' | 'three' | undefined;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Json = any;
 
@@ -45,14 +48,15 @@ const health = { permission: 'WHEN_IN_USE', preciseLocation: true, trackingActiv
 
 const morgan = await token(seed[0]!);
 const taylor = await token(seed[1]!);
+const casey = crewMode ? await token(seed[2]!) : null;
 
-// Start clean: abort active rounds and close open nights for both accounts.
-for (const t of [morgan, taylor]) {
+// Start clean: abort active rounds and close open nights for every account.
+for (const t of [morgan, taylor, ...(casey ? [casey] : [])]) {
   for (const s of (await call(t, 'GET', '/v1/sessions?limit=50')).items ?? []) {
     if (s.status === 'COMPLETED') continue;
     const v = await call(t, 'GET', `/v1/sessions/${s.id}`);
     if (['HEAD_START', 'CHASE', 'CAPTURE_PENDING', 'PAUSED'].includes(v.round?.state)) await call(t, 'POST', `/v1/sessions/${s.id}/rounds/${v.round.id}/abort`, { reason: 'fixture reset', safety: false });
-    if (s.isHost) await call(t, 'POST', `/v1/sessions/${s.id}/complete`, {});
+    await call(t, 'POST', `/v1/sessions/${s.id}/complete`, {});
   }
 }
 
@@ -65,15 +69,23 @@ const created = await call(morgan, 'POST', '/v1/sessions', {
   teams: {
     A: { name: 'Night Owls', roster: [{ personId: me.profile.selfPersonId, displayName: me.profile.displayName }, { displayName: 'Casey' }, { displayName: 'Jordan' }] },
     B: { name: 'Foxes', roster: [{ displayName: 'Taylor' }, { displayName: 'Riley' }] },
+    ...(crewMode === 'three' ? { C: { name: 'Ravens', roster: [{ displayName: 'Quinn' }] } } : {}),
   },
-  rules: { headStartSeconds, pingIntervalSeconds: 60, visiblePingHistoryCount: 3, totalRounds: state === 'night' ? 2 : 4, initialHidingTeam: morganSeeks ? 'B' : 'A', confirmationTimeoutSeconds: 300 },
+  firstHidingTeam: morganSeeks ? 'B' : 'A',
+  seekMode: crewMode === 'three' ? 'RACE' : 'TOGETHER',
+  rules: { headStartSeconds, pingIntervalSeconds: 60, visiblePingHistoryCount: 3, confirmationTimeoutSeconds: 300 },
 });
 const sid = created.sessionId as string;
-const inv = await call(morgan, 'POST', `/v1/sessions/${sid}/invites`, {});
-await call(taylor, 'POST', '/v1/invites/redeem', { code: inv.code });
+const code = created.session.joinCode as string;
+await call(taylor, 'POST', '/v1/invites/redeem', { code, teamKey: 'B' });
 const consent = { accepted: true, consentVersion: 'v1', routeSharingAfterRound: true, guestDisclosureAcknowledged: true };
 await call(taylor, 'POST', `/v1/sessions/${sid}/consent`, consent);
 await call(taylor, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health });
+if (casey) {
+  await call(casey, 'POST', '/v1/invites/redeem', { code, teamKey: crewMode === 'three' ? 'C' : 'A' });
+  await call(casey, 'POST', `/v1/sessions/${sid}/consent`, consent);
+  if (crewMode === 'three') await call(casey, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health });
+}
 if (state === 'lobby') { console.log(`lobby ready: session ${sid}`); process.exit(0); }
 await call(morgan, 'POST', `/v1/sessions/${sid}/consent`, consent);
 
@@ -81,6 +93,7 @@ await call(morgan, 'POST', `/v1/sessions/${sid}/consent`, consent);
 async function playRound(both: boolean, until: (rid: string, chaseAt: number) => Promise<boolean>) {
   await call(morgan, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health });
   await call(taylor, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health });
+  if (crewMode === 'three') await call(casey!, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health });
   const rid = (await call(morgan, 'GET', `/v1/sessions/${sid}`)).round.id as string;
   await call(morgan, 'POST', `/v1/sessions/${sid}/rounds/${rid}/start`, { acknowledgeWarnings: true });
   const v = await call(taylor, 'GET', `/v1/sessions/${sid}`);
@@ -95,6 +108,8 @@ async function playRound(both: boolean, until: (rid: string, chaseAt: number) =>
     const mk = ([lat, lon]: number[]) => ({ batchId: randomUUID(), sentAt: new Date().toISOString(), samples: [{ pointId: randomUUID(), recordedAt: new Date(Date.now() - 700).toISOString(), latitude: lat, longitude: lon, horizontalAccuracyMeters: 6 }], health });
     await call(taylor, 'POST', `/v1/sessions/${sid}/rounds/${rid}/location-batches`, mk(taylorHides ? walk(s) : drive(s)));
     if (both) await call(morgan, 'POST', `/v1/sessions/${sid}/rounds/${rid}/location-batches`, mk(taylorHides ? drive(s) : walk(s)));
+    // Casey: Morgan's crew-mate (two) or a third crew that always seeks here (three).
+    if (casey) await call(casey, 'POST', `/v1/sessions/${sid}/rounds/${rid}/location-batches`, mk(crewMode === 'two' && !taylorHides ? walk(s + 20) : drive(s + 30)));
     if (await until(rid, chaseAt)) return { rid, taylorHides };
     await sleep(4000);
   }

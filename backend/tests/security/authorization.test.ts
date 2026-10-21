@@ -29,12 +29,13 @@ beforeAll(async () => {
     scheduledDate: '2026-10-17',
     myTeam: 'B',
     teams: { A: { name: 'Foxes', roster: [{ displayName: 'Ana' }] }, B: { name: 'Hounds', roster: [{ displayName: 'Bo' }] } },
-    rules: { initialHidingTeam: 'A', headStartSeconds: 300, pingIntervalSeconds: 300 },
+    firstHidingTeam: 'A',
+    rules: { headStartSeconds: 300, pingIntervalSeconds: 300 },
   });
   sid = s.body.sessionId;
   rid = s.body.round.id;
   const inv = await h.call(host, 'POST', `/v1/sessions/${sid}/invites`, {});
-  await h.call(hider, 'POST', '/v1/invites/redeem', { code: inv.body.code });
+  await h.call(hider, 'POST', '/v1/invites/redeem', { code: inv.body.code, teamKey: 'A' });
   for (const u of [host, hider]) {
     await h.call(u, 'POST', `/v1/sessions/${sid}/consent`, consentBody);
     await h.call(u, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: healthyPreflight() });
@@ -99,8 +100,14 @@ describe('seeker (also host) cannot see the hider during the round', () => {
     const b = batch(h.clock, [[h.clock.now(), 1, 1]]) as Record<string, unknown>;
     const smug = await h.call(host, 'POST', `/v1/sessions/${sid}/rounds/${rid}/location-batches`, { ...b, operatorUid: hider.uid });
     expect(smug.status).toBe(400);
-    const setup = await h.call(host, 'PATCH', `/v1/sessions/${sid}/setup`, { teams: { A: { operatorUid: host.uid } } });
-    expect(setup.status).toBe(400);
+    for (const teams of [{ A: { operatorUid: host.uid } }, { A: { operatorUids: [host.uid] } }]) {
+      expect((await h.call(host, 'PATCH', `/v1/sessions/${sid}/setup`, { teams })).status).toBe(400);
+    }
+    // Moving phones mid-round is refused (in-round authority comes from the start snapshot anyway).
+    const move = await h.call(host, 'PATCH', `/v1/sessions/${sid}/setup`, { moves: [{ uid: host.uid, teamKey: 'A' }] });
+    expect(move.body.error.code).toBe('GAME_CLOSED');
+    const redeem = await h.call(host, 'POST', '/v1/invites/redeem', { code: 'ABCDEFGH', teamKey: 'A', role: 'HIDING' });
+    expect(redeem.status).toBe(400);
   });
 
   it('seeker uploads are stored as SEEKING and can never become hider pings', async () => {
@@ -118,22 +125,30 @@ describe('seeker (also host) cannot see the hider during the round', () => {
     expect(v.body.round.pins[0].ageSeconds).toBe(31);
   });
 
-  it('late (offline) hider uploads are never revealed retroactively', async () => {
-    // Hider goes "offline" for the 5 min before ping 1; batch arrives after the deadline.
+  it('late (offline) hider uploads are never revealed retroactively; a waiting ping only takes a current fix', async () => {
+    // Hider goes "offline" for the 5 min before ping 1; the ping waits instead of releasing.
     const deadline = T0 + 10 * MIN;
     h.clock.set(deadline);
     await h.tick(sid, rid);
     let v = await h.call(host, 'GET', `/v1/sessions/${sid}`);
-    const p1 = v.body.round.pingLog.find((p: any) => p.index === 1);
-    expect(p1.status).toBe('NO_FRESH_FIX');
+    expect(v.body.round.waitingPing).toMatchObject({ index: 1 });
+    expect(v.body.round.pingLog.map((p: any) => p.index)).toEqual([0]);
     // Pins still show the older ping 0 with its original timestamp, not a fake fresh one.
     expect(v.body.round.pins.map((p: any) => p.index)).toEqual([0]);
+    // The backlog arrives after the deadline: a fix from before the deadline never fills the waiting ping.
     h.clock.set(deadline + 30_000);
     const late = await h.call(hider, 'POST', `/v1/sessions/${sid}/rounds/${rid}/location-batches`, batch(h.clock, [[deadline - 5000, 39.7777, -104.9]]));
     expect(late.status).toBe(200);
     await h.tick(sid, rid);
     v = await h.call(host, 'GET', `/v1/sessions/${sid}`);
     expect(JSON.stringify(v.body)).not.toContain('39.7777');
+    expect(v.body.round.waitingPing).toMatchObject({ index: 1 });
+    // Neither does a stale fix recorded after the deadline but older than the max GPS age.
+    h.clock.set(deadline + 3 * MIN);
+    await h.call(hider, 'POST', `/v1/sessions/${sid}/rounds/${rid}/location-batches`, batch(h.clock, [[deadline + 30_000, 39.7778, -104.9]]));
+    v = await h.call(host, 'GET', `/v1/sessions/${sid}`);
+    expect(JSON.stringify(v.body)).not.toContain('39.7778');
+    expect(v.body.round.waitingPing).not.toBeNull();
   });
 
   it('seeker cannot decide claims; hider cannot submit them; outsider cannot touch the round', async () => {
@@ -235,16 +250,38 @@ describe('seeker (also host) cannot see the hider during the round', () => {
 });
 
 describe('invites and accounts', () => {
-  it('expired invites are rejected; targeted invites only work for the target', async () => {
+  it('expired night codes are rejected and replaced; direct invites need friendship; non-members cannot fetch the code', async () => {
     const a = await h.createUser('Ann');
     const b = await h.createUser('Ben');
     const s = await h.call(a, 'POST', '/v1/sessions', { title: 'x', scheduledDate: '2026-10-18', myTeam: 'A', teams: { A: { name: 'A', roster: [] }, B: { name: 'B', roster: [] } } });
-    const inv = await h.call(a, 'POST', `/v1/sessions/${s.body.sessionId}/invites`, {});
-    h.clock.advance(2 * 3600_000);
+    const sidX = s.body.sessionId;
+    expect((await h.call(b, 'POST', `/v1/sessions/${sidX}/invites`, {})).status).toBe(404);
+    const inv = await h.call(a, 'POST', `/v1/sessions/${sidX}/invites`, {});
+    h.clock.advance(8 * 24 * 3600_000);
     expect((await h.call(b, 'POST', '/v1/invites/redeem', { code: inv.body.code })).body.error.code).toBe('INVITE_INVALID');
+    const fresh = await h.call(a, 'POST', `/v1/sessions/${sidX}/invites`, {});
+    expect(fresh.body.code).not.toBe(inv.body.code);
     // Direct invites require friendship.
-    const direct = await h.call(a, 'POST', `/v1/sessions/${s.body.sessionId}/invites`, { targetUid: b.uid });
+    const direct = await h.call(a, 'POST', `/v1/sessions/${sidX}/invites`, { targetUid: b.uid });
     expect(direct.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('guessing night codes is rate limited on failures only', async () => {
+    const a = await h.createUser('Cara');
+    const guesser = await h.createUser('Guesser');
+    const s = await h.call(a, 'POST', '/v1/sessions', { title: 'y', scheduledDate: '2026-10-18', myTeam: 'A', teams: { A: { name: 'A', roster: [] }, B: { name: 'B', roster: [] } } });
+    const code = s.body.session.joinCode as string;
+    // Successful previews are free.
+    for (let i = 0; i < 15; i++) expect((await h.call(guesser, 'POST', '/v1/invites/preview', { code })).status).toBe(200);
+    let limited = 0;
+    for (let i = 0; i < 14; i++) {
+      const r = await h.call(guesser, 'POST', '/v1/invites/preview', { code: `ZZZZZZ${String(i).padStart(2, '2')}` });
+      if (r.status === 429) limited++;
+      else expect(r.status).toBe(410);
+    }
+    expect(limited).toBeGreaterThan(0);
+    // Once limited, even the right code waits.
+    expect((await h.call(guesser, 'POST', '/v1/invites/redeem', { code })).status).toBe(429);
   });
 
   it('account deletion removes profile, social graph and auth user', async () => {
