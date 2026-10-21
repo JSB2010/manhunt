@@ -41,3 +41,6 @@ ios/Config/*.local.xcconfig
 # Test artifacts that may contain coordinates
 test-artifacts/private/
 test-artifacts/e2e-*/
+
+# Release details kept out of the public repo (team, tester, App Store Connect IDs)
+docs/*.local.md
