@@ -58,7 +58,7 @@ export interface PingLogEntry {
   delayed: boolean;
 }
 
-export type TrackingState = 'ACTIVE' | 'STALE' | 'NO_SIGNAL' | 'STOPPED' | 'PERMISSION_ISSUE' | 'UNKNOWN';
+export type TrackingState = 'ACTIVE' | 'STARTING' | 'STALE' | 'NO_SIGNAL' | 'STOPPED' | 'PERMISSION_ISSUE' | 'UNKNOWN';
 
 /** Coarse per-crew phone status: never a timestamp or a location. */
 export interface CrewStatusView {
@@ -165,21 +165,26 @@ export interface ViewDoc {
 export const STALE_HEARTBEAT_MS = 120_000;
 export const NO_SIGNAL_HEARTBEAT_MS = 300_000;
 
-/** Coarse tracking state of one phone, derived from its heartbeat age. */
-export function trackingState(h: DeviceHealth | undefined, now: number): TrackingState {
+/**
+ * Coarse tracking state of one phone, derived from its heartbeat age. `roundStartAt`: a phone
+ * whose last report is its Ready check from before the start hasn't begun tracking yet, which
+ * is STARTING (then STALE/NO_SIGNAL by age), not STOPPED.
+ */
+export function trackingState(h: DeviceHealth | undefined, now: number, roundStartAt: number | null = null): TrackingState {
   if (!h) return 'UNKNOWN';
   if (h.permission === 'DENIED' || h.permission === 'RESTRICTED') return 'PERMISSION_ISSUE';
-  if (!h.trackingActive && h.lastHeartbeatAt !== null) return 'STOPPED';
   if (h.lastHeartbeatAt === null) return 'UNKNOWN';
+  const preRound = roundStartAt !== null && h.lastHeartbeatAt < roundStartAt;
+  if (!h.trackingActive && !preRound) return 'STOPPED';
   if (now - h.lastHeartbeatAt > NO_SIGNAL_HEARTBEAT_MS) return 'NO_SIGNAL';
   if (now - h.lastHeartbeatAt > STALE_HEARTBEAT_MS) return 'STALE';
-  return 'ACTIVE';
+  return preRound ? 'STARTING' : 'ACTIVE';
 }
 
-const STATE_RANK: Record<TrackingState, number> = { ACTIVE: 0, STALE: 1, NO_SIGNAL: 2, STOPPED: 3, PERMISSION_ISSUE: 4, UNKNOWN: 5 };
+const STATE_RANK: Record<TrackingState, number> = { ACTIVE: 0, STARTING: 1, STALE: 1, NO_SIGNAL: 2, STOPPED: 3, PERMISSION_ISSUE: 4, UNKNOWN: 5 };
 
-export function crewStatus(uids: readonly string[], members: Record<string, MemberDoc>, now: number): CrewStatusView {
-  const states = uids.map((u) => trackingState(members[u]?.health, now));
+export function crewStatus(uids: readonly string[], members: Record<string, MemberDoc>, now: number, roundStartAt: number | null = null): CrewStatusView {
+  const states = uids.map((u) => trackingState(members[u]?.health, now, roundStartAt));
   const issues = new Set<string>();
   for (const u of uids) {
     const h = members[u]?.health;
@@ -302,7 +307,8 @@ export function renderRound(params: {
     }
   }
 
-  const statusOf = (k: TeamKey) => crewStatus(started ? r.operatorsByTeam[k] ?? [] : session.teams[k]?.operatorUids ?? [], members, now);
+  const statusOf = (k: TeamKey) =>
+    started ? crewStatus(r.operatorsByTeam[k] ?? [], members, now, r.roundStartAt) : crewStatus(session.teams[k]?.operatorUids ?? [], members, now);
 
   return {
     id: r.id,

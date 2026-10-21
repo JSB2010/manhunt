@@ -1,6 +1,6 @@
 # ADR 0016 — Network efficiency on cellular
 
-**Status:** accepted (backend part; the app part lands with the iOS networking change) · **Updates:** ADR 0010
+**Status:** accepted · **Updates:** ADR 0010
 
 **Context.** Measured before this change, a phone pulled about 4–6 MB an hour and made about 18 requests a minute during a round:
 * Every location batch from every phone ran a full transaction that re-rendered and rewrote **every** member's view. `renderedAt` always differed, so each write reached every phone.
@@ -15,6 +15,11 @@
 * **Conditional GET.** `GET /v1/sessions/{id}` serves the phone's stored view doc (one read instead of four), with `ETag: "<viewHash>"`; `If-None-Match` returns a body-less 304.
 * `stateVersion` comes from the session and round document versions, which only grow. A REST response that read older state can no longer outrank a newer listener snapshot.
 
-**Decision (app, to follow).** Reconcile over REST only when the listener has been quiet for 45 s or on foreground, conditionally. Hider uploads stay at 15–20 s during the chase, with a fix uploaded just before each deadline; seekers upload every 90 s. On reconnect, the newest fix goes first. Request bodies are gzipped and health is sent only when it changes or once a minute.
+**Decision (app).**
+* **Reconcile on quiet.** REST reconcile runs only after the listener has been quiet for 45 s in the foreground (120 s in the background), on foreground and on reconnect. It sends `If-None-Match` with the last view hash, so an unchanged view costs a body-less 304.
+* **Adaptive uploads.** Hider phones upload every 15 s, seekers every 90 s. Health rides along only when it changes meaningfully or once a minute. A hider phone also uploads from its location callback just before each ping deadline, which works in the background, and uploads at once while a ping is waiting on it.
+* **Recovery.** Failed uploads back off exponentially, capped at 30 s. On reconnect the newest 20 fixes go first, then the backlog oldest-first. A batch the server rejects as invalid is dropped instead of blocking the queue.
+* **Compression.** Bodies over 4 KB are gzipped (`Content-Encoding: gzip`). The API inflates them, capped at the route's body limit, so a compression bomb gets 413.
+* **Timers after sleep.** The server clock is anchored to a sleep-inclusive monotonic clock, so a phone that slept mid-round shows correct timers before its first response after waking.
 
 **Measured (2026-10-21, `npm run e2e:crews`, 5 phones, 3 crews, 1-minute pings).** About 4 listener snapshots a minute per phone (~16 KB/min) and 3–5 REST calls a minute (~1–2.5 KB/min), down from a full rewrite of every view on every batch from every phone (≈20 snapshots a minute per phone with five phones). Every remaining snapshot is a real game event: start, chase start, a ping, a waiting or late ping, a claim, a decision. With 10-minute pings, snapshots drop to a handful per ping interval.

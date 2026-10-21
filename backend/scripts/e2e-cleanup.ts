@@ -30,10 +30,9 @@ for (const a of seed.slice(0, 2)) {
       await call(t, 'POST', `/v1/sessions/${s.id}/rounds/${v.round.id}/abort`, { reason: 'E2E cleanup', safety: false });
       aborted++;
     }
-    if (s.isHost) {
-      const r = await call(t, 'POST', `/v1/sessions/${s.id}/complete`, {});
-      if (r.ok) closed++;
-    }
+    // Any phone in the night can end it.
+    const r = await call(t, 'POST', `/v1/sessions/${s.id}/complete`, {});
+    if (r.ok) closed++;
   }
 }
 console.log(`e2e cleanup: aborted ${aborted} active rounds, closed ${closed} open nights`);

@@ -159,6 +159,17 @@ final class TwoPhoneE2ETests: XCTestCase {
         snapshot("seeker-second-ping")
         try write("second-ping.txt", lastPing.label)
 
+        // One tap routes to the latest ping in Apple Maps.
+        let directions = app.buttons["game.directions"]
+        XCTAssertTrue(directions.exists, "seekers get Directions once a ping is out")
+        XCTAssertTrue(directions.label.contains("ping 1"), directions.label)
+        directions.tap()
+        let maps = XCUIApplication(bundleIdentifier: "com.apple.Maps")
+        XCTAssertTrue(maps.wait(for: .runningForeground, timeout: 20), "Directions should open Apple Maps")
+        RunLoop.current.run(until: Date().addingTimeInterval(3)) // let Maps draw the route
+        snapshot("seeker-directions-maps")
+        app.activate()
+
         tap(app.buttons["game.photoCatch"])
         takePhoto(app)
         tap(app.buttons["capture.submit"], timeout: 20)

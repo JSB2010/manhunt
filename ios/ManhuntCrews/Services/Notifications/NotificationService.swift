@@ -80,7 +80,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mes
         if round.state == .HEAD_START {
             schedule("mh.chase", at: round.headStartEndsAt, title: "The chase is on", body: round.myRole == .SEEKING ? "Head start is over. Open the app for the first ping." : "Seekers are now moving.")
         } else if round.state == .CHASE, round.myRole == .SEEKING {
-            schedule("mh.ping", at: round.nextPingAt, title: "Ping due", body: "A scheduled hiding-crew ping is due. Open the app to see if it was released.")
+            schedule("mh.ping", at: round.nextPingAt, title: "Ping due", body: "Open the map for the hiders' latest spot.")
         }
     }
 
@@ -89,6 +89,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mes
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        // Local deadline nudges are for a phone in a pocket; the open app already shows the timers.
+        if notification.request.identifier.hasPrefix("mh.") { return [] }
+        return [.banner, .sound]
     }
 }

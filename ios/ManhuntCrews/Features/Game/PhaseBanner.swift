@@ -96,7 +96,7 @@ struct PhaseBanner: View {
     private func subtitle(_ now: Date) -> String {
         switch round.state {
         case .HEAD_START:
-            return round.myRole == .HIDING ? "Move! First ping at 0:00." : "Wait. First ping at 0:00 — then go."
+            return round.myRole == .HIDING ? "Move! First ping when this hits 0:00." : "Wait. First ping when this hits 0:00."
         case .CHASE:
             var parts: [String] = []
             if let next = round.nextPingAt {

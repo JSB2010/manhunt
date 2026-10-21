@@ -91,6 +91,19 @@ describe('per-user view privacy invariant', () => {
     expect(Object.keys(v.round!.crewStatus.A!).sort()).toEqual(['issues', 'live', 'state', 'total']);
   });
 
+  it('a hider phone that has not reported since the start reads as starting, not stopped', () => {
+    const { session: s, round: r0 } = readyRound();
+    const m = members(s);
+    // Its last report is the Ready check, sent before tracking began.
+    m[HIDER]!.health = { ...m[HIDER]!.health, trackingActive: false, lastHeartbeatAt: T0 - 20_000 };
+    const r = startRound(r0, s, HIDER, allPhones(s), [], T0).round;
+    const at = (now: number) => renderView({ uid: SEEKER, session: s, round: r, members: m, activeClaim: null, now }).round!.crewStatus.A!.state;
+    expect(at(T0 + 1000)).toBe('STARTING');
+    expect(at(T0 + 3 * MIN)).toBe('STALE');
+    m[HIDER]!.health = { ...m[HIDER]!.health, trackingActive: false, lastHeartbeatAt: T0 + 30_000 };
+    expect(at(T0 + 40_000)).toBe('STOPPED');
+  });
+
   it('clock view lets clients compute elapsed from server timestamps', async () => {
     const { session: s, round: r0 } = readyRound();
     let r = startRound(r0, s, HIDER, allPhones(s), [], T0).round;

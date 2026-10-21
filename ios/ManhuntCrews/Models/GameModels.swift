@@ -133,7 +133,7 @@ struct PingLogEntry: Codable, Identifiable, Hashable, Sendable {
 struct CrewStatusView: Codable, Equatable, Sendable {
     var live: Int
     var total: Int
-    var state: String // ACTIVE | STALE | NO_SIGNAL | STOPPED | PERMISSION_ISSUE | UNKNOWN
+    var state: String // ACTIVE | STARTING | STALE | NO_SIGNAL | STOPPED | PERMISSION_ISSUE | UNKNOWN
     var issues: [String]
 }
 

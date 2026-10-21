@@ -392,9 +392,6 @@ struct PingChip: View {
                          text: "\(mine ? "Seen at ping" : "Ping") #\(pin.index) · \(Fmt.ago(pin.scheduledAt, now: now))\(pin.delayed ? " · late" : "")")
                         .accessibilityLabel("Last hider ping #\(pin.index), \(Fmt.ago(pin.scheduledAt, now: now)). GPS sample \(pin.ageSeconds.map { "\($0) seconds" } ?? "age unknown") old, accurate to \(Int(pin.accuracyMeters ?? 0)) meters\(pin.delayed ? ", released late" : "")")
                         .accessibilityIdentifier("game.lastPing")
-                } else if round.state == .HEAD_START {
-                    chip(symbol: "hourglass", tint: .secondary,
-                         text: round.myRole == .SEEKING ? "First ping when the head start ends" : "Seekers get their first ping at 0:00")
                 }
             }
         }
@@ -452,7 +449,7 @@ struct HealthChip: View {
         guard let age = loc.lastFixAge else { return ("No GPS fix yet", "location", Theme.warning) }
         if age > 60 { return ("GPS stale \(Int(age))s", "exclamationmark.triangle.fill", Theme.warning) }
         if let (k, p) = worst, p.isProblem { return ("\(label(k)): \(p.text.lowercased())", p.symbol, p.tint) }
-        if loc.queuedSamples > 0 { return ("\(loc.queuedSamples) unsent", "tray.full.fill", Theme.warning) }
+        if loc.uploadsFailing { return ("\(loc.queuedSamples) unsent", "tray.full.fill", Theme.warning) }
         return ("GPS ±\(Int(loc.lastFix?.horizontalAccuracy ?? 0)) m", "location.fill", Theme.ok)
     }
 

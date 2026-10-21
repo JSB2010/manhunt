@@ -134,6 +134,7 @@ struct HealthPresentation {
     init(status: CrewStatusView) {
         let v: (String, String, StatusRow.State) = switch status.state {
         case "ACTIVE": (status.total > 1 ? "\(status.live) of \(status.total) live" : "Live", "dot.radiowaves.left.and.right", status.live < status.total ? .warning : .ok)
+        case "STARTING": ("Starting", "hourglass", .neutral)
         case "STALE": ("Signal weak", "exclamationmark.triangle.fill", .warning)
         case "NO_SIGNAL": ("No signal", "antenna.radiowaves.left.and.right.slash", .problem)
         case "STOPPED": ("Tracking stopped", "location.slash.fill", .problem)

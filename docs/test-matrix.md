@@ -6,8 +6,8 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas, Cloud Functions adapter + tick handler + task-queue scheduler) | `cd backend && npm run test:unit` | ✅ 108 / 108 (2026-10-21, crews: several phones per crew, three crews, waiting pings, Race/Together credit, shuffler-independent scoring, privacy of source phones) |
-| Backend integration + security (Auth/Firestore/Storage emulators, rules, deployed-functions surface) | `npm run test:integration` | ✅ 48 / 48 (2026-10-21: open night with two phones on a crew and a third crew added mid-night; concurrent hider decisions; Race photo restriction; hider outage → waiting ping → current position on reconnect; night code cap/regenerate/brute-force; phone moves/removal; changed-only view writes and 304) |
+| Backend unit (domain, privacy invariant, OpenAPI contract, iOS-encoding schemas, Cloud Functions adapter + tick handler + task-queue scheduler) | `cd backend && npm run test:unit` | ✅ 115 / 115 (2026-10-21, crews: several phones per crew, three crews, waiting pings, Race/Together credit, shuffler-independent scoring, privacy of source phones) |
+| Backend integration + security (Auth/Firestore/Storage emulators, rules, deployed-functions surface) | `npm run test:integration` | ✅ 53 / 53 (2026-10-21: open night with two phones on a crew and a third crew added mid-night; concurrent hider decisions; Race photo restriction; hider outage → waiting ping → current position on reconnect; night code cap/regenerate/brute-force; phone moves/removal; changed-only view writes and 304; gzip bodies incl. a bomb → 413; a joining account whose name is already on the roster isn't listed twice) |
 | Real-time crews E2E (live stack, wall clock, 5 phones with Firestore listeners, 3 crews) | `npm run e2e:crews` | ✅ 2026-10-21: ping waited through a 65 s hider outage and released the current position 0.4 s after reconnect (no backlog point); 0 unreleased coordinates in seeker REST views or listener snapshots; Race catch credited to Crew C only, Crew B denied its photo; phone moved and any crew hid next; night ended by a phone. Bandwidth per phone with **1-min pings**: ~4 listener snapshots/min (~16 KB/min) and 3–5 REST calls/min (~1–2.5 KB/min) — vs. a full view rewrite on every batch from every phone before (≈20 snapshots/min per phone with 5 phones) |
 | Real-time API E2E (live stack, wall clock, local scheduler → worker) | `npm run e2e:two-operators` | ✅ first ping seen 0.5 s after chase start; ping 1 0.7 s after its deadline; sample age 9 s; 0 unreleased coordinates in seeker view; official time = submission time |
 | Real-time API E2E through the **deployable Cloud Functions** (Functions + Cloud Tasks emulators: `api` → task queue → `tick`) | `npm run serve:functions` (alternate ports), then `API_URL=http://127.0.0.1:<port>/demo-manhunt/us-central1/api npm run e2e:two-operators` | ✅ 2026-10-18: first ping seen 1.3 s after chase start; ping 1 0.2 s after its deadline; sample age 7 s; 0 unreleased coordinates in seeker view; photo upload (JPEG through the adapter, metadata stripped), catch, recap, round 2 role swap. The Cloud Tasks emulator ignores `scheduleTime`, so delivery timing here came from `tick`'s early-arrival wait-and-retry (ADR 0012). The first run, before that handling existed, failed at ping 0. |
@@ -15,7 +15,7 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 | iOS **Prod** configuration (unsigned build) | `xcodebuild build -scheme "ManhuntCrews Prod" -configuration Prod -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ 2026-10-20: bundle `com.example.manhuntcrews`, prod API URL, `GoogleService-Info-Prod.plist` bundled, emulators off, manual signing settings resolved |
 | Manual signing helper | `scripts/ios-signing.sh csr` / `install` in a throwaway HOME + keychain with a self-signed stand-in certificate and CMS-signed fake profile | ✅ key/cert pair into an identity; profile checks (bundle, App Store type, push, certificate membership) and `Prod.local.xcconfig` output work. A real Apple certificate and upload are not yet exercised |
 | Prod Firebase project | `firebase deploy --only auth,firestore:rules --project your-prod-project` | ✅ 2026-10-20: Email/Password enabled, rules live. Indexes/TTL need Blaze |
-| iOS unit + listener integration (XCTest) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 14 / 14 (re-run 2026-10-18 on iPhone 18 Pro / iOS 27 after the redesign; the listener test runs only when the local stack is up) |
+| iOS unit + listener integration (XCTest) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 47 / 47 (2026-10-21 on iPhone 17 / iOS 27: crews, shuffler, gzip, conditional reload, newest-first recovery, auth resilience, clock through device sleep; the listener test runs only when the local stack is up and the build points at it, e.g. `MH_DEV_HOST=127.0.0.1`) |
 | iOS app build (Debug, simulator) | `xcodebuild build …` | ✅ no warnings in app sources |
 | iOS Release build for device (unsigned) | `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ |
 | Setup / deploy scripts | `bash -n scripts/setup-gcp-project.sh scripts/deploy-backend.sh`; every gcloud flag checked against `--help` (gcloud 580) | ✅ syntax only; never run against a project |
@@ -53,6 +53,21 @@ Production Firestore rejected two composite indexes that the emulator accepts: `
 ## Two-simulator E2E
 
 `scripts/e2e-two-simulators.sh` boots two simulators, starts simulated GPS routes (hider walking 1.6 m/s, seeker driving 12 m/s), and runs `TwoPhoneE2ETests.testHost` and `.testSeeker` **concurrently**. Rules: 60 s head start, 60 s pings (DEBUG `-uiTestShortRules`). The hider app is sent to the background (home button) for the entire chase to exercise background location and uploads.
+
+**Crews v2 (2026-10-21): ✅ PASS, 3 consecutive runs** (`e2e-20261021-090055`, `-091041`, `-091842`) on iPhone 16 Pro Max + iPhone 16e (iOS 18.5). The flow:
+1. The host's phone shows the night code; the seeker joins with it and picks Crew B.
+2. One "I agree" consent each, then both Ready and start.
+3. Pings #0 and #1 arrive (GPS samples 13–17 s old). The seeker's one-tap **Directions** opens Apple Maps.
+4. Photo catch, confirmed on the hider's backgrounded phone: "Caught after 1:10".
+5. **Next: Round 2** defaults to the crew that has hidden least, so Crew B hides; ping #0 arrives (14 s old) and the round ends "Caught after 0:07" on both phones.
+
+Fixes from these runs:
+* Seekers no longer see "Hiders: tracking stopped" before the hider phone's first in-round upload; the crew status reads `STARTING`.
+* The "N unsent" chip shows only while uploads fail.
+* Local deadline nudges don't pop a banner over the open app.
+* The head-start line appears once.
+
+The script now builds with `MH_DEV_HOST=127.0.0.1`, so a LAN host in `Local.xcconfig` (for a physical phone) can't break it. Screens: `docs/evidence/design/e2e-crews-v2.jpg`.
 
 **v0.2 redesign (2026-10-18): ✅ PASS** — run `e2e-20261018-175622` on iPhone 16 Pro Max + iPhone 16e (iOS 18.5, so the non-glass fallback path) plays rounds 1 and 2 with the redesigned UI: pings #0/#1 at 17 s/14 s sample age, "Caught after 1:07"; round 2 roles swapped, ping #0 at 14 s, "Caught after 0:07" on both phones (`docs/evidence/design/e2e-ios18-fallback.jpg`). The two earlier runs that day failed: one on the stale-round view bug (fixed in the server), one on a single dropped toolbar tap under heavy machine load. The test now retries that tap only while the sheet is still idle. Test changes for the redesign: phase text is matched case-insensitively, and the scroll helper accepts buttons pinned in a bottom action bar.
 

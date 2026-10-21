@@ -185,7 +185,7 @@ components:
       properties:
         live: { type: integer }
         total: { type: integer }
-        state: { type: string, enum: [ACTIVE, STALE, NO_SIGNAL, STOPPED, PERMISSION_ISSUE, UNKNOWN] }
+        state: { type: string, enum: [ACTIVE, STARTING, STALE, NO_SIGNAL, STOPPED, PERMISSION_ISSUE, UNKNOWN] }
         issues: { type: array, items: { type: string } }
     RoundView:
       type: object

@@ -31,6 +31,9 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
     private(set) var lastUploadError: String?
     private(set) var interruptedResumeNotice: String?
     private(set) var role: Role?
+    /// Unsent fixes are normal between batches (seekers upload every 90 s); they only
+    /// matter while uploads are failing.
+    var uploadsFailing: Bool { queuedSamples > 0 && consecutiveFailures > 0 }
 
     private let manager = CLLocationManager()
     private var updatesTask: Task<Void, Never>?

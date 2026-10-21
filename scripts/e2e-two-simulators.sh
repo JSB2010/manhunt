@@ -32,8 +32,9 @@ SEEKER_UDID=$(sim_udid "$SEEKER_SIM_NAME")
 acct() { python3 -c "import json,sys; a=json.load(open('backend/scripts/seed-accounts.json'))['accounts'][int(sys.argv[1])]; print(a[sys.argv[2]])" "$1" "$2"; }
 
 echo "▶ Building for testing…"
+# Simulators reach this Mac at localhost; ignore a LAN host set for a physical phone in Local.xcconfig.
 xcodebuild build-for-testing -project ios/ManhuntCrews.xcodeproj -scheme ManhuntCrews \
-  -destination "platform=iOS Simulator,id=$HOST_UDID" -derivedDataPath "$DD" -quiet
+  -destination "platform=iOS Simulator,id=$HOST_UDID" -derivedDataPath "$DD" -quiet MH_DEV_HOST=127.0.0.1
 
 for U in "$HOST_UDID" "$SEEKER_UDID"; do
   xcrun simctl boot "$U" 2>/dev/null || true
