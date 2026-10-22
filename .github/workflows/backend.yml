@@ -1,23 +1,75 @@
 name: backend
 on:
   push:
-    paths: ['backend/**', 'firestore.rules', 'firestore.indexes.json', 'storage.rules', 'firebase.json', 'shared/**', '.github/workflows/backend.yml']
+    branches: [main]
+    paths: &paths
+      - 'backend/**'
+      - 'shared/**'
+      - 'firebase.json'
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+      - 'storage.rules'
+      - '.github/workflows/backend.yml'
   pull_request:
-    paths: ['backend/**', 'firestore.rules', 'firestore.indexes.json', 'storage.rules', 'firebase.json', 'shared/**']
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per PR / branch: a new push cancels the superseded run, except on main where every commit gets a result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults: { run: { working-directory: backend } }
+    timeout-minutes: 15
+    defaults: { run: { working-directory: backend, shell: bash } }
+    env:
+      # Pinned so a CLI or emulator release can't change CI under us; bump deliberately.
+      FIREBASE_TOOLS_VERSION: 15.34.1
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v7
         with: { node-version: '24', cache: npm, cache-dependency-path: backend/package-lock.json }
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with: { distribution: temurin, java-version: '21' }
+
+      # The Firebase CLI isn't a backend dependency (Cloud Functions installs those on deploy), so it and the
+      # emulator jars it downloads are cached by CLI version instead of reinstalled on every run.
+      - name: Cache Firebase CLI and emulators
+        id: firebase-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.firebase-cli
+            ~/.cache/firebase/emulators
+          key: firebase-cli-${{ runner.os }}-${{ env.FIREBASE_TOOLS_VERSION }}
+      - name: Install Firebase CLI and emulators
+        if: steps.firebase-cache.outputs.cache-hit != 'true'
+        run: |
+          npm install --global --prefix ~/.firebase-cli "firebase-tools@$FIREBASE_TOOLS_VERSION"
+          ~/.firebase-cli/bin/firebase setup:emulators:firestore
+          ~/.firebase-cli/bin/firebase setup:emulators:storage
+      - run: echo "$HOME/.firebase-cli/bin" >> "$GITHUB_PATH"
+
       - run: npm ci
       - run: npm run typecheck
-      - run: npm run build
+      - name: Build (deployable dist/, src only)
+        run: npm run build
       - name: Unit tests (domain, privacy invariant, OpenAPI contract)
         run: npm run test:unit
       - name: Emulator integration + security tests (Auth, Firestore rules, Storage)
-        run: npx firebase-tools@15 --project demo-manhunt --config ../firebase.json emulators:exec --only auth,firestore,storage "npx vitest run tests/integration tests/security"
+        run: npm run test:integration
+
+      - name: Upload emulator logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: emulator-logs
+          path: backend/*-debug.log
+          if-no-files-found: ignore
+          retention-days: 7
