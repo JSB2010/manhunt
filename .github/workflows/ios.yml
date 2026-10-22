@@ -1,22 +1,154 @@
 name: ios
 on:
   push:
-    paths: ['ios/**', '.github/workflows/ios.yml']
+    branches: [main]
+    paths: &paths
+      - 'ios/**'
+      - 'shared/**' # LiveActivityTests reads shared/fixtures
+      - '.github/workflows/ios.yml'
   pull_request:
-    paths: ['ios/**']
+    paths: *paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per PR / branch: a new push cancels the superseded run, except on main where every commit gets a result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # The app needs the iOS 27 SDK (`@available(iOS 27, *)` in the widget extension). GitHub ships Xcode 27 on the
+  # preview `xcode-27` image; move `runs-on` to the GA macOS 27 label once it exists. Same Xcode as local development.
+  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+  PACKAGE_RESOLVED: ios/ManhuntCrews.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+defaults:
+  run: { shell: bash }
+
+# The two jobs run in parallel on separate runners. Each restores the Swift packages (~1.2 GB, ~75 s to fetch) and
+# its own Xcode compilation cache: compile results keyed by content, so restored entries hit after a fresh checkout.
+# Only main saves a new compilation cache (keyed on the sources); PRs restore main's newest one and upload nothing.
 jobs:
-  build-test:
-    runs-on: macos-15
+  test:
+    name: Unit tests (Debug, simulator)
+    runs-on: xcode-27
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
-      - name: Unit tests (simulator)
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - name: Xcode
+        id: xcode
         run: |
+          if [ ! -d "$DEVELOPER_DIR" ]; then
+            echo "::error::$DEVELOPER_DIR is not on this image. Installed: $(ls -d /Applications/Xcode*.app | tr '\n' ' ')"
+            exit 1
+          fi
+          xcodebuild -version
+          echo "build=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_OUTPUT"
+      - name: Boot a simulator (finishes booting while the app builds)
+        id: sim
+        run: |
+          devices=$(xcrun simctl list devices available --json)
+          runtime=$(jq -r '.devices | to_entries[] | select(.key | test("SimRuntime\\.iOS-"))
+            | select(any(.value[]; .name | startswith("iPhone"))) | .key' <<<"$devices" | sort -V | tail -1)
+          udid=$(jq -r --arg rt "$runtime" '[.devices[$rt][] | select(.name | startswith("iPhone"))][0].udid // empty' <<<"$devices")
+          if [ -z "$udid" ]; then echo "::error::No available iPhone simulator"; exit 1; fi
+          echo "$(jq -r --arg u "$udid" '.devices[][] | select(.udid == $u) | .name' <<<"$devices") on ${runtime##*.} ($udid)"
+          xcrun simctl boot "$udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Cache Swift packages
+        uses: actions/cache@v6
+        with:
+          path: ios/build/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}
+          restore-keys: spm-${{ runner.os }}-
+      - name: Restore compilation results
+        id: cas
+        uses: actions/cache/restore@v6
+        with:
+          path: ios/build/CompilationCache.noindex
+          key: xcode-cas-test-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}-${{ hashFiles('ios/ManhuntCrews*/**', 'ios/LiveActivityShared/**', 'ios/Config/**', 'shared/**') }}
+          restore-keys: |
+            xcode-cas-test-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}-
+            xcode-cas-test-${{ steps.xcode.outputs.build }}-
+      - name: Unit tests
+        run: |
+          mkdir -p ios/build
           xcodebuild test -project ios/ManhuntCrews.xcodeproj -scheme ManhuntCrews \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
-            -only-testing:ManhuntCrewsTests -derivedDataPath ios/build
-      - name: Release build compiles (no signing)
+            -destination "id=${{ steps.sim.outputs.udid }}" -only-testing:ManhuntCrewsTests \
+            -derivedDataPath ios/build -onlyUsePackageVersionsFromResolvedFile \
+            -resultBundlePath ios/build/ManhuntCrewsTests.xcresult \
+            COMPILATION_CACHE_ENABLE_CACHING=YES COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | tee ios/build/xcodebuild.log | xcbeautify --quiet --renderer github-actions
+      - name: Save compilation results
+        if: github.ref == 'refs/heads/main' && steps.cas.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ios/build/CompilationCache.noindex
+          key: ${{ steps.cas.outputs.cache-primary-key }}
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-test-results
+          path: |
+            ios/build/ManhuntCrewsTests.xcresult
+            ios/build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release-build:
+    name: Release build (device, unsigned)
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with: { persist-credentials: false }
+      - name: Xcode
+        id: xcode
         run: |
+          if [ ! -d "$DEVELOPER_DIR" ]; then
+            echo "::error::$DEVELOPER_DIR is not on this image. Installed: $(ls -d /Applications/Xcode*.app | tr '\n' ' ')"
+            exit 1
+          fi
+          xcodebuild -version
+          echo "build=$(xcodebuild -version | awk '/Build version/ {print $3}')" >> "$GITHUB_OUTPUT"
+      - name: Cache Swift packages
+        uses: actions/cache@v6
+        with:
+          path: ios/build/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}
+          restore-keys: spm-${{ runner.os }}-
+      - name: Restore compilation results
+        id: cas
+        uses: actions/cache/restore@v6
+        with:
+          path: ios/build/CompilationCache.noindex
+          key: xcode-cas-release-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}-${{ hashFiles('ios/ManhuntCrews*/**', 'ios/LiveActivityShared/**', 'ios/Config/**', 'shared/**') }}
+          restore-keys: |
+            xcode-cas-release-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}-
+            xcode-cas-release-${{ steps.xcode.outputs.build }}-
+      - name: Release build
+        run: |
+          mkdir -p ios/build
           xcodebuild build -project ios/ManhuntCrews.xcodeproj -scheme ManhuntCrews -configuration Release \
-            -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO -derivedDataPath ios/build
+            -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath ios/build -onlyUsePackageVersionsFromResolvedFile \
+            COMPILATION_CACHE_ENABLE_CACHING=YES COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | tee ios/build/xcodebuild.log | xcbeautify --quiet --renderer github-actions
+      - name: Save compilation results
+        if: github.ref == 'refs/heads/main' && steps.cas.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ios/build/CompilationCache.noindex
+          key: ${{ steps.cas.outputs.cache-primary-key }}
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-release-build-log
+          path: ios/build/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7

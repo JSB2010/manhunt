@@ -141,7 +141,11 @@ Notes:
 
 ### CI
 
-`.github/workflows/backend.yml` runs typecheck, build, unit tests and the emulator suites on Node 24 and Java 21 for changes under `backend/`, the Firebase config or `shared/`. `.github/workflows/ios.yml` runs the iOS unit tests and an unsigned Release build on `macos-15`. The project needs Xcode 27, so if that job fails at the build step, check which Xcode the runner selects first.
+Both workflows run on pushes to `main`, on pull requests and on manual dispatch. A newer push to a PR cancels the older run.
+
+- `.github/workflows/backend.yml` runs typecheck, build, unit tests and `npm run test:integration` on Node 24 and Java 21 for changes under `backend/`, the Firebase config or `shared/`. The Firebase CLI is pinned in `FIREBASE_TOOLS_VERSION` and cached with its emulator jars.
+- `.github/workflows/ios.yml` runs the iOS unit tests (Debug, simulator) and an unsigned Release device build as two parallel jobs, for changes under `ios/` or `shared/`. They run on GitHub's `xcode-27` image with `DEVELOPER_DIR` pinned to Xcode 27.1. Swift packages are cached by `Package.resolved`, and Xcode's compilation cache is restored on every run but saved only from `main`.
+- Bump the Xcode and Firebase CLI pins on purpose when local tooling moves. If the pinned Xcode leaves the image, the iOS job fails at its first step and lists the Xcodes that are installed.
 
 ## Making common changes
 
