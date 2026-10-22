@@ -119,6 +119,7 @@ struct PersonDetailView: View {
     let person: Person
     let allPeople: [Person]
     @State private var stats: PersonAnalyticsResponse?
+    @State private var statsError: String?
     @State private var name = ""
     @State private var showMerge = false
     @State private var busy = false
@@ -163,13 +164,21 @@ struct PersonDetailView: View {
                 if !a.coPlayers.isEmpty {
                     Section("Played With") { ForEach(a.coPlayers) { c in LabeledContent(c.displayName, value: "\(c.sessionsTogether) nights") } }
                 }
+            } else if let statsError {
+                // A failed load must not leave the spinner running forever.
+                Section {
+                    Label("Couldn’t load stats", systemImage: "exclamationmark.triangle")
+                    Text(statsError).font(.footnote).foregroundStyle(.secondary)
+                    Button("Try Again") { Task { await loadStats() } }
+                }
             } else {
                 ProgressView()
             }
         }
         .navigationTitle(person.displayName)
         .onAppear { name = person.displayName }
-        .task { stats = try? await model.api.personAnalytics(person.id) }
+        .task { await loadStats() }
+        .refreshable { await loadStats() }
         .confirmationDialog("Merge \(person.displayName) into…", isPresented: $showMerge, titleVisibility: .visible) {
             ForEach(allPeople.filter { $0.id != person.id && $0.canEdit }) { target in
                 Button(target.displayName) {
@@ -178,5 +187,12 @@ struct PersonDetailView: View {
             }
         } message: { Text("For duplicates of the same person.") }
         .errorAlert($error)
+    }
+
+    private func loadStats() async {
+        statsError = nil
+        do { stats = try await model.api.personAnalytics(person.id) } catch {
+            if !Task.isCancelled { statsError = error.localizedDescription }
+        }
     }
 }

@@ -420,7 +420,8 @@ export class GameService {
    */
   async getView(uid: string, sid: string): Promise<ViewDoc> {
     const stored = (await this.p.view(sid, uid).get()).data() as ViewDoc | undefined;
-    if (stored?.uid === uid) return stored;
+    // Views written before crews (schema 1) have the old shape: render those from the upgraded documents.
+    if (stored?.uid === uid && stored.schemaVersion === 2) return stored;
     return this.renderFreshView(uid, sid);
   }
 

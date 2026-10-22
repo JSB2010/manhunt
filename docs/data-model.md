@@ -22,6 +22,8 @@ Where the data lives, who can read it and how long it's kept. The types are in `
 | `sessions/{sid}/routes/{rid}` | Simplified per-crew polylines | Served only after the round, to its phones, with every phone's route-sharing consent |
 | `sessions/{sid}/liveActivities/{uid}_{deviceId}` | Live Activity push token, clock offset, `sentVersion` (the round version last pushed; only newer versions go out) | **12 h TTL**. Removed on revoke, delete-my-data and account deletion |
 
+**Nights recorded before crews** (before 2026-10-21) are stored in the old shape: one `operatorUid` per crew, rounds with one `seekingTeam` plus frozen `hiderUid`/`seekerUid`, per-side result fields, and pins without `sourceUid`. They aren't migrated. `domain/legacy.ts` upgrades them as they're read, through Firestore converters on the session and round paths in `services/repo.ts`. An old round's `operatorsByTeam` comes from its own frozen phones. Their stored views are `schemaVersion: 1`, so `GET /v1/sessions/{id}` renders a fresh view for them instead. Their round summaries keep the old shape (claims without `team`, and `routeStats` per side), which the app reads as is.
+
 ### Joining
 
 | Path | Contents | Notes |

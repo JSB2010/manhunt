@@ -131,8 +131,8 @@ docs/          guides, architecture, runbooks, ADRs (see docs/README.md)
 | Area | Command (from the repo root) | Needs | Time |
 |---|---|---|---|
 | Backend types | `cd backend && npm run typecheck` | Node 24 | seconds |
-| Backend unit | `cd backend && npm run test:unit` | — | seconds (125 tests) |
-| Backend integration + security | `cd backend && npm run test:integration` | Java **21** (`export JAVA_HOME=$(/usr/libexec/java_home -v 21)` on macOS if a newer JDK is the default) | ~1 min (62 tests) |
+| Backend unit | `cd backend && npm run test:unit` | — | seconds (129 tests) |
+| Backend integration + security | `cd backend && npm run test:integration` | Java **21** (`export JAVA_HOME=$(/usr/libexec/java_home -v 21)` on macOS if a newer JDK is the default) | ~1 min (66 tests) |
 | iOS unit | `xcodebuild test -project ios/ManhuntCrews.xcodeproj -scheme ManhuntCrews -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:ManhuntCrewsTests` | Xcode 27 | a few min (56 tests, the listener test skips without the local stack) |
 | iOS Release / Prod compile | `xcodebuild build -project ios/ManhuntCrews.xcodeproj -scheme ManhuntCrews -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` (and `-scheme "ManhuntCrews Prod" -configuration Prod`) | Xcode 27 | minutes |
 | Real-time E2E | `scripts/dev.sh`, then `cd backend && npm run seed:emulator && npm run e2e:crews` | local stack | ~5 min |

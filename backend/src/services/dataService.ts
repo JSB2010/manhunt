@@ -302,7 +302,8 @@ export class DataService {
       // Released pins are hider positions: redact the ones that came from this phone's fixes
       // (timestamps/status stay so the round's ping counts remain intact).
       const lone = hiderUids(r).length === 1 && hiderUids(r)[0] === uid;
-      const fromMe = (p: RoundDoc['pings'][number]) => p.latitude !== null && (p.sourceUid === uid || (p.sourceUid === null && lone));
+      // Pins from before crews have no sourceUid at all; like null, that means the lone hider phone.
+      const fromMe = (p: RoundDoc['pings'][number]) => p.latitude !== null && (p.sourceUid === uid || ((p.sourceUid ?? null) === null && lone));
       if (r.pings.some(fromMe)) {
         const redacted = r.pings.map((p) => (fromMe(p) ? { ...p, latitude: null, longitude: null, sourcePointId: null } : p));
         await this.p.round(sid, r.id).update({ pings: redacted, updatedAt: now, version: r.version + 1 });

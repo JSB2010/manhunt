@@ -1,6 +1,7 @@
-import type { DocumentReference, Firestore, Transaction } from 'firebase-admin/firestore';
+import type { DocumentData, DocumentReference, Firestore, FirestoreDataConverter, Transaction } from 'firebase-admin/firestore';
 import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../config.js';
+import { upgradeRoundDoc, upgradeSessionDoc } from '../domain/legacy.js';
 import type { CaptureClaim, DomainEvent, MemberDoc, RoundDoc, SessionDoc } from '../domain/types.js';
 import { renderView, viewHash } from '../domain/views.js';
 import type { LiveActivityTransport } from './liveActivities.js';
@@ -27,6 +28,14 @@ export interface Deps {
   deleteAuthUser?: (uid: string) => Promise<void>;
 }
 
+/** Reads nights recorded before crews in the current shape (domain/legacy.ts); writes are unchanged. */
+const upgradeOnRead = (upgrade: (d: DocumentData) => DocumentData): FirestoreDataConverter<DocumentData, DocumentData> => ({
+  toFirestore: (d: DocumentData) => d,
+  fromFirestore: (snap) => upgrade(snap.data()),
+});
+const sessionReads = upgradeOnRead(upgradeSessionDoc);
+const roundReads = upgradeOnRead(upgradeRoundDoc);
+
 /**
  * Firestore layout. Everything except `sessions/{sid}/views/{uid}` is
  * server-only (firestore.rules denies all client access).
@@ -35,12 +44,12 @@ export const paths = (db: Firestore) => ({
   user: (uid: string) => db.collection('users').doc(uid),
   devices: (uid: string) => db.collection('users').doc(uid).collection('devices'),
   handle: (h: string) => db.collection('handles').doc(h),
-  session: (sid: string) => db.collection('sessions').doc(sid),
-  sessions: () => db.collection('sessions'),
+  session: (sid: string) => db.collection('sessions').withConverter(sessionReads).doc(sid),
+  sessions: () => db.collection('sessions').withConverter(sessionReads),
   member: (sid: string, uid: string) => db.collection('sessions').doc(sid).collection('members').doc(uid),
   members: (sid: string) => db.collection('sessions').doc(sid).collection('members'),
-  round: (sid: string, rid: string) => db.collection('sessions').doc(sid).collection('rounds').doc(rid),
-  rounds: (sid: string) => db.collection('sessions').doc(sid).collection('rounds'),
+  round: (sid: string, rid: string) => db.collection('sessions').doc(sid).collection('rounds').withConverter(roundReads).doc(rid),
+  rounds: (sid: string) => db.collection('sessions').doc(sid).collection('rounds').withConverter(roundReads),
   points: (sid: string, rid: string) => db.collection('sessions').doc(sid).collection('rounds').doc(rid).collection('points'),
   pingDoc: (sid: string, rid: string, index: number) => db.collection('sessions').doc(sid).collection('rounds').doc(rid).collection('pings').doc(`p${index}`),
   claim: (sid: string, rid: string, cid: string) => db.collection('sessions').doc(sid).collection('rounds').doc(rid).collection('captures').doc(cid),
