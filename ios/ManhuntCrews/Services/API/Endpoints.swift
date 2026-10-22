@@ -139,6 +139,29 @@ extension APIClient {
         let _: OkResponse = try await post("/v1/devices/push-token", Body(deviceId: deviceId, fcmToken: token, apnsEnvironment: environment, appVersion: appVersion))
     }
 
+    // Live Activities (ADR 0017)
+    func registerLiveActivity(_ sid: String, _ rid: String, deviceId: String, pushToken: String, clockOffsetMs: Int) async throws {
+        struct Body: Encodable { var pushToken: String; var clockOffsetMs: Int }
+        let _: OkResponse = try await send("PUT", "/v1/sessions/\(sid)/rounds/\(rid)/live-activity/\(deviceId)", body: Body(pushToken: pushToken, clockOffsetMs: clockOffsetMs))
+    }
+    func unregisterLiveActivity(_ sid: String, _ rid: String, deviceId: String) async throws {
+        let _: OkResponse = try await delete("/v1/sessions/\(sid)/rounds/\(rid)/live-activity/\(deviceId)")
+    }
+    /// `token` nil: Live Activities are off on this device; the server stops push-starting them.
+    func registerLiveActivityStartToken(deviceId: String, token: String?) async throws {
+        struct Body: Encodable {
+            var deviceId: String
+            var pushToStartToken: String?
+            enum CodingKeys: String, CodingKey { case deviceId, pushToStartToken }
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(deviceId, forKey: .deviceId)
+                try c.encode(pushToStartToken, forKey: .pushToStartToken) // explicit null = off
+            }
+        }
+        let _: OkResponse = try await post("/v1/devices/live-activity-token", Body(deviceId: deviceId, pushToStartToken: token))
+    }
+
     // Sessions
     func createSession(_ body: CreateSessionBody) async throws -> SessionViewDoc { try await post("/v1/sessions", body) }
     func sessions(query: String? = nil, before: Double? = nil) async throws -> SessionList {

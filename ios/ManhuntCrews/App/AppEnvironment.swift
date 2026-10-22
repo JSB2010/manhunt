@@ -2,6 +2,7 @@ import Foundation
 import FirebaseCore
 import FirebaseAuth
 import FirebaseFirestore
+import UIKit
 
 /// Build-time configuration injected through xcconfig → Info.plist.
 struct AppEnvironment: Sendable {
@@ -44,6 +45,17 @@ struct AppEnvironment: Sendable {
             siteURL: URL(string: str("MHSiteURL")).flatMap { $0.host == nil ? nil : $0 },
             configurationError: error)
     }()
+
+    /// Stable id of this install, shared by the push token and Live Activity registrations
+    /// (the server pairs an activity token with the device's FCM token by it).
+    @MainActor static var deviceId: String {
+        if let id = UIDevice.current.identifierForVendor?.uuidString { return id }
+        let key = "mh.deviceId"
+        if let id = UserDefaults.standard.string(forKey: key) { return id }
+        let id = UUID().uuidString
+        UserDefaults.standard.set(id, forKey: key)
+        return id
+    }
 
     var appVersion: String {
         let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"

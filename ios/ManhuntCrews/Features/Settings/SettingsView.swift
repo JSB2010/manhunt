@@ -71,6 +71,22 @@ struct SettingsView: View {
                 }
             }
 
+            Section {
+                let live = model.liveActivities
+                Toggle("Show Rounds on Lock Screen", isOn: Binding(get: { live.enabled }, set: { live.enabled = $0 }))
+                    .disabled(!live.systemAllowed)
+                if !live.systemAllowed {
+                    StatusRow(title: "iOS Setting", value: "Off", state: .neutral)
+                    Button("Open iOS Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                }
+            } header: {
+                Text("Live Activities")
+            } footer: {
+                Text("The round’s phase, clock and next ping on the Lock Screen, in the Dynamic Island and on Apple Watch. It never shows a location.")
+            }
+
             Section("Privacy & Data") {
                 Button("Privacy Summary") { showPrivacy = true }
                 Button("Delete My Account", role: .destructive) { confirmDelete = true }

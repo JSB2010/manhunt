@@ -6,6 +6,8 @@ import UIKit
 enum DeepLink: Equatable {
     case join(code: String)
     case friend(token: String)
+    /// A round's Live Activity was tapped: open that night's game screen.
+    case round(sessionId: String)
 
     init?(url: URL) {
         guard url.scheme == "manhuntcrews", let comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
@@ -13,6 +15,7 @@ enum DeepLink: Equatable {
         switch url.host {
         case "join": if let c = q["code"], !c.isEmpty { self = .join(code: c) } else { return nil }
         case "friend": if let t = q["token"], !t.isEmpty { self = .friend(token: t) } else { return nil }
+        case "round": if let s = q["session"], !s.isEmpty { self = .round(sessionId: s) } else { return nil }
         default: return nil
         }
     }
@@ -28,6 +31,7 @@ final class AppModel {
     let auth: AuthService
     let location: LocationTrackingCoordinator
     let notifications: NotificationService
+    let liveActivities: LiveActivityController
     let clock = ServerClock.shared
 
     var me: MeResponse?
@@ -63,6 +67,7 @@ final class AppModel {
         self.auth = AuthService(env: env)
         self.location = LocationTrackingCoordinator()
         self.notifications = NotificationService(env: env)
+        self.liveActivities = LiveActivityController(env: env, api: self.api, clock: ServerClock.shared)
         firebaseError = env.configureFirebase()
         let auth = self.auth
         let client = self.api
@@ -96,6 +101,7 @@ final class AppModel {
         await api.syncTime()
         await refreshMe()
         await notifications.refreshStatus()
+        liveActivities.start()
         if let resumed = await location.resumeIfNeeded() {
             openSession(resumed.sessionId, automatically: true)
         } else if activeSessionId == nil, let active = me?.activeSessions.first(where: { $0.status == "IN_ROUND" }) {
@@ -194,6 +200,7 @@ final class AppModel {
             apply(v, fromCache: false)
         } catch let e as APIError where e.code == "NOT_FOUND" {
             await location.stop()
+            await liveActivities.reconcile(with: nil)
             if autoResumed {
                 // Leftover state from another account or an ended night: nothing the user
                 // asked for, so close it quietly and stay on Play.
@@ -243,7 +250,10 @@ final class AppModel {
         viewError = nil
         if !fromCache {
             Task { await reconcileTracking(v) }
-            notifications.plan(for: v, clock: clock)
+            Task {
+                await liveActivities.reconcile(with: v)
+                notifications.plan(for: v, clock: clock, liveActivityAlerts: v.round.map { liveActivities.carriesAlerts(roundId: $0.id) } ?? false)
+            }
         }
     }
 
@@ -272,6 +282,7 @@ final class AppModel {
         signingOut = true
         defer { signingOut = false }
         closeSession(refresh: false)
+        await liveActivities.signOut()
         await location.purgeLocalData()
         notifications.clearAll()
         EncryptedStore.purgeAll()
@@ -283,7 +294,13 @@ final class AppModel {
     }
 
     func handle(url: URL) {
-        if let link = DeepLink(url: url) { pendingDeepLink = link }
+        guard let link = DeepLink(url: url) else { return }
+        if case let .round(sid) = link, auth.uid != nil {
+            // From a Live Activity: straight to that night's game screen.
+            if activeSessionId != sid { openSession(sid) }
+            return
+        }
+        pendingDeepLink = link
     }
 
     func show(_ message: String) {

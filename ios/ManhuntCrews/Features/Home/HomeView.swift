@@ -111,6 +111,8 @@ struct HomeView: View {
             showJoin = true
         case let .friend(token):
             friendToken = token
+        case let .round(sessionId):
+            model.openSession(sessionId)
         }
     }
 }

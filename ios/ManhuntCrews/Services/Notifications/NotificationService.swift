@@ -48,7 +48,7 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mes
     nonisolated func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let fcmToken else { return }
         Task { @MainActor in
-            let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+            let deviceId = AppEnvironment.deviceId
             #if DEBUG
             let envName = "development"
             #else
@@ -61,10 +61,12 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mes
     // MARK: Local deadline nudges
 
     /// Re-plan local notifications for the current round from server timestamps.
-    func plan(for view: SessionViewDoc?, clock: ServerClock) {
+    /// `liveActivityAlerts`: the round's Live Activity gets these moments as pushed alerts,
+    /// so a local nudge would say the same thing twice (HIG › Live Activities).
+    func plan(for view: SessionViewDoc?, clock: ServerClock, liveActivityAlerts: Bool = false) {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: ["mh.chase", "mh.ping", "mh.timecap"])
-        guard authorized, let round = view?.round, round.state.isActive, round.state != .PAUSED else { return }
+        guard authorized, !liveActivityAlerts, let round = view?.round, round.state.isActive, round.state != .PAUSED else { return }
         func schedule(_ id: String, at serverDate: Date?, title: String, body: String) {
             guard let serverDate else { return }
             let local = clock.localDate(forServer: serverDate)

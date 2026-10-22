@@ -21,9 +21,12 @@ Below, `<bundle-id>` is your `MH_BUNDLE_ID` and `<prod-project-id>` your Firebas
    - Certificate: the one from step 2
    - Name: exactly **Manhunt Crews App Store**
    - Download it.
-4. Install both on this Mac (checks they match, then writes your team ID into `ios/Config/Prod.local.xcconfig`, keeping your other values):
+   Then the Live Activity extension (ADR 0017) gets its own App ID and profile:
+   - **Identifiers → +** → App IDs → App, Bundle ID (Explicit): `<bundle-id>.widgets`, no capabilities.
+   - **Profiles → +** → Distribution → **App Store Connect**, App ID `<bundle-id>.widgets`, the same certificate, name exactly **Manhunt Crews Widgets App Store**.
+4. Install them on this Mac (checks they match, then writes your team ID and both profile names into `ios/Config/Prod.local.xcconfig`, keeping your other values):
    ```bash
-   scripts/ios-signing.sh install ~/Downloads/distribution.cer ~/Downloads/Manhunt_Crews_App_Store.mobileprovision
+   scripts/ios-signing.sh install ~/Downloads/distribution.cer ~/Downloads/Manhunt_Crews_App_Store.mobileprovision ~/Downloads/Manhunt_Crews_Widgets_App_Store.mobileprovision
    ```
    The first time `codesign` uses the key, macOS asks for keychain access; choose **Always Allow**. If the script says the certificate isn't trusted, run the command it prints, which installs Apple's WWDR intermediate.
 5. **Keys → +** → name "Manhunt Crews APNs" → enable **Apple Push Notifications service (APNs)**.
@@ -48,7 +51,7 @@ Below, `<bundle-id>` is your `MH_BUNDLE_ID` and `<prod-project-id>` your Firebas
 
 ## 3. Firebase console (console.firebase.google.com → your project)
 1. **Upgrade to Blaze** (Usage and billing → Modify plan) and link a billing account. Set a budget.
-2. **Project settings → Cloud Messaging → Apple app configuration** → upload the APNs `.p8` with its Key ID and Team ID.
+2. **Project settings → Cloud Messaging → Apple app configuration** → upload the APNs `.p8` with its Key ID and Team ID. The same key carries the Live Activity pushes (ADR 0017); there's nothing else to configure.
 
 ## 4. Backend (terminal, after Blaze)
 1. Choose a public contact email for the privacy and support pages. Put it in `hosting/contact-email.local` (git-ignored) or export `CONTACT_EMAIL`. The Hosting predeploy (`scripts/build-hosting.mjs`) fills it in, and the deploy refuses to publish without it.

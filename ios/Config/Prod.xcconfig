@@ -27,6 +27,8 @@ MH_ENTITLEMENTS = ManhuntCrews/ManhuntCrews-Prod.entitlements
 
 MH_CODE_SIGN_IDENTITY = Apple Distribution
 MH_PROVISIONING_PROFILE = Manhunt Crews App Store
+// The Live Activity extension (MH_BUNDLE_ID.widgets) has its own App Store profile.
+MH_WIDGETS_PROVISIONING_PROFILE = Manhunt Crews Widgets App Store
 MH_DEVELOPMENT_TEAM =
 
 #include? "Prod.local.xcconfig"

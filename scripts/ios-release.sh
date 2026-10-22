@@ -24,6 +24,7 @@ die() { echo "✗ $*" >&2; exit 1; }
 [[ -f "$LOCAL_CFG" ]] || die "Missing $LOCAL_CFG: copy ios/Config/Prod.local.xcconfig.example, then run scripts/ios-signing.sh install <cer> <mobileprovision>"
 TEAM=$(sed -n 's/^MH_DEVELOPMENT_TEAM = //p' "$LOCAL_CFG")
 PROFILE=$(sed -n 's/^MH_PROVISIONING_PROFILE = //p' "$LOCAL_CFG")
+WIDGETS_PROFILE=$(sed -n 's/^MH_WIDGETS_PROVISIONING_PROFILE = //p' "$LOCAL_CFG")
 # Prod.local.xcconfig (git-ignored) overrides the placeholders in Prod.xcconfig.
 prod_cfg() { local v; v=$(sed -n "s/^$1 = //p" "$LOCAL_CFG" 2>/dev/null | tail -1); [[ -n "$v" ]] || v=$(sed -n "s/^$1 = //p" ios/Config/Prod.xcconfig | tail -1); printf '%s' "$v"; }
 BUNDLE_ID=$(prod_cfg MH_BUNDLE_ID)
@@ -33,6 +34,7 @@ PROJECT=$(prod_cfg MH_FIREBASE_PROJECT_ID)
 [[ -f ios/ManhuntCrews/GoogleService-Info-Prod.plist ]] ||
   die "Missing ios/ManhuntCrews/GoogleService-Info-Prod.plist: firebase apps:sdkconfig IOS --project $PROJECT -o ios/ManhuntCrews/GoogleService-Info-Prod.plist"
 [[ -n "$TEAM" && -n "$PROFILE" ]] || die "$LOCAL_CFG must set MH_DEVELOPMENT_TEAM and MH_PROVISIONING_PROFILE"
+[[ -n "$WIDGETS_PROFILE" ]] || die "$LOCAL_CFG must set MH_WIDGETS_PROVISIONING_PROFILE (App Store profile for $BUNDLE_ID.widgets, the Live Activity extension): rerun scripts/ios-signing.sh install with it"
 security find-identity -v -p codesigning | grep -qE "(Apple|iPhone) Distribution.*\($TEAM\)" ||
   die "No trusted Apple Distribution identity for team $TEAM in your keychain (scripts/ios-signing.sh status)"
 BUILD="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
@@ -47,7 +49,7 @@ if [[ -n "${ASC_KEY_ID:-}" ]]; then
   AUTH=(-authenticationKeyPath "$KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
 fi
 
-echo "Archiving $BUNDLE_ID build $BUILD (team $TEAM, profile '$PROFILE'); then $DEST."
+echo "Archiving $BUNDLE_ID build $BUILD (team $TEAM, profiles '$PROFILE' and '$WIDGETS_PROFILE'); then $DEST."
 rm -rf "$OUT/ManhuntCrews.xcarchive" "$OUT/export"
 mkdir -p "$OUT"
 xcodebuild archive -project ios/ManhuntCrews.xcodeproj -scheme "ManhuntCrews Prod" -configuration Prod \
@@ -65,7 +67,10 @@ cat > "$OUT/ExportOptions.plist" <<EOF
 	<key>teamID</key><string>$TEAM</string>
 	<key>signingCertificate</key><string>Apple Distribution</string>
 	<key>provisioningProfiles</key>
-	<dict><key>$BUNDLE_ID</key><string>$PROFILE</string></dict>
+	<dict>
+		<key>$BUNDLE_ID</key><string>$PROFILE</string>
+		<key>$BUNDLE_ID.widgets</key><string>$WIDGETS_PROFILE</string>
+	</dict>
 	<key>uploadSymbols</key><true/>
 	<key>manageAppVersionAndBuildNumber</key><false/>
 </dict>

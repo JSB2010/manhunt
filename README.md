@@ -6,7 +6,7 @@ A friends-only, two-crew Manhunt game: **one iPhone per crew**. The hiding crew'
 
 | | |
 |---|---|
-| iOS app | `ios/` — SwiftUI, MapKit, Core Location (background), AVFoundation camera, Firebase Auth/Firestore/Messaging. iOS 18+. |
+| iOS app | `ios/` — SwiftUI, MapKit, Core Location (background), AVFoundation camera, Firebase Auth/Firestore/Messaging, ActivityKit + WidgetKit Live Activity (`ManhuntCrewsWidgets` extension). iOS 18+. |
 | Backend | `backend/` — Node 24 + TypeScript + Fastify on **Cloud Functions for Firebase** (`api`, task-queue `tick`, scheduled `watchdog` + `retention`), Firestore, Firebase Auth, private Cloud Storage, FCM. Deploys with one `firebase deploy`. |
 | Contract | `shared/openapi.yaml` (enforced by a contract test) |
 | Infra | `firebase.json`, `firestore.rules`, `firestore.indexes.json` (incl. TTL), `storage.rules`, one-time `scripts/setup-gcp-project.sh` |
@@ -15,6 +15,8 @@ A friends-only, two-crew Manhunt game: **one iPhone per crew**. The hiding crew'
 
 ## Live updates
 Phones subscribe to their own sanitized Firestore view and also reconcile over REST every 10 s, restarting the listener if it goes quiet (ADR 0010). Game timing never depends on either.
+
+On a locked phone the round is a **Live Activity** on the Lock Screen, in the Dynamic Island, on the Apple Watch Smart Stack and on CarPlay. It shows the phase, the clock and the next ping, never a location. The app updates it, and the server keeps it current with ActivityKit pushes through FCM (ADR 0017).
 
 ## The invariant
 While a round is active, the seeking operator can access **only released, scheduled hider pins** — never the hider's live route, latest sample or upcoming position. This is enforced in the server and in Firestore/Storage rules, not by hiding UI. The host gets no special visibility. See `docs/permissions-threat-model.md`.
@@ -66,7 +68,8 @@ backend/src/services    Firestore transactions, finalization, social, deletion/r
 backend/src/api         public Fastify API      backend/src/functions  Cloud Functions entry (api, tick, watchdog, retention)
 backend/src/worker      tick payload + local-only worker for dev.sh/tests
 backend/tests           unit / integration / security (emulators)
-ios/ManhuntCrews        App, Features/*, Services/{API,Auth,Location,OfflineQueue,Realtime,Clock,Notifications}, Models
+ios/ManhuntCrews        App, Features/*, Services/{API,Auth,Location,OfflineQueue,Realtime,Clock,Notifications,LiveActivity}, Models
+ios/ManhuntCrewsWidgets Live Activity extension    ios/LiveActivityShared  attributes + wording shared by app and extension
 ios/ManhuntCrewsTests   unit tests          ios/ManhuntCrewsUITests  two-simulator E2E
 scripts/                dev.sh, emulator-start.sh, e2e-two-simulators.sh, setup-gcp-project.sh, deploy-backend.sh, setup-firebase.md
 ```

@@ -188,6 +188,10 @@ struct GameView: View {
                         if round.rules.manualPausesEnabled && role != nil { Button("Pause…", systemImage: "pause") { showPausePrompt = true } }
                         Button("Safety Pause Now", systemImage: "exclamationmark.octagon") { act { try await model.api.pause(view.sessionId, round.id, safety: true, reason: nil) } }
                         Button("Phone Status", systemImage: "antenna.radiowaves.left.and.right") { showStatus = true }
+                        if model.liveActivities.activeRoundId == round.id {
+                            // HIG › Live Activities: let people turn it off where it belongs.
+                            Button("Hide Live Activity", systemImage: "rectangle.badge.xmark") { Task { await model.liveActivities.dismissCurrent() } }
+                        }
                         Divider()
                         Button("Stop Tracking This Phone", systemImage: "location.slash") { confirmStopTracking = true }
                         Button("Abort Round", systemImage: "xmark.octagon", role: .destructive) { confirmAbort = true }

@@ -35,6 +35,10 @@
 	<string>Take a catch photo for the hiding crew to confirm; location metadata is removed.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Development builds connect to the Manhunt Crews server running on your local network.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>

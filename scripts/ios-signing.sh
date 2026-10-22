@@ -8,12 +8,13 @@
 #       (0700). Upload the .csr at developer.apple.com → Certificates → + →
 #       "Apple Distribution", then download the .cer.
 #
-#   scripts/ios-signing.sh install <distribution.cer> <profile.mobileprovision>
+#   scripts/ios-signing.sh install <distribution.cer> <app.mobileprovision> <widgets.mobileprovision>
 #       Imports the certificate and its private key into your login keychain,
-#       installs the App Store provisioning profile, checks that they match each
-#       other and MH_BUNDLE_ID, and writes ios/Config/Prod.local.xcconfig
-#       (git-ignored) with your team ID and the profile name, keeping the other
-#       values there.
+#       installs the App Store provisioning profiles — one for the app
+#       (MH_BUNDLE_ID) and one for its Live Activity extension
+#       (MH_BUNDLE_ID.widgets) — checks that they match each other and the bundle
+#       IDs, and writes ios/Config/Prod.local.xcconfig (git-ignored) with your
+#       team ID and the profile names, keeping the other values there.
 #
 #   scripts/ios-signing.sh status
 #       Shows the installed distribution identities and the Prod signing config.
@@ -46,8 +47,10 @@ case "${1:-}" in
     ;;
 
   install)
-    CER="${2:?usage: install <distribution.cer> <profile.mobileprovision>}"
-    PROFILE="${3:?usage: install <distribution.cer> <profile.mobileprovision>}"
+    USAGE="usage: install <distribution.cer> <app.mobileprovision> <widgets.mobileprovision>"
+    CER="${2:?$USAGE}"
+    PROFILE="${3:?$USAGE}"
+    WIDGETS_PROFILE="${4:?$USAGE (App Store profile for $BUNDLE_ID.widgets, the Live Activity extension)}"
     [[ -f "$KEY" ]] || die "No private key at $KEY. Run 'scripts/ios-signing.sh csr' first (the .cer must come from that CSR)."
     TMP=$(mktemp -d)
     trap 'rm -rf "$TMP"' EXIT
@@ -60,33 +63,44 @@ case "${1:-}" in
     [[ "$SUBJECT" == *"Apple Distribution"* || "$SUBJECT" == *"iPhone Distribution"* ]] || die "Not a distribution certificate: $SUBJECT"
     openssl x509 -in "$TMP/cert.pem" -outform DER -out "$TMP/cert.der"
 
-    # The profile must be an App Store profile for MH_BUNDLE_ID that includes this certificate.
-    security cms -D -i "$PROFILE" > "$TMP/profile.plist" 2>/dev/null ||
-      openssl smime -verify -noverify -inform DER -in "$PROFILE" -out "$TMP/profile.plist" 2>/dev/null ||
-      die "$PROFILE is not a provisioning profile"
-    pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$TMP/profile.plist" 2>/dev/null; }
-    NAME=$(pb Name); UUID=$(pb UUID); TEAM=$(pb TeamIdentifier:0); APP_ID=$(pb Entitlements:application-identifier)
-    [[ "$APP_ID" == "$TEAM.$BUNDLE_ID" ]] || die "Profile is for $APP_ID, expected $TEAM.$BUNDLE_ID"
-    [[ -z "$(pb ProvisionedDevices 2>/dev/null)" ]] || die "Profile '$NAME' lists devices: create an App Store (not Ad Hoc/Development) profile"
-    [[ "$(pb Entitlements:aps-environment)" == "production" ]] || die "Profile '$NAME' lacks Push Notifications: enable it on the App ID and regenerate the profile"
-    FOUND=0
-    for i in $(seq 0 20); do
-      plutil -extract "DeveloperCertificates.$i" raw -o "$TMP/dev.b64" "$TMP/profile.plist" 2>/dev/null || break
-      [[ "$(base64 -d -i "$TMP/dev.b64" | openssl sha1)" == "$(openssl sha1 < "$TMP/cert.der")" ]] && FOUND=1
-    done
-    [[ $FOUND == 1 ]] || die "Profile '$NAME' doesn't include this certificate: edit the profile, tick the new certificate, download again"
+    # Each profile must be an App Store profile for its bundle ID that includes this certificate.
+    # check_profile <file> <bundle id> <needs push: 1|0> sets NAME, UUID, TEAM, EXPIRES.
+    check_profile() {
+      local file="$1" bundle="$2" push="$3" plist="$TMP/profile-$(basename "$1").plist"
+      security cms -D -i "$file" > "$plist" 2>/dev/null ||
+        openssl smime -verify -noverify -inform DER -in "$file" -out "$plist" 2>/dev/null ||
+        die "$file is not a provisioning profile"
+      pb() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist" 2>/dev/null; }
+      NAME=$(pb Name); UUID=$(pb UUID); TEAM=$(pb TeamIdentifier:0); EXPIRES=$(pb ExpirationDate)
+      local app_id; app_id=$(pb Entitlements:application-identifier)
+      [[ "$app_id" == "$TEAM.$bundle" ]] || die "Profile '$NAME' is for $app_id, expected $TEAM.$bundle"
+      [[ -z "$(pb ProvisionedDevices 2>/dev/null)" ]] || die "Profile '$NAME' lists devices: create an App Store (not Ad Hoc/Development) profile"
+      if [[ "$push" == 1 ]]; then
+        [[ "$(pb Entitlements:aps-environment)" == "production" ]] || die "Profile '$NAME' lacks Push Notifications: enable it on the App ID and regenerate the profile"
+      fi
+      local found=0
+      for i in $(seq 0 20); do
+        plutil -extract "DeveloperCertificates.$i" raw -o "$TMP/dev.b64" "$plist" 2>/dev/null || break
+        [[ "$(base64 -d -i "$TMP/dev.b64" | openssl sha1)" == "$(openssl sha1 < "$TMP/cert.der")" ]] && found=1
+      done
+      [[ $found == 1 ]] || die "Profile '$NAME' doesn't include this certificate: edit the profile, tick the new certificate, download again"
+    }
+    check_profile "$WIDGETS_PROFILE" "$BUNDLE_ID.widgets" 0
+    WIDGETS_NAME=$NAME; WIDGETS_UUID=$UUID; WIDGETS_TEAM=$TEAM; WIDGETS_EXPIRES=$EXPIRES
+    check_profile "$PROFILE" "$BUNDLE_ID" 1
+    [[ "$WIDGETS_TEAM" == "$TEAM" ]] || die "The two profiles belong to different teams ($TEAM, $WIDGETS_TEAM)"
 
     # Keychain: private key + certificate (pairs automatically); codesign may ask once — choose "Always Allow".
     security import "$KEY" -k "$KEYCHAIN" -T /usr/bin/codesign -T /usr/bin/security >/dev/null 2>&1 || echo "  (private key already in keychain)"
     security import "$TMP/cert.der" -k "$KEYCHAIN" >/dev/null 2>&1 || echo "  (certificate already in keychain)"
 
     for d in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"; do
-      mkdir -p "$d" && cp "$PROFILE" "$d/$UUID.mobileprovision"
+      mkdir -p "$d" && cp "$PROFILE" "$d/$UUID.mobileprovision" && cp "$WIDGETS_PROFILE" "$d/$WIDGETS_UUID.mobileprovision"
     done
 
     # Replace only the signing keys; keep your project values in the same file.
-    KEEP=$(grep -vE '^(MH_DEVELOPMENT_TEAM|MH_PROVISIONING_PROFILE) = ' "$LOCAL_CFG" 2>/dev/null || true)
-    printf '%s\nMH_DEVELOPMENT_TEAM = %s\nMH_PROVISIONING_PROFILE = %s\n' "${KEEP:-// Prod.local.xcconfig (git-ignored): your project values and signing team.}" "$TEAM" "$NAME" > "$LOCAL_CFG"
+    KEEP=$(grep -vE '^(MH_DEVELOPMENT_TEAM|MH_PROVISIONING_PROFILE|MH_WIDGETS_PROVISIONING_PROFILE) = ' "$LOCAL_CFG" 2>/dev/null || true)
+    printf '%s\nMH_DEVELOPMENT_TEAM = %s\nMH_PROVISIONING_PROFILE = %s\nMH_WIDGETS_PROVISIONING_PROFILE = %s\n' "${KEEP:-// Prod.local.xcconfig (git-ignored): your project values and signing team.}" "$TEAM" "$NAME" "$WIDGETS_NAME" > "$LOCAL_CFG"
     IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -E "(Apple|iPhone) Distribution.*\($TEAM\)" | head -1 | sed 's/^ *[0-9]*) [0-9A-F]* //' || true)
     if [[ -n "$IDENTITY" ]]; then
       echo "✓ Signing identity: $IDENTITY"
@@ -95,7 +109,8 @@ case "${1:-}" in
       echo "  intermediate certificate, then run 'scripts/ios-signing.sh status':"
       echo "  curl -fsSLO https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer && security import AppleWWDRCAG3.cer -k \"$KEYCHAIN\""
     fi
-    echo "✓ Profile '$NAME' ($UUID), expires $(pb ExpirationDate)"
+    echo "✓ Profile '$NAME' ($UUID), expires $EXPIRES"
+    echo "✓ Profile '$WIDGETS_NAME' ($WIDGETS_UUID), expires $WIDGETS_EXPIRES"
     echo "✓ Wrote $LOCAL_CFG (team $TEAM). Next: scripts/ios-release.sh"
     ;;
 
@@ -105,7 +120,7 @@ case "${1:-}" in
     ;;
 
   *)
-    sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

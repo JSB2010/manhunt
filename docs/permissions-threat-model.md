@@ -30,6 +30,8 @@
 | Upload timing as a movement side-channel | Heartbeat batches every ~15 s regardless of motion; opponent sees 30 s-bucketed heartbeat only | view unit test |
 | Coordinates in logs | pino redaction of coordinate keys; request bodies never logged; audit events carry no coordinates | code review |
 | Coordinates in push notifications | Notification intents carry kind/title/body only | code review |
+| Hider position on a Live Activity (Lock Screen, Watch, CarPlay — readable by anyone nearby) | Content is rendered only from the phone's own sanitized `RoundView`; it carries times, ping indexes, crew keys and the outcome, never coordinates, phone ids, names or free text (ADR 0017) | `unit/views.privacy.test.ts` (all phases, both roles, several phones), `security/authorization.test.ts` (every push a host-seeker's activity got) |
+| Live Activity push tokens | Server-only `liveActivities` docs (12 h TTL), keyed by the caller's uid; registration only for a round in progress the phone plays; removed on revoke, delete-my-data and account deletion | `integration/liveActivities.test.ts`, `security/firestore-rules.test.ts`, `security/authorization.test.ts` |
 | EXIF GPS in photos | Client re-renders JPEG; server strips APP1–APP15 + COM segments | integration test checks GPS/serial strings removed |
 | CSV injection in exports | Leading `= + - @` neutralized | code |
 

@@ -74,6 +74,27 @@ Content-layer buttons use the standard `.borderedProminent` / `.bordered` styles
 - **Controls**: circular glass Options (menu) and Home, with the one prominent action between them: Photo Catch for seekers, or a sharing status for hiders.
 - **Pins**: diamond shape plus index number and a white outline for contrast; the latest is larger and labeled. Shape and number mean color is never the only signal.
 
+## Live Activity (Lock Screen, Dynamic Island, Smart Stack, CarPlay)
+
+[ADR 0017](adr/0017-live-activities.md). A round on a locked phone answers the same three questions as the game screen. It follows [HIG › Live Activities](https://developer.apple.com/design/human-interface-guidelines/live-activities).
+
+| Presentation | Content |
+|---|---|
+| Lock Screen (system background, 14 pt margins) | Role symbol in crew colour · "Chase · Seeking" · crew and round; big rounded clock (head start left, or chase time); one status line with the next ping or claim deadline as a live countdown |
+| StandBy (`.medium`, `isActivityFullscreen`) | Same layout, larger clock |
+| Dynamic Island compact | Leading: role (or phase) symbol in crew colour. Trailing: the countdown that matters (chase start, next ping, claim deadline) |
+| Minimal | The countdown, as the Timer app does; the symbol when nothing counts down |
+| Limited width (iOS 27) | One 28 pt leading view; empty trailing view, which the system hides |
+| Expanded | Role · round; phase and big clock; status line |
+| Smart Stack / CarPlay (`.small`) | Phase symbol and word, clock, one line. No controls |
+
+Rules:
+- Every timer is a system timer (`Text(timerInterval:)`), so it keeps running between updates. Stale content says "Open the app for the latest".
+- Colour is the crew, and the Dynamic Island keyline uses it. Warning and danger appear only with the pause symbols.
+- No buttons. Tapping opens the night's game screen.
+- Never a location, a roster name or a free-text reason. The Lock Screen is readable by anyone nearby.
+- Settings › **Show Rounds on Lock Screen** and game Options › **Hide Live Activity** turn it off. An activity removed from the Lock Screen stays removed for that round.
+
 ## Accessibility
 
 - **Dynamic Type**: verified at Accessibility Extra Large. Rows grow, chips wrap (`FlowLayout`), headers stack (`AnyLayout`, `ViewThatFits`), and action labels wrap instead of truncating.
@@ -82,6 +103,7 @@ Content-layer buttons use the standard `.borderedProminent` / `.bordered` styles
 - **Reduce Motion**: the pulsing sharing symbol stops, and toast and morph transitions fall back to opacity.
 - **Touch targets**: ≥ 44 pt for every floating control.
 - **Haptics**: success feedback when a catch is submitted (`sensoryFeedback`).
+- **Live Activity**: each presentation is one combined VoiceOver element; icon-only compact and minimal views carry the phase as their label.
 
 ## App icon
 

@@ -32,6 +32,7 @@ flowchart TD
 | `ios/ManhuntCrews/` | SwiftUI app. `Services/Location` (background GPS), `Services/OfflineQueue` (encrypted queue), `Services/Realtime` (own-view listener), `Services/Clock` (server clock), `Features/*` (screens). |
 | `firebase.json` + `scripts/` | `firebase deploy` ships the functions, task queue, scheduler jobs, rules, indexes and TTL policies. `scripts/setup-gcp-project.sh` does the one-time rest: backend service account + least-privilege IAM, private media bucket, log metric, alerts, budget. |
 | `shared/openapi.yaml` | API contract; a unit test asserts it matches the registered routes. |
+| `backend/src/services/liveActivities.ts` + `ios/ManhuntCrewsWidgets`, `ios/LiveActivityShared` | The round's Live Activity (ADR 0017): token registrations, ActivityKit pushes through FCM, and the widget extension with its presentations. |
 
 ## Data flows
 
@@ -42,6 +43,8 @@ flowchart TD
 **Released game information.** At each deadline the worker runs `tickRound` inside a Firestore transaction: it queries hiding-crew candidates (`role == HIDING`) near the deadline, applies `selectPingSample` across the crew's phones (freshest fix; accuracy breaks 10 s ties; recorded *and received* ≤ deadline, ≤60 s old, ≤50 m, not during a pause, per-phone spike check), appends an immutable `PingRelease`, creates `pings/p{index}` with `tx.create` (duplicate-proof), and re-renders the views that changed in the same commit. With no qualifying sample the ping **waits** (ADR 0015): the next hiding-crew upload (or tick, or watchdog pass) releases the crew's *current* position, labelled late.
 
 **Views.** `views.ts` renders each member's view from session + round + members + active claim. Its inputs contain no raw samples; the only coordinates it can emit are released pings, and never which phone a pin came from. Seeker views get the last *N* released pins; hiding-crew phones get the capture request; phones not in the round get neither. Crew health is coarse (live/total phones and a state). A view is written only when its content hash changes, and `GET /v1/sessions/{id}` serves the stored view with an ETag (ADR 0016).
+
+**Live Activities (ADR 0017).** A phone playing a round shows it on the Lock Screen and in the Dynamic Island. `views.ts` renders the activity's content from that phone's `RoundView`: phase, clock anchors, ping index and times, claim crew and outcome. It never carries coordinates. The app updates the activity from every applied view. After each committed round change, the server push-starts it on the round's other phones, updates registered activities and ends them with the round. These are ActivityKit pushes through FCM, and they carry the round's notification as the alert in place of a duplicate push. App and server share one mapping, pinned by `shared/fixtures/live-activity.json`.
 
 ## Server-authoritative timing
 

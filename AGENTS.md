@@ -3,7 +3,7 @@
 Product/technical source of truth: `docs/product-spec.md` (the original handoff). Deviations are recorded as ADRs in `docs/adr/`.
 
 ## Non-negotiables
-1. **Secrecy invariant.** During HEAD_START / CHASE / CAPTURE_PENDING / PAUSED the seeking operator may receive only *released* hider pings. Any new client-readable data must be produced by `backend/src/domain/views.ts`; add a case to `tests/unit/views.privacy.test.ts` and `tests/security/*` for every new field or endpoint. Never add raw samples, latest hider position or hider routes to views, API responses, notifications, logs, analytics or exports.
+1. **Secrecy invariant.** During HEAD_START / CHASE / CAPTURE_PENDING / PAUSED the seeking operator may receive only *released* hider pings. Any new client-readable data must be produced by `backend/src/domain/views.ts`; add a case to `tests/unit/views.privacy.test.ts` and `tests/security/*` for every new field or endpoint. Never add raw samples, latest hider position or hider routes to views, API responses, notifications, Live Activities, logs, analytics or exports. Live Activity content comes only from `liveActivityState` in `views.ts`, and the app mirrors it (`RoundActivityContent.swift`, contract fixture `shared/fixtures/live-activity.json`).
 2. **Server-authoritative time.** All transitions and deadlines derive from persisted `roundStartAt`, `chaseStartAt`, `pauses[]` (see `clock.ts`). Never use a device clock or push delivery for correctness.
 3. **Idempotency.** State changes run in Firestore transactions; the worker tick must stay idempotent; pings are unique per index (`tx.create`).
 4. **Crew attribution.** Never present a team outcome as an individual's time or distance. No single-round winner fields.
