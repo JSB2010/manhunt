@@ -29,6 +29,7 @@ defaults:
 
 # The two jobs run in parallel on separate runners. Each restores the Swift packages (~1.2 GB, ~75 s to fetch) and
 # its own Xcode compilation cache: compile results keyed by content, so restored entries hit after a fresh checkout.
+# Only main saves a new compilation cache (keyed on the sources); PRs restore main's newest one and upload nothing.
 jobs:
   test:
     name: Unit tests (Debug, simulator)
@@ -63,12 +64,15 @@ jobs:
           path: ios/build/SourcePackages
           key: spm-${{ runner.os }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}
           restore-keys: spm-${{ runner.os }}-
-      - name: Cache compilation results
-        uses: actions/cache@v6
+      - name: Restore compilation results
+        id: cas
+        uses: actions/cache/restore@v6
         with:
           path: ios/build/CompilationCache.noindex
-          key: xcode-cas-test-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}
-          restore-keys: xcode-cas-test-${{ steps.xcode.outputs.build }}-
+          key: xcode-cas-test-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}-${{ hashFiles('ios/ManhuntCrews*/**', 'ios/LiveActivityShared/**', 'ios/Config/**', 'shared/**') }}
+          restore-keys: |
+            xcode-cas-test-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}-
+            xcode-cas-test-${{ steps.xcode.outputs.build }}-
       - name: Unit tests
         run: |
           mkdir -p ios/build
@@ -78,6 +82,12 @@ jobs:
             -resultBundlePath ios/build/ManhuntCrewsTests.xcresult \
             COMPILATION_CACHE_ENABLE_CACHING=YES COMPILER_INDEX_STORE_ENABLE=NO \
             2>&1 | tee ios/build/xcodebuild.log | xcbeautify --quiet --renderer github-actions
+      - name: Save compilation results
+        if: github.ref == 'refs/heads/main' && steps.cas.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ios/build/CompilationCache.noindex
+          key: ${{ steps.cas.outputs.cache-primary-key }}
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v7
@@ -111,12 +121,15 @@ jobs:
           path: ios/build/SourcePackages
           key: spm-${{ runner.os }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}
           restore-keys: spm-${{ runner.os }}-
-      - name: Cache compilation results
-        uses: actions/cache@v6
+      - name: Restore compilation results
+        id: cas
+        uses: actions/cache/restore@v6
         with:
           path: ios/build/CompilationCache.noindex
-          key: xcode-cas-release-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}
-          restore-keys: xcode-cas-release-${{ steps.xcode.outputs.build }}-
+          key: xcode-cas-release-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}-${{ hashFiles('ios/ManhuntCrews*/**', 'ios/LiveActivityShared/**', 'ios/Config/**', 'shared/**') }}
+          restore-keys: |
+            xcode-cas-release-${{ steps.xcode.outputs.build }}-${{ hashFiles(env.PACKAGE_RESOLVED) }}-
+            xcode-cas-release-${{ steps.xcode.outputs.build }}-
       - name: Release build
         run: |
           mkdir -p ios/build
@@ -125,6 +138,12 @@ jobs:
             -derivedDataPath ios/build -onlyUsePackageVersionsFromResolvedFile \
             COMPILATION_CACHE_ENABLE_CACHING=YES COMPILER_INDEX_STORE_ENABLE=NO \
             2>&1 | tee ios/build/xcodebuild.log | xcbeautify --quiet --renderer github-actions
+      - name: Save compilation results
+        if: github.ref == 'refs/heads/main' && steps.cas.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ios/build/CompilationCache.noindex
+          key: ${{ steps.cas.outputs.cache-primary-key }}
       - name: Upload build log
         if: failure()
         uses: actions/upload-artifact@v7
