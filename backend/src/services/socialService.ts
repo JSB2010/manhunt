@@ -174,7 +174,7 @@ export class SocialService {
   }
 
   async registerPushToken(uid: string, body: z.infer<typeof PushTokenBody>) {
-    await this.p.devices(uid).doc(body.deviceId).set({ fcmToken: body.fcmToken, apnsEnvironment: body.apnsEnvironment, appVersion: body.appVersion ?? null, updatedAt: this.d.clock.now() });
+    await this.p.devices(uid).doc(body.deviceId).set({ fcmToken: body.fcmToken, apnsEnvironment: body.apnsEnvironment, appVersion: body.appVersion ?? null, updatedAt: this.d.clock.now() }, { merge: true });
     return { ok: true };
   }
 

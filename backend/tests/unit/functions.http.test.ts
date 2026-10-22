@@ -5,6 +5,7 @@ import { buildApiApp } from '../../src/api/app.js';
 import { loadConfig } from '../../src/config.js';
 import { fastifyHandler, stripFunctionPrefix, type FnRequest } from '../../src/functions/http.js';
 import { createLogger } from '../../src/observability/logger.js';
+import { RecordingLiveActivityTransport } from '../../src/services/liveActivities.js';
 import { RecordingNotifier } from '../../src/services/notifier.js';
 import type { Deps } from '../../src/services/repo.js';
 import { ManualScheduler } from '../../src/services/scheduler.js';
@@ -37,7 +38,7 @@ const request = (r: Partial<FnRequest> & Pick<FnRequest, 'url'>): FnRequest => (
 async function apiApp() {
   process.env.APP_ENV = 'test';
   const cfg = loadConfig({ env: 'test', scheduler: 'manual', notifier: 'log', projectId: 'demo-manhunt' });
-  const deps: Deps = { cfg, db: {} as never, store: new MemoryObjectStore(), scheduler: new ManualScheduler(), notifier: new RecordingNotifier(), clock: { now: () => Date.UTC(2026, 9, 18) }, log: createLogger(cfg, 'functions-http') };
+  const deps: Deps = { cfg, db: {} as never, store: new MemoryObjectStore(), scheduler: new ManualScheduler(), notifier: new RecordingNotifier(), liveActivityTransport: new RecordingLiveActivityTransport(), clock: { now: () => Date.UTC(2026, 9, 18) }, log: createLogger(cfg, 'functions-http') };
   const app = await buildApiApp(deps, {
     verifyIdToken: async () => {
       throw new Error('invalid');

@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { getFunctions } from 'firebase-admin/functions';
 import type { Config } from './config.js';
 import { firebase } from './services/firebase.js';
+import { FcmLiveActivityTransport, LogLiveActivityTransport } from './services/liveActivities.js';
 import { FcmNotifier, LogNotifier } from './services/notifier.js';
 import { systemClock, type Deps } from './services/repo.js';
 import { LocalScheduler, ManualScheduler, TaskQueueScheduler } from './services/scheduler.js';
@@ -22,6 +23,7 @@ export function buildDeps(cfg: Config, log: FastifyBaseLogger): Deps {
     store: new GcsObjectStore(fb.bucket),
     scheduler,
     notifier,
+    liveActivityTransport: cfg.notifier === 'fcm' ? new FcmLiveActivityTransport(fb.messaging) : new LogLiveActivityTransport(log),
     clock: systemClock,
     log,
     deleteAuthUser: async (uid) => {

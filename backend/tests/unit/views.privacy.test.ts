@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { decideClaim, startRound, submitClaim } from '../../src/domain/engine.js';
+import { decideClaim, requestPause, startRound, submitClaim } from '../../src/domain/engine.js';
 import { tickRound } from '../../src/domain/tick.js';
 import type { GpsPoint, RoundDoc } from '../../src/domain/types.js';
-import { renderView } from '../../src/domain/views.js';
+import { liveActivityAttributes, liveActivityState, renderView } from '../../src/domain/views.js';
 import { allPhones, claim, HIDER, HIDER2, members, MIN, point, readyRound, SEEKER, SEEKER2, SEEKER_C, T0 } from './fixtures.js';
 
 /** Recursively collect every numeric value in an object. */
@@ -170,6 +170,43 @@ describe('per-user view privacy invariant', () => {
     expect(other.claimByTeam).toBe('C');
     const mine = renderView({ uid: SEEKER_C, session: s, round: r, members: members(s), activeClaim: c, now: at }).round!;
     expect(mine.myClaim).toMatchObject({ status: 'PENDING', byMe: true });
+  });
+
+  it('Live Activity content (Lock Screen, Dynamic Island) carries no coordinates, phones, rosters or free text', async () => {
+    const { session: s, round: r0 } = readyRound({ visiblePingHistoryCount: null }, { phonesA: [HIDER, HIDER2], phonesB: [SEEKER, SEEKER2] });
+    const all = [...track(T0 + 40 * MIN, HIDER), ...track(T0 + 40 * MIN, HIDER2, 3_000)];
+    const coords = new Set(all.flatMap((p) => [p.latitude, p.longitude]));
+    let r = startRound(r0, s, HIDER, allPhones(s), [], T0).round;
+    const rounds: [RoundDoc, number][] = [[r, T0 + MIN]];
+    for (const m of [10, 20, 30]) {
+      r = (await tick(r, T0 + m * MIN, all)).round;
+      rounds.push([r, T0 + m * MIN + 1000]);
+    }
+    const c = claim({ status: 'PENDING', submittedAt: T0 + 31 * MIN, officialChaseMsAtClaim: 21 * MIN });
+    const pending = submitClaim(r, claim(), SEEKER, T0 + 31 * MIN).round;
+    const safety = requestPause(pending, SEEKER, 'SAFETY', 'Riley twisted an ankle', T0 + 31 * MIN + 1500).round;
+    rounds.push([pending, T0 + 31 * MIN + 1000], [safety, T0 + 31 * MIN + 2000]);
+    rounds.push([decideClaim(pending, c, HIDER, 'CONFIRM', null, T0 + 32 * MIN).round, T0 + 32 * MIN]);
+    const allowed = ['chaseElapsed', 'chaseStartedAt', 'claim', 'headStartEndsAt', 'headStartRemaining', 'lastPing', 'nextPingAt', 'nextPingIndex', 'outcome', 'pausedPhase', 'phase', 'pingWaiting', 'safetyPause', 'timeCapAt'];
+    for (const [round, now] of rounds) {
+      for (const uid of [SEEKER, SEEKER2, HIDER, HIDER2]) {
+        const v = renderView({ uid, session: s, round, members: members(s), activeClaim: round.state === 'CAPTURE_PENDING' ? c : null, now });
+        const state = liveActivityState(v.round!, 1234)!;
+        const attrs = liveActivityAttributes(v)!;
+        expect(Object.keys(state).sort()).toEqual(allowed);
+        expect(Object.keys(attrs).sort()).toEqual(['crew', 'crewName', 'role', 'roundId', 'roundIndex', 'sessionId']);
+        expect(numbers(state).filter((n) => coords.has(n))).toEqual([]);
+        const json = JSON.stringify({ attrs, state });
+        for (const leak of [HIDER, HIDER2, SEEKER, SEEKER2, 'Morgan', 'Taylor', 'twisted', 'latitude', 'longitude', 'photoPath', 'sourceUid']) expect(json).not.toContain(leak);
+        // ActivityKit caps static + dynamic data at 4 KB.
+        expect(Buffer.byteLength(json)).toBeLessThan(1024);
+      }
+    }
+    // A phone that isn't playing the round (joined after the start) gets no Live Activity.
+    const late = { ...s, teams: { ...s.teams, B: { ...s.teams.B!, operatorUids: [SEEKER, SEEKER2, 'late-phone'] } } };
+    const lv = renderView({ uid: 'late-phone', session: late, round: r, members: members(late), activeClaim: null, now: T0 + 31 * MIN });
+    expect(liveActivityState(lv.round!)).toBeNull();
+    expect(liveActivityAttributes(lv)).toBeNull();
   });
 
   it('stateVersion grows with every committed session or round change', () => {

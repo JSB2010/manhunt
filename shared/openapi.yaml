@@ -270,6 +270,11 @@ paths:
       summary: Register FCM token (APNs via FCM) for this device
       requestBody: { content: { application/json: { schema: { type: object, required: [deviceId, fcmToken, apnsEnvironment], properties: { deviceId: { type: string }, fcmToken: { type: string }, apnsEnvironment: { type: string, enum: [development, production] }, appVersion: { type: [string, 'null'] } } } } } }
       responses: { '200': { $ref: '#/components/responses/Ok' } }
+  /v1/devices/live-activity-token:
+    post:
+      summary: Register this device's Live Activity push-to-start token (null = Live Activities off). Rounds started by another phone then start the round's Live Activity here (ADR 0017).
+      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, required: [deviceId, pushToStartToken], properties: { deviceId: { type: string }, pushToStartToken: { type: [string, 'null'], pattern: '^[0-9a-fA-F]+$' } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
 
   /v1/friends/requests:
     get: { summary: Pending incoming/outgoing friend requests, responses: { '200': { description: OK } } }
@@ -450,6 +455,16 @@ paths:
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, required: [batchId, sentAt, samples, health], properties: { batchId: { type: string, format: uuid }, sentAt: { type: string, format: date-time }, samples: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Sample' } }, health: { $ref: '#/components/schemas/Health' } } } } } }
       responses: { '200': { description: '{accepted, duplicates, rejected[], clockSkewMs}' }, default: { $ref: '#/components/responses/Error' } }
+  /v1/sessions/{id}/rounds/{rid}/live-activity/{deviceId}:
+    put:
+      summary: Register the push token of this phone's Live Activity for a round it plays (in progress only). The server then updates and ends the activity with ActivityKit pushes rendered from the phone's own sanitized view — never coordinates (ADR 0017).
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { name: deviceId, in: path, required: true, schema: { type: string } }]
+      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, required: [pushToken, clockOffsetMs], properties: { pushToken: { type: string, pattern: '^[0-9a-fA-F]+$' }, clockOffsetMs: { type: integer, description: 'phone clock minus server time' } } } } } }
+      responses: { '200': { $ref: '#/components/responses/Ok' }, '403': { $ref: '#/components/responses/Error' }, '409': { $ref: '#/components/responses/Error' } }
+    delete:
+      summary: Stop updating this phone's Live Activity (dismissed, or Live Activities turned off)
+      parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { name: deviceId, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { $ref: '#/components/responses/Ok' } }
   /v1/sessions/{id}/rounds/{rid}/my-track:
     get: { summary: The caller's OWN samples for this round (self-only), parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }], responses: { '200': { description: '{points}' } } }
   /v1/sessions/{id}/rounds/{rid}/captures/init:

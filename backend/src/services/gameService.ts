@@ -55,6 +55,7 @@ import type {
   SetupPatchBody,
 } from '../schemas/api.js';
 import { finalizeRound } from './finalize.js';
+import { LiveActivityService } from './liveActivities.js';
 import { paths, txGet, txMembers, writeEvents, writeViews, type Deps } from './repo.js';
 import { stripJpegMetadata } from './storage.js';
 import { resolvePeopleForRoster } from './socialService.js';
@@ -156,14 +157,18 @@ interface TxOutcome<R> {
   members?: Record<string, MemberDoc>;
   events?: DomainEvent[];
   notifications?: NotificationIntent[];
+  /** the phone that caused the change (it updates its own Live Activity in the foreground) */
+  actorUid?: string;
   /** throw this after commit (e.g. expiry applied, then report CAPTURE_EXPIRED) */
   errorAfterCommit?: AppError;
 }
 
 export class GameService {
   private p;
+  private liveActivities: LiveActivityService;
   constructor(private d: Deps) {
     this.p = paths(d.db);
+    this.liveActivities = new LiveActivityService(d);
   }
 
   // -------------------------------------------------------------------------
@@ -264,9 +269,15 @@ export class GameService {
       }
       // Edited member docs are written once, carrying their new view hashes.
       for (const u of edited) tx.set(this.p.member(sid, u), nextMembers[u]!);
-      return { o, nextRound, roundChanged: !!o.round, wasFinished: !!round && isFinishedState(round.state) };
+      return {
+        o,
+        nextRound,
+        roundChanged: !!o.round,
+        wasFinished: !!round && isFinishedState(round.state),
+        live: { session: nextSession, members: nextMembers, claim: nextClaim, started: round?.state === 'READY' && o.round?.state === 'HEAD_START', actorUid: o.actorUid ?? null },
+      };
     });
-    if (out.nextRound) await this.afterCommit(sid, out.nextRound, out.o.notifications ?? [], out.roundChanged && !out.wasFinished);
+    if (out.nextRound) await this.afterCommit(sid, out.nextRound, out.o.notifications ?? [], out.roundChanged && !out.wasFinished, out.live);
     else if (out.o.notifications?.length) this.d.notifier.send(out.o.notifications).catch((err) => this.d.log.warn({ err }, 'notify failed'));
     if (out.o.errorAfterCommit) throw out.o.errorAfterCommit;
     return out.o.result;
@@ -280,9 +291,17 @@ export class GameService {
     });
   }
 
-  private async afterCommit(sid: string, round: RoundDoc, notifications: NotificationIntent[], roundChanged: boolean) {
+  private async afterCommit(
+    sid: string,
+    round: RoundDoc,
+    notifications: NotificationIntent[],
+    roundChanged: boolean,
+    live: { session: SessionDoc; members: Record<string, MemberDoc>; claim: CaptureClaim | null; started: boolean; actorUid: string | null },
+  ) {
+    // Live Activities first: a phone whose activity carried an alert skips the duplicate push.
+    const alerts = roundChanged ? await this.liveActivities.publish({ ...live, round, notifications, now: this.d.clock.now() }) : [];
     if (notifications.length) {
-      this.d.notifier.send(notifications).catch((err) => this.d.log.warn({ err }, 'notify failed'));
+      this.d.notifier.send(notifications, alerts).catch((err) => this.d.log.warn({ err }, 'notify failed'));
     }
     if (roundChanged && round.active) await this.scheduleNext(sid, round);
     if (roundChanged && isFinishedState(round.state)) {
@@ -817,7 +836,7 @@ export class GameService {
       if (warnings.length && !acknowledgeWarnings) fail('GPS_UNAVAILABLE', 'Location health warnings must be acknowledged to start', { warnings });
       const t: Transition = engineStartRound(round, session, uid, eligible, warnings, now);
       const s = { ...structuredClone(session), status: 'IN_ROUND' as const, updatedAt: now, version: session.version + 1 };
-      return { result: { ok: true, warnings }, session: s, round: t.round, events: t.events, notifications: t.notifications };
+      return { result: { ok: true, warnings }, session: s, round: t.round, events: t.events, notifications: t.notifications, actorUid: uid };
     });
   }
 

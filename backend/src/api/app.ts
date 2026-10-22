@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { AppError } from '../domain/errors.js';
 import { DataService } from '../services/dataService.js';
 import { GameService } from '../services/gameService.js';
+import { LiveActivityService } from '../services/liveActivities.js';
 import type { Deps } from '../services/repo.js';
 import { SocialService } from '../services/socialService.js';
 import { bucketFor, FAILURE_ONLY_BUCKETS, installErrorHandling, installGzipBodies, installIdempotency, installServerTime, isTransientVerifyError, RateLimiter, rateLimited } from './http.js';
@@ -23,6 +24,7 @@ export interface Services {
   game: GameService;
   social: SocialService;
   data: DataService;
+  liveActivities: LiveActivityService;
 }
 
 export interface ApiOptions {
@@ -48,7 +50,7 @@ export async function buildApiApp(deps: Deps, opts: ApiOptions): Promise<Fastify
     for (const m of [r.method].flat()) if (m !== 'HEAD') registered.push({ method: m, url: r.url });
   });
   app.decorate('registeredRoutes', registered);
-  const services: Services = { game: new GameService(deps), social: new SocialService(deps), data: new DataService(deps) };
+  const services: Services = { game: new GameService(deps), social: new SocialService(deps), data: new DataService(deps), liveActivities: new LiveActivityService(deps) };
   const limiter = new RateLimiter();
 
   app.addContentTypeParser('image/jpeg', { parseAs: 'buffer', bodyLimit: deps.cfg.maxPhotoBytes + 1024 }, (_req, body, done) => done(null, body));

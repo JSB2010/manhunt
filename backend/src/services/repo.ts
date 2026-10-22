@@ -3,6 +3,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../config.js';
 import type { CaptureClaim, DomainEvent, MemberDoc, RoundDoc, SessionDoc } from '../domain/types.js';
 import { renderView, viewHash } from '../domain/views.js';
+import type { LiveActivityTransport } from './liveActivities.js';
 import type { Notifier } from './notifier.js';
 import type { Scheduler } from './scheduler.js';
 import type { ObjectStore } from './storage.js';
@@ -18,6 +19,8 @@ export interface Deps {
   store: ObjectStore;
   scheduler: Scheduler;
   notifier: Notifier;
+  /** ActivityKit pushes for Live Activities (FCM when deployed) */
+  liveActivityTransport: LiveActivityTransport;
   clock: Clock;
   log: FastifyBaseLogger;
   /** optional hook so the Firebase Auth admin API can be swapped in tests */

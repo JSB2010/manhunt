@@ -36,6 +36,9 @@ beforeAll(async () => {
     await setDoc(doc(db, 'sessions/s1/events/e1'), { type: 'PING_RELEASED' });
     await setDoc(doc(db, 'users/hider'), { displayName: 'H' });
     await setDoc(doc(db, 'invites/i1'), { codeHash: 'abc' });
+    await setDoc(doc(db, 'sessions/s1/liveActivities/seeker_device1'), { uid: 'seeker', roundId: 'r1', pushToken: 'abcdef0123456789' });
+    await setDoc(doc(db, 'sessions/s1/liveActivities/hider_device1'), { uid: 'hider', roundId: 'r1', pushToken: 'abcdef0123456789' });
+    await setDoc(doc(db, 'users/hider/devices/device1'), { fcmToken: 'x', liveActivityStartToken: 'abcdef0123456789' });
   });
 });
 
@@ -63,12 +66,17 @@ describe('firestore.rules', () => {
       'sessions/s1/roundSummaries/r1',
       'sessions/s1/routes/r1',
       'sessions/s1/events/e1',
+      // Live Activity push tokens (own and others')
+      'sessions/s1/liveActivities/seeker_device1',
+      'sessions/s1/liveActivities/hider_device1',
+      'users/hider/devices/device1',
       'users/hider',
       'invites/i1',
     ]) {
       await assertFails(getDoc(doc(seeker, p)));
     }
     await assertFails(getDocs(collection(seeker, 'sessions/s1/rounds/r1/points')));
+    await assertFails(getDocs(collection(seeker, 'sessions/s1/liveActivities')));
   });
 
   it('removed members and anonymous clients are denied', async () => {
@@ -83,5 +91,6 @@ describe('firestore.rules', () => {
     await assertFails(setDoc(doc(hider, 'sessions/s1/rounds/r1/points/p2'), { latitude: 1 }));
     await assertFails(setDoc(doc(hider, 'sessions/s1/members/hider'), { active: true, teamKey: 'B' }));
     await assertFails(setDoc(doc(hider, 'users/hider'), { displayName: 'x' }));
+    await assertFails(setDoc(doc(hider, 'sessions/s1/liveActivities/hider_device1'), { pushToken: 'ab', roundId: 'r1' }));
   });
 });

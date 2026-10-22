@@ -4,6 +4,7 @@ import { buildApiApp } from '../../src/api/app.js';
 import { bucketFor, installErrorHandling, isTransientVerifyError, RateLimiter, rateLimited } from '../../src/api/http.js';
 import { loadConfig } from '../../src/config.js';
 import { createLogger } from '../../src/observability/logger.js';
+import { RecordingLiveActivityTransport } from '../../src/services/liveActivities.js';
 import { RecordingNotifier } from '../../src/services/notifier.js';
 import type { Deps } from '../../src/services/repo.js';
 import { ManualScheduler } from '../../src/services/scheduler.js';
@@ -20,7 +21,7 @@ function deps(): Deps {
   process.env.APP_ENV = 'test';
   const cfg = loadConfig({ env: 'test', scheduler: 'manual', notifier: 'log', projectId: 'demo-manhunt' });
   // No Firestore: every request here is answered before the handler touches it.
-  return { cfg, db: {} as never, store: new MemoryObjectStore(), scheduler: new ManualScheduler(), notifier: new RecordingNotifier(), clock: { now: () => NOW }, log: createLogger(cfg, 'http-resilience') };
+  return { cfg, db: {} as never, store: new MemoryObjectStore(), scheduler: new ManualScheduler(), notifier: new RecordingNotifier(), liveActivityTransport: new RecordingLiveActivityTransport(), clock: { now: () => NOW }, log: createLogger(cfg, 'http-resilience') };
 }
 
 /** firebase-admin's FirebaseAuthError shape. */

@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AppError } from '../../domain/errors.js';
-import { AbortBody, CaptureCompleteBody, DecisionBody, DisputeBody, LocationBatchBody, parse, PauseBody, StartBody } from '../../schemas/api.js';
+import { AbortBody, CaptureCompleteBody, DecisionBody, DeviceIdParam, DisputeBody, LiveActivityTokenBody, LocationBatchBody, parse, PauseBody, StartBody } from '../../schemas/api.js';
 import { uidOf, type Services } from '../app.js';
 
 const R = z.object({ id: z.string().min(1).max(128), rid: z.string().min(1).max(128) });
 const RC = R.extend({ cid: z.string().min(1).max(128) });
+const RD = R.extend({ deviceId: DeviceIdParam });
 
 export function registerGameRoutes(app: FastifyInstance, s: Services) {
   app.post('/v1/sessions/:id/rounds/:rid/start', async (req) => {
@@ -69,5 +70,15 @@ export function registerGameRoutes(app: FastifyInstance, s: Services) {
   app.post('/v1/sessions/:id/rounds/:rid/captures/:cid/dispute', async (req) => {
     const p = parse(RC, req.params);
     return s.game.resolveDispute(uidOf(req), p.id, p.rid, p.cid, parse(DisputeBody, req.body).resolution);
+  });
+
+  app.put('/v1/sessions/:id/rounds/:rid/live-activity/:deviceId', async (req) => {
+    const p = parse(RD, req.params);
+    return s.liveActivities.register(uidOf(req), p.id, p.rid, p.deviceId, parse(LiveActivityTokenBody, req.body));
+  });
+
+  app.delete('/v1/sessions/:id/rounds/:rid/live-activity/:deviceId', async (req) => {
+    const p = parse(RD, req.params);
+    return s.liveActivities.unregister(uidOf(req), p.id, p.rid, p.deviceId);
   });
 }

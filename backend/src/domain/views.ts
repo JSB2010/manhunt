@@ -11,6 +11,7 @@ import {
   type PingRelease,
   type Role,
   type RoundDoc,
+  type RoundOutcome,
   type RoundResult,
   type Rules,
   type SeekMode,
@@ -427,4 +428,112 @@ export function renderView(params: {
 export function viewHash(v: ViewDoc): string {
   const { renderedAt: _r, viewHash: _h, ...content } = v;
   return createHash('sha256').update(JSON.stringify(content)).digest('base64url').slice(0, 22);
+}
+
+// ---------------------------------------------------------------------------
+// Live Activity (Lock Screen, Dynamic Island, Smart Stack, CarPlay) — ADR 0017
+// ---------------------------------------------------------------------------
+
+export type LiveActivityPhase = 'HEAD_START' | 'CHASE' | 'CAPTURE_PENDING' | 'PAUSED' | 'ENDED';
+
+/** Static part of a round's Live Activity (`RoundActivityAttributes` on iOS). */
+export interface LiveActivityAttributes {
+  sessionId: string;
+  roundId: string;
+  roundIndex: number;
+  role: Role;
+  crew: TeamKey;
+  crewName: string;
+}
+
+/**
+ * Dynamic part (`RoundActivityAttributes.ContentState`). Times are epoch seconds on the
+ * phone's clock so the system can run the timers on its own between updates. No
+ * coordinates, rosters or free-text reasons: a Live Activity is readable on a locked
+ * phone by anyone standing next to it.
+ */
+export interface LiveActivityState {
+  phase: LiveActivityPhase;
+  /** while PAUSED: the phase the clocks froze in */
+  pausedPhase: 'HEAD_START' | 'CHASE' | null;
+  safetyPause: boolean;
+  /** head start running: countdown target */
+  headStartEndsAt: number | null;
+  /** head start frozen (paused): seconds left */
+  headStartRemaining: number | null;
+  /** chase clock running: it reads now − chaseStartedAt */
+  chaseStartedAt: number | null;
+  /** chase clock frozen (claim review, pause, end): seconds */
+  chaseElapsed: number | null;
+  nextPingAt: number | null;
+  nextPingIndex: number;
+  timeCapAt: number | null;
+  /** the latest ping slot (when and whether it had a fix) — never where */
+  lastPing: { index: number; at: number; missing: boolean } | null;
+  pingWaiting: boolean;
+  /** a catch claim under review */
+  claim: { crew: TeamKey; expiresAt: number | null } | null;
+  outcome: { result: RoundOutcome; creditCrews: TeamKey[] } | null;
+}
+
+/** Live Activity attributes for a phone playing the view's round, else null. */
+export function liveActivityAttributes(view: ViewDoc): LiveActivityAttributes | null {
+  const r = view.round;
+  if (!r || !r.myRole || !r.myTeam || r.state === 'READY') return null;
+  return {
+    sessionId: view.sessionId,
+    roundId: r.id,
+    roundIndex: r.index,
+    role: r.myRole,
+    crew: r.myTeam,
+    crewName: view.session.teams[r.myTeam]?.name ?? `Crew ${r.myTeam}`,
+  };
+}
+
+const OUTCOME_OF_STATE: Partial<Record<RoundDoc['state'], RoundOutcome>> = { COMPLETED: 'CAUGHT', TIMED_OUT: 'TIMED_OUT', ABORTED: 'ABORTED' };
+
+/**
+ * Live Activity content for one phone, rendered from that phone's own sanitized round view
+ * (so it can never carry more than the view). `clockOffsetMs` is the phone's clock minus
+ * server time, as the phone reported it; null when the phone isn't playing the round.
+ */
+export function liveActivityState(r: RoundView, clockOffsetMs = 0): LiveActivityState | null {
+  if (!r.myRole || r.state === 'READY' || r.roundStartAt === null) return null;
+  const at = (s: string | null) => (s === null ? null : (Date.parse(s) + clockOffsetMs) / 1000);
+  const ended = isFinishedState(r.state);
+  const phase: LiveActivityPhase = ended ? 'ENDED' : (r.state as LiveActivityPhase);
+  const chase = r.chaseClock;
+  const chaseRunning = !ended && !!chase?.runningSince;
+  const last = r.pingLog[r.pingLog.length - 1];
+  return {
+    phase,
+    pausedPhase: r.state === 'PAUSED' ? (r.pausedFromState === 'HEAD_START' ? 'HEAD_START' : 'CHASE') : null,
+    safetyPause: r.state === 'PAUSED' && r.pause?.kind === 'SAFETY',
+    headStartEndsAt: r.state === 'HEAD_START' ? at(r.headStartEndsAt) : null,
+    headStartRemaining:
+      r.state === 'PAUSED' && r.pausedFromState === 'HEAD_START' ? Math.max(0, r.rules.headStartSeconds - r.headStartClock.accumulatedMs / 1000) : null,
+    chaseStartedAt: chaseRunning ? (Date.parse(chase!.runningSince!) - chase!.accumulatedMs + clockOffsetMs) / 1000 : null,
+    chaseElapsed: ended ? (r.result?.observedChaseSeconds ?? (chase ? chase.accumulatedMs / 1000 : 0)) : chase && !chaseRunning ? chase.accumulatedMs / 1000 : null,
+    nextPingAt: r.state === 'CHASE' ? at(r.nextPingAt) : null,
+    nextPingIndex: r.nextPingIndex,
+    timeCapAt: r.state === 'CHASE' ? at(r.timeCapAt) : null,
+    lastPing: last ? { index: last.index, at: at(last.releasedAt)!, missing: last.status !== 'RELEASED' } : null,
+    pingWaiting: !ended && r.waitingPing !== null,
+    claim: !ended && r.claimByTeam ? { crew: r.claimByTeam, expiresAt: at(r.captureRequest?.expiresAt ?? r.myClaim?.expiresAt ?? null) } : null,
+    outcome: ended ? { result: r.result?.outcome ?? OUTCOME_OF_STATE[r.state]!, creditCrews: [...(r.result?.catchCreditTeams ?? [])] } : null,
+  };
+}
+
+/** How long past an expected update (chase start, ping, claim deadline) a Live Activity may go before it shows as out of date. */
+export const LIVE_ACTIVITY_STALE_GRACE_S = 90;
+
+/**
+ * When the content goes stale (epoch seconds, phone clock): the next moment an update
+ * is due, plus a grace period. Null when nothing is due (paused, waiting ping, ended).
+ */
+export function liveActivityStaleDate(s: LiveActivityState): number | null {
+  const due =
+    s.phase === 'HEAD_START' ? [s.headStartEndsAt] : s.phase === 'CHASE' && !s.pingWaiting ? [s.nextPingAt, s.timeCapAt] : s.phase === 'CAPTURE_PENDING' ? [s.claim?.expiresAt ?? null] : [];
+  const next = due.filter((t): t is number => t !== null);
+  return next.length ? Math.min(...next) + LIVE_ACTIVITY_STALE_GRACE_S : null;
 }

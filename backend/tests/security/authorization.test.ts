@@ -87,6 +87,24 @@ describe('seeker (also host) cannot see the hider during the round', () => {
     }
   });
 
+  it('Live Activity tokens: outsiders cannot register or remove them; bodies are strict; tokens are never served back', async () => {
+    const device = 'host-phone-0001';
+    await h.call(host, 'POST', '/v1/devices/push-token', { deviceId: device, fcmToken: 'fcm-token-host', apnsEnvironment: 'development' });
+    const reg = await h.call(host, 'PUT', `/v1/sessions/${sid}/rounds/${rid}/live-activity/${device}`, { pushToken: 'ab'.repeat(16), clockOffsetMs: 0 });
+    expect(reg.status, JSON.stringify(reg.body)).toBe(200);
+    // Role or team can't be smuggled into a registration.
+    expect((await h.call(host, 'PUT', `/v1/sessions/${sid}/rounds/${rid}/live-activity/${device}`, { pushToken: 'ab'.repeat(16), clockOffsetMs: 0, role: 'HIDING' })).status).toBe(400);
+    const url = `/v1/sessions/${sid}/rounds/${rid}/live-activity/${device}`;
+    expect((await h.call(outsider, 'PUT', url, { pushToken: 'cd'.repeat(16), clockOffsetMs: 0 })).status).toBe(404);
+    // Registrations are keyed by the caller's uid: the same device id from another account can't reach the host's.
+    expect((await h.call(outsider, 'DELETE', url)).status).toBe(200);
+    expect((await h.call(hider, 'DELETE', url)).status).toBe(200);
+    const regs = await h.deps.db.collection(`sessions/${sid}/liveActivities`).get();
+    expect(regs.docs.map((d) => d.get('uid'))).toEqual([host.uid]);
+    // The registration (a push token) is never client-readable through any API.
+    expect(JSON.stringify((await h.call(host, 'GET', `/v1/sessions/${sid}`)).body)).not.toContain('ab'.repeat(16));
+  });
+
   it('there is no raw-locations endpoint and unknown routes 404', async () => {
     for (const url of ['/raw-locations', `/v1/sessions/${sid}/rounds/${rid}/points`, `/v1/sessions/${sid}/rounds/${rid}/locations`]) {
       expect((await h.call(host, 'GET', url)).status).toBe(404);
@@ -212,6 +230,13 @@ describe('seeker (also host) cannot see the hider during the round', () => {
     expect(a.status).toBe(200);
     expect(b.headers['idempotent-replay']).toBe('true');
     expect(b.body.pendingRequest).toBe(a.body.pendingRequest);
+  });
+
+  it('Live Activity: everything the seeker’s activity received this round carried times and indexes, never hider coordinates', () => {
+    const pushes = h.liveActivities.sent.filter((p) => p.activityToken === 'ab'.repeat(16));
+    expect(pushes.map((p) => p.contentState.phase)).toContain('CHASE');
+    for (const p of pushes) expect(containsHiderCoords(p)).toBe(false);
+    expect(JSON.stringify(pushes)).not.toMatch(/latitude|longitude|sourceUid|photoPath/);
   });
 
   it('after completion both operators can see both routes; outsiders still cannot', async () => {

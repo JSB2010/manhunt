@@ -4,6 +4,7 @@ import { buildApiApp } from '../../src/api/app.js';
 import { loadConfig } from '../../src/config.js';
 import { createLogger } from '../../src/observability/logger.js';
 import { firebase } from '../../src/services/firebase.js';
+import { RecordingLiveActivityTransport } from '../../src/services/liveActivities.js';
 import { RecordingNotifier } from '../../src/services/notifier.js';
 import type { Deps } from '../../src/services/repo.js';
 import { ManualScheduler } from '../../src/services/scheduler.js';
@@ -47,6 +48,7 @@ export interface Harness {
   clock: FakeClock;
   scheduler: ManualScheduler;
   notifier: RecordingNotifier;
+  liveActivities: RecordingLiveActivityTransport;
   deps: Deps;
   createUser(name: string): Promise<TestUser>;
   call<T = any>(user: TestUser | null, method: InjectOptions['method'], url: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: T; headers: Record<string, unknown>; raw: Buffer }>;
@@ -68,12 +70,14 @@ export async function harness(): Promise<Harness> {
   const fb = firebase(cfg);
   const scheduler = new ManualScheduler();
   const notifier = new RecordingNotifier();
+  const liveActivities = new RecordingLiveActivityTransport();
   const deps: Deps = {
     cfg,
     db: fb.db,
     store: new GcsObjectStore(fb.bucket),
     scheduler,
     notifier,
+    liveActivityTransport: liveActivities,
     clock,
     log,
     deleteAuthUser: (uid) => fb.auth.deleteUser(uid).then(() => undefined),
@@ -135,6 +139,7 @@ export async function harness(): Promise<Harness> {
     clock,
     scheduler,
     notifier,
+    liveActivities,
     deps,
     createUser,
     call,

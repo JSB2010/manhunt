@@ -164,6 +164,26 @@ export const PushTokenBody = z
   })
   .strict();
 
+/** ActivityKit tokens are hex. */
+const activityToken = z.string().min(16).max(512).regex(/^[0-9a-fA-F]+$/);
+export const DeviceIdParam = z.string().min(8).max(128).regex(/^[A-Za-z0-9_-]+$/);
+
+/** A round's Live Activity push token; the clock offset (phone − server) keeps its timers on server time. */
+export const LiveActivityTokenBody = z
+  .object({
+    pushToken: activityToken,
+    clockOffsetMs: z.number().int().min(-86_400_000).max(86_400_000),
+  })
+  .strict();
+
+/** Push-to-start token for Live Activities on this device; null turns them off. */
+export const LiveActivityStartTokenBody = z
+  .object({
+    deviceId: DeviceIdParam,
+    pushToStartToken: activityToken.nullable(),
+  })
+  .strict();
+
 export const FriendRequestBody = z
   .object({ handle: z.string().trim().toLowerCase().max(24).optional(), inviteToken: z.string().max(64).optional() })
   .strict()

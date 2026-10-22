@@ -4,6 +4,7 @@ import { fail } from '../domain/errors.js';
 import { buildScorecard, personAnalytics, type SessionResults } from '../domain/scoring.js';
 import { isActiveState, isFinishedState, TEAM_KEYS, type CaptureClaim, type DomainEvent, type MemberDoc, type RoundDoc, type RoundResult, type SessionDoc, type TeamKey } from '../domain/types.js';
 import { finalizeRound, phoneKey, type RouteDoc } from './finalize.js';
+import { LiveActivityService } from './liveActivities.js';
 import { paths, writeEvents, writeViews, type Deps } from './repo.js';
 import { deletedAccountRef, SocialService, type PersonDoc, type UserDoc } from './socialService.js';
 
@@ -322,6 +323,7 @@ export class DataService {
       const current = sess.currentRoundId ? ((await tx.get(this.p.round(sid, sess.currentRoundId))).data() as RoundDoc) : null;
       writeViews(tx, this.d.db, sess, current, members, null, now);
     });
+    await new LiveActivityService(this.d).forget(uid, sid);
     const ev: DomainEvent = { type: 'ROUTE_DELETED', at: now, actorUid: uid, roundId: null, details: { pointsDeleted: points, photosDeleted: photos } };
     await this.d.db.runTransaction(async (tx) => {
       writeEvents(tx, this.d.db, sid, [ev]);
@@ -423,6 +425,9 @@ export class DataService {
     const members = await this.p.members(sid).get();
     await Promise.all(members.docs.map((d) => d.ref.update({ active: false, viewHash: null })));
     await this.p.session(sid).update({ revokedAt: now, version: s.version + 1 });
+    // Take the round off every Lock Screen now, and drop the activity tokens.
+    const current = s.currentRoundId ? ((await this.p.round(sid, s.currentRoundId).get()).data() as RoundDoc | undefined) : undefined;
+    await new LiveActivityService(this.d).endAll(sid, current ?? null).catch((err) => this.d.log.warn({ err }, 'ending live activities on revoke failed'));
     await this.d.db.runTransaction(async (tx) =>
       writeEvents(tx, this.d.db, sid, [{ type: 'SESSION_REVOKED', at: now, actorUid: uid, roundId: null, details: {} }]),
     );

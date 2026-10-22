@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { parse, PatchMeBody, PushTokenBody } from '../../schemas/api.js';
+import { LiveActivityStartTokenBody, parse, PatchMeBody, PushTokenBody } from '../../schemas/api.js';
 import { uidOf, type Services } from '../app.js';
 
 export function registerMeRoutes(app: FastifyInstance, s: Services) {
@@ -10,4 +10,6 @@ export function registerMeRoutes(app: FastifyInstance, s: Services) {
   app.delete('/v1/me', { config: { rateLimit: 'account' } }, async (req) => s.data.deleteAccount(uidOf(req)));
 
   app.post('/v1/devices/push-token', async (req) => s.social.registerPushToken(uidOf(req), parse(PushTokenBody, req.body)));
+
+  app.post('/v1/devices/live-activity-token', async (req) => s.liveActivities.registerStartToken(uidOf(req), parse(LiveActivityStartTokenBody, req.body)));
 }
