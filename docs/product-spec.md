@@ -1,5 +1,7 @@
 # MANHUNT CREWS — FULL-STACK CODING AGENT HANDOFF
 
+> **Reading this today:** this is the original handoff (v1.0, 2026-10-17), kept as written. The product has since changed in places through accepted ADRs, and where an ADR disagrees with this spec, **the ADR wins**. The biggest changes: crews of 1–5 equal phones and up to three crews instead of exactly two operators (ADR 0013); open-ended nights instead of a fixed round count (ADR 0014); waiting pings instead of missed ones (ADR 0015); Cloud Functions for Firebase instead of Cloud Run + Terraform (ADR 0012). See the [ADR index](adr/README.md) for the full list of changed sections, and [architecture.md](architecture.md) for how it works now.
+
 **Status:** Implementation-ready product/technical specification (v1.0)  
 **Prepared:** October 17, 2026  
 **Target:** Native iPhone application + production-capable Google Cloud backend  

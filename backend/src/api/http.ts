@@ -39,8 +39,8 @@ const LIMITS: Record<RateBucket, { capacity: number; perMs: number }> = {
 };
 
 /**
- * Cheap reads the app repeats on a timer (the open night's view, reconciled every
- * 10 s next to the Firestore listener). They get their own bucket so polling can
+ * Cheap reads the app repeats on a timer (the open night's view, reconciled next to
+ * the Firestore listener when it goes quiet, ADR 0016). They get their own bucket so polling can
  * never starve writes in `default`. Keyed by Fastify route pattern.
  */
 const ROUTE_BUCKETS: Record<string, RateBucket> = {

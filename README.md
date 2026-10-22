@@ -1,75 +1,94 @@
 # Manhunt Crews
 
-A friends-only, two-crew Manhunt game: **one iPhone per crew**. The hiding crew's phone records a private GPS route; the seeking crew gets only **scheduled, server-released location pings** (first one exactly when the head start ends). Seekers claim a catch with an in-app photo that the hiding operator confirms. Crews swap roles each round (typically four per night), and nights build into crew-attributed history, friends, saved people and reusable groups.
+**Manhunt for friends, played across a town with iPhones.** Two or three crews take turns hiding. While one crew hides, the others hunt it down. The seekers never see where the hiders actually are. They get a location **ping** on a schedule, for example every 10 minutes. They close in, take a photo of the hiders, and the hiders confirm the catch. Then another crew hides.
 
-> Working name only — not a cleared App Store name.
+> *Manhunt Crews* is a working name, not a cleared App Store name. The app is in private testing on TestFlight.
 
-| | |
+## How a night works
+
+1. **Make a night.** Someone taps **Create a Night**, names the crews (2 or 3) and lists who's on each. Friends without the app are just names on a roster.
+2. **Join with the night code.** Every crew needs at least one iPhone running the app, and can have up to five. Phones join with the night code and pick a crew.
+3. **Ready up.** Each phone agrees to round tracking once. Then every crew taps **Ready** and any phone starts the round.
+4. **Head start.** The hiding crew gets a head start (10 minutes by default) to get away. The seekers wait.
+5. **Chase.** When the head start ends, the seekers get the first ping: where the hiders were *at that moment*. Another ping follows every interval (10 minutes by default). Between pings the seekers are on their own.
+6. **Catch.** When they find the hiders, a seeker taps **Photo Catch** and takes a picture. The clock freezes while the hiding crew reviews it on their own phone and confirms or rejects it.
+7. **Next round.** Every phone sees the recap: chase time, both crews' routes and distances, and the pings. Any phone can set up the next round, and the app suggests the crew that has hidden least. Play as many rounds as you like, then **End Night**. The night summary shows how long each crew lasted while hiding.
+
+The full player guide, with roles, pauses, phone status and the Lock Screen, is in **[docs/how-to-play.md](docs/how-to-play.md)**.
+
+## What makes it fair
+
+- **Seekers only ever get the scheduled pings.** The hiders' live route, latest position and upcoming positions never reach a seeker's phone. The server and the database rules enforce this, not just the screen. Hosting or organizing the night gives no extra access.
+- **The server keeps time.** Head starts, pings, catch reviews and pauses run on the server's clock. Changing a phone's clock, locking it or losing notifications can't change the game.
+- **Honest pings.** A ping uses a recent, accurate GPS fix from one of the hiding crew's phones. If none has arrived yet, the ping *waits* and goes out, marked late, with where the hiders are **now**. It never reveals an old backlog and never invents a position.
+- **Crew scores, not individual ones.** Every time and distance belongs to a crew. A single round has no winner. A night only names the stronger hiding crew when the rounds were actually comparable.
+- **Your data, your call.** Raw GPS is deleted after 30 days. Routes are only shown after a round, and only if every phone agreed. You can delete your data from a night, or your whole account, at any time. See the [privacy policy source](hosting/public/privacy.html).
+
+## On a locked phone
+
+During a round the phone is usually locked in a pocket or mounted in a car. The round shows as a **Live Activity** on the Lock Screen, in the Dynamic Island, on the Apple Watch Smart Stack and on CarPlay. It shows the phase, the clock and when the next ping goes out. It never shows a location. GPS keeps recording in the background, and notifications cover the moments that need you: the chase starting, a ping going out, a catch to review.
+
+## What you need
+
+| To… | You need |
 |---|---|
-| iOS app | `ios/` — SwiftUI, MapKit, Core Location (background), AVFoundation camera, Firebase Auth/Firestore/Messaging, ActivityKit + WidgetKit Live Activity (`ManhuntCrewsWidgets` extension). iOS 18+. |
-| Backend | `backend/` — Node 24 + TypeScript + Fastify on **Cloud Functions for Firebase** (`api`, task-queue `tick`, scheduled `watchdog` + `retention`), Firestore, Firebase Auth, private Cloud Storage, FCM. Deploys with one `firebase deploy`. |
-| Contract | `shared/openapi.yaml` (enforced by a contract test) |
-| Infra | `firebase.json`, `firestore.rules`, `firestore.indexes.json` (incl. TTL), `storage.rules`, one-time `scripts/setup-gcp-project.sh` |
-| Docs | `docs/` — architecture, threat model, scoring & privacy, design system, Apple distribution, deployment, test matrix, ADRs, product spec |
-| Design | Apple HIG + native iOS 26 Liquid Glass (iOS 18 fallbacks) — `docs/design-system.md` |
+| Play on TestFlight | An iPhone on iOS 18 or later, an invite to the TestFlight build, and Location set to *While Using the App* with Precise Location on |
+| Run it locally | A Mac with Xcode 27, Node 24, Java 21 and the Firebase CLI. No cloud account needed |
+| Run it on your own iPhones | The above, plus a free Apple Personal Team. Push notifications and Sign in with Apple need the paid Apple Developer Program |
+| Host your own backend | A dedicated Firebase project on the Blaze (pay-as-you-go) plan |
 
-## Live updates
-Phones subscribe to their own sanitized Firestore view and also reconcile over REST every 10 s, restarting the listener if it goes quiet (ADR 0010). Game timing never depends on either.
+## Quick start for developers
 
-On a locked phone the round is a **Live Activity** on the Lock Screen, in the Dynamic Island, on the Apple Watch Smart Stack and on CarPlay. It shows the phase, the clock and the next ping, never a location. The app updates it, and the server keeps it current with ActivityKit pushes through FCM (ADR 0017).
-
-## The invariant
-While a round is active, the seeking operator can access **only released, scheduled hider pins** — never the hider's live route, latest sample or upcoming position. This is enforced in the server and in Firestore/Storage rules, not by hiding UI. The host gets no special visibility. See `docs/permissions-threat-model.md`.
-
-## Quick start (local, no cloud account needed)
-
-Requirements: Node 24+, Java 21 (Firebase emulators — JDK 24+ crashes the Storage emulator on the first upload; `scripts/emulator-start.sh` picks an installed JDK 21), Firebase CLI, Xcode 16+ (built with Xcode 27; two-phone E2E verified on iOS 18.5 simulators).
+Everything runs locally against the Firebase emulators, using the `demo-manhunt` project. Nothing can touch a real project.
 
 ```bash
 cd backend && npm ci && cd ..
-scripts/dev.sh                     # emulators + API :8787 + worker :8788 (project demo-manhunt)
+scripts/dev.sh
 ```
 
-In another terminal:
+`dev.sh` starts the emulators, the API on `:8787` and the local worker on `:8788`. Then seed the demo accounts from a second terminal:
 
 ```bash
-cd backend && npm run seed:emulator   # emulator-only demo accounts (backend/scripts/seed-accounts.json)
+cd backend && npm run seed:emulator
 ```
 
-Design QA: `cd backend && npx tsx scripts/ui-fixture.ts <lobby|headstart|chase|pending|paused|recap|night> [seek|hide]` puts the emulator accounts into one game state so each screen can be reviewed.
-
-Open `ios/ManhuntCrews.xcodeproj`, pick a simulator, Run. Sign in with a seeded account (or create one). For two phones use two simulators — or run the automated two-simulator round:
+Open `ios/ManhuntCrews.xcodeproj`, choose an iPhone simulator and Run. Sign in with an account from `backend/scripts/seed-accounts.json`. To play both sides, run a second simulator, or let the scripted two-phone round do it:
 
 ```bash
-scripts/e2e-two-simulators.sh "iPhone 16 Pro Max" "iPhone 16e"   # two iOS 18.5 simulators
+scripts/e2e-two-simulators.sh "iPhone 16 Pro Max" "iPhone 16e"
 ```
 
-Physical iPhones: see `docs/apple-distribution.md` (free Personal Team works for development; Push and Sign in with Apple need the paid program).
+The [developer guide](docs/development.md) covers setup, tests, physical iPhones, design-QA fixtures and troubleshooting.
 
-## Tests
+## Documentation
 
-```bash
-cd backend
-npm run typecheck
-npm run test:unit                  # domain, privacy invariant, OpenAPI contract
-npm run test:integration           # Auth/Firestore/Storage emulators: full 4-round night + hard negative security tests + rules
-xcodebuild test -project ios/ManhuntCrews.xcodeproj -scheme ManhuntCrews -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:ManhuntCrewsTests
+| | |
+|---|---|
+| [How to play](docs/how-to-play.md) | The player guide |
+| [Developer guide](docs/development.md) | Setup, running, testing, common changes, troubleshooting |
+| [Architecture](docs/architecture.md) | How the app, the API, the worker and Firestore fit together |
+| [Data model](docs/data-model.md) · [API](docs/api.md) | Firestore and Storage layout; REST conventions and routes |
+| [Privacy & threat model](docs/permissions-threat-model.md) · [Scoring & retention](docs/scoring-and-privacy.md) | What's protected and how; how times, distances and scores are defined |
+| [Deployment](docs/deployment.md) · [Production release](docs/release-prod.md) · [iOS signing](docs/apple-distribution.md) | Backend deploys, TestFlight releases, device builds |
+| [Test matrix](docs/test-matrix.md) | What's tested where, latest results, the physical-device checklist |
+| [Design system](docs/design-system.md) | The iOS design: HIG, Liquid Glass, colour, accessibility |
+| [Decisions (ADRs)](docs/adr/README.md) · [Original spec](docs/product-spec.md) · [Glossary](docs/glossary.md) | Why it is the way it is |
+| [AGENTS.md](AGENTS.md) | Rules and workflow for AI coding agents and contributors |
+
+All the docs are listed in [docs/README.md](docs/README.md).
+
+## Repository layout
+
+```
+ios/            SwiftUI app, Live Activity widget extension, unit + UI tests
+backend/        Node 24 + TypeScript: game core, API, Cloud Functions entry, tests
+shared/         OpenAPI contract and the Live Activity fixture shared by app and server
+hosting/        Privacy policy and support pages (Firebase Hosting)
+scripts/        Local stack, two-simulator E2E, project setup, deploy, iOS signing and release
+docs/           Guides, architecture, runbooks, ADRs
+firebase.json, firestore.rules, firestore.indexes.json, storage.rules   Firebase config
 ```
 
-Results and the physical-device acceptance checklist: `docs/test-matrix.md`.
+## Deploying
 
-## Deploying (requires your approval and a dedicated Firebase project on Blaze)
-Nothing in this repo deploys automatically. `docs/deployment.md` walks through the one-time `scripts/setup-gcp-project.sh` (service account, IAM, private bucket, alerts) and `scripts/deploy-backend.sh`, which runs a single `firebase deploy --only functions,firestore,auth,hosting`. The production project and TestFlight steps: `docs/release-prod.md`. Both scripts refuse non-Manhunt project ids and ask you to type the id. To try the deployable functions locally: `cd backend && npm run serve:functions` (Functions + Cloud Tasks emulators; stop `dev.sh` first).
-
-## Repository map
-```
-backend/src/domain      pure game core (state machine, clock, ping selection, geo, scoring, views)
-backend/src/services    Firestore transactions, finalization, social, deletion/retention, schedulers, storage, push
-backend/src/api         public Fastify API      backend/src/functions  Cloud Functions entry (api, tick, watchdog, retention)
-backend/src/worker      tick payload + local-only worker for dev.sh/tests
-backend/tests           unit / integration / security (emulators)
-ios/ManhuntCrews        App, Features/*, Services/{API,Auth,Location,OfflineQueue,Realtime,Clock,Notifications,LiveActivity}, Models
-ios/ManhuntCrewsWidgets Live Activity extension    ios/LiveActivityShared  attributes + wording shared by app and extension
-ios/ManhuntCrewsTests   unit tests          ios/ManhuntCrewsUITests  two-simulator E2E
-scripts/                dev.sh, emulator-start.sh, e2e-two-simulators.sh, setup-gcp-project.sh, deploy-backend.sh, setup-firebase.md
-```
+Nothing in this repo deploys on its own. Deploys and anything billed need a dedicated Firebase project on Blaze, and your approval. Start with [docs/deployment.md](docs/deployment.md) for the backend and [docs/release-prod.md](docs/release-prod.md) for TestFlight. The deploy and setup scripts refuse project ids without "manhunt" in them and ask you to type the id before they do anything.

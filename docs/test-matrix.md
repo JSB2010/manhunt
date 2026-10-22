@@ -2,7 +2,7 @@
 
 Legend: ✅ automated and passing · 🟡 partially covered / simulator only · ⏳ requires physical iPhones (not yet run) · — not applicable.
 
-## Automated suites (run on 2026-10-17, macOS, Xcode 27.0, Node 24.18, Firebase CLI 15.28)
+## Automated suites (first run 2026-10-17; latest full backend and iOS unit run 2026-10-22 on macOS, Xcode 27.1, Node 24.18, Firebase CLI 15.28.1, JDK 21)
 
 | Suite | Command | Result |
 |---|---|---|
@@ -15,10 +15,10 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 | iOS **Prod** configuration (unsigned build) | `xcodebuild build -scheme "ManhuntCrews Prod" -configuration Prod -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ 2026-10-20: your bundle ID and prod API URL from `Prod.local.xcconfig`, `GoogleService-Info-Prod.plist` bundled, emulators off, manual signing settings resolved |
 | Manual signing helper | `scripts/ios-signing.sh csr` / `install` in a throwaway HOME + keychain with a self-signed stand-in certificate and CMS-signed fake profile | ✅ key/cert pair into an identity; profile checks (bundle, App Store type, push, certificate membership) and `Prod.local.xcconfig` output work. A real Apple certificate and upload are not yet exercised |
 | Prod Firebase project | `firebase deploy --only auth,firestore:rules --project <prod-project-id>` | ✅ 2026-10-20: Email/Password enabled, rules live. Indexes/TTL need Blaze |
-| iOS unit + listener integration (XCTest) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 55 / 55, listener test skipped (2026-10-22 on Xcode 27.1, iOS 27.0 simulator: + Live Activity mapping) · 47 / 47 (2026-10-21 on iPhone 17 / iOS 27: crews, shuffler, gzip, conditional reload, newest-first recovery, auth resilience, clock through device sleep; the listener test runs only when the local stack is up and the build points at it, e.g. `MH_DEV_HOST=127.0.0.1`) |
-| iOS app build (Debug, simulator) | `xcodebuild build …` | ✅ 2026-10-22 on Xcode 27.1 with the Live Activity extension (Debug simulator and Release device): no warnings in app or widget sources. Also built by CI (`.github/workflows/ios.yml`) on every iOS change |
-| iOS Live Activity mapping and wording on Linux | SwiftPM harness compiling `GameModels.swift`, `JSONCoding.swift`, `LiveActivityShared/RoundActivityAttributes.swift` and `RoundActivityContent.swift` with Swift 6.4.1, running `LiveActivityTests.swift` (CoreLocation stubbed) | ✅ 8 / 8 (2026-10-22); a one-second drift in the mapping fails the contract test |
-| iOS Release build for device (unsigned) | `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ |
+| iOS unit + listener integration (XCTest) | `xcodebuild test … -only-testing:ManhuntCrewsTests` | ✅ 55 passed, 1 skipped / 56 (2026-10-22 on iPhone 17 / iOS 27, with the Live Activity extension: + `LiveActivityContractTests` against `shared/fixtures/live-activity.json` and `LiveActivityTextTests`; the listener test skipped because the local stack wasn't running) · 47 / 47 (2026-10-21 on iPhone 17 / iOS 27: crews, shuffler, gzip, conditional reload, newest-first recovery, auth resilience, clock through device sleep; the listener test runs only when the local stack is up and the build points at it, e.g. `MH_DEV_HOST=127.0.0.1`) |
+| iOS app build (Debug, simulator) | `xcodebuild build …` | ✅ 2026-10-22: app + `ManhuntCrewsWidgets` extension build with Xcode 27.1; no warnings in app or extension sources (test sources have 7 Swift 6 `Sendable` warnings in `AuthResilienceTests.swift`). The Live Activity UI itself is not yet checked on a simulator or device. CI (`.github/workflows/ios.yml`) builds Debug + Release and runs the unit tests on every iOS change |
+| iOS Live Activity mapping and wording on Linux (superseded by the macOS run above) | SwiftPM harness compiling `GameModels.swift`, `JSONCoding.swift`, `LiveActivityShared/RoundActivityAttributes.swift` and `RoundActivityContent.swift` with Swift 6.4.1, running `LiveActivityTests.swift` (CoreLocation stubbed) | ✅ 8 / 8 (2026-10-22); a one-second drift in the mapping fails the contract test |
+| iOS Release build for device (unsigned) | `xcodebuild build -configuration Release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO` | ✅ 2026-10-22 with the `ManhuntCrewsWidgets` extension, no warnings in app or extension sources |
 | Setup / deploy scripts | `bash -n scripts/setup-gcp-project.sh scripts/deploy-backend.sh`; every gcloud flag checked against `--help` (gcloud 580) | ✅ syntax only; never run against a project |
 | Two-simulator E2E (real app ×2 + local stack) | `scripts/e2e-two-simulators.sh` | see "Two-simulator E2E" below |
 
@@ -38,7 +38,7 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 | Comparison validity across unequal/censored/aborted/rule-changed rounds | `unit/scoring.test.ts`, edge-cases |
 | Real Firebase Auth tokens in emulator; rules | all integration tests use emulator-issued ID tokens; `security/firestore-rules.test.ts` |
 | Payload cannot reassign team/role | security "role/team smuggling" |
-| Exactly two UIDs; third operator denied | gameplay join test; engine distinct-operator test |
+| Crews of 1–5 phones; a sixth phone is refused; mid-round joiners are spectators (ADR 0013, superseding "exactly two operators") | edge-cases "a crew takes at most five phones"; gameplay join tests; engine "several phones per crew" |
 | Raw hider data unreadable by seeker **who is also host** | security suite (host = seeker) + rules suite |
 | Photos only post-authorization; EXIF stripped | gameplay (GPS/serial strings removed); security (outsider 404) |
 | Late GPS never retro-leaks | pingSelection unit + security "late (offline) uploads" |
@@ -134,7 +134,7 @@ Simulators cannot validate real GPS reliability, suspension, signal loss or Low 
 | Finalized round inspected by both | Combined routes, photos, distances | ✅ emulator |
 
 ### Outdoor protocol (to run)
-1. Two iPhones on cellular, both signed in (Debug build pointed at a reachable stack — LAN with `API_HOST=0.0.0.0 scripts/dev.sh` while on the same Wi-Fi, or a deployed dev backend).
+1. Two iPhones on cellular, both signed in, with a build pointed at a reachable stack: `scripts/dev.sh` on the same Wi-Fi (it already listens on all interfaces), a deployed dev backend, or a TestFlight build against prod.
 2. Rules: 10 min head start, 10 min pings (or 2/2 for a quick run). Hider walks ≥ head start + 2 intervals with the phone locked in a pocket; seeker rides as a **passenger**.
 3. Repeat with: screen locked, app backgrounded, airplane mode for 2 min mid-chase, Low Power Mode on.
 4. Record: ping sample ages (recap "Pings" list), coverage %, distance vs. a reference (e.g., Apple Fitness walk), screenshots of both phones. Keep raw exports inside `test-artifacts/private/` (git-ignored).

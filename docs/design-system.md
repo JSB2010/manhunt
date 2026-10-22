@@ -36,11 +36,12 @@ All colors are asset-catalog colors with **light, dark and Increase Contrast** v
 | `AccentColor` | "Go" actions and OK status | #1B7F3B | #28A653 | 5.1:1 on white · 5.4:1 on #1C1C1E · white label on tint ≥ 3.1:1 |
 | `CrewA` | Crew identity | #1565C0 | #3D8EF0 | 5.7:1 · 5.1:1 · white on tint 3.3:1 (dark) |
 | `CrewB` | Crew identity | #C2410C | #EE6A30 | 5.2:1 · 5.5:1 · white on tint 3.1:1 (dark) |
+| `CrewC` | Crew identity (third crew, ADR 0013) | #2E7D32 | #66BB6A | 5.1:1 · 7.2:1 · white on tint 5.1:1 (light), **2.4:1 (dark)**: below 3:1, so don't put white labels on the dark CrewC tint |
 | `Warning` | Status (with ⚠ symbol) | #B25000 | #FFB340 | 5.2:1 · 9.5:1 |
 | `Danger` | Status (with ⛔ symbol) | #D70015 | #FF6961 | 5.4:1 · 6.0:1 |
 
 Rules:
-- **Color = crew, never role.** Hiding and seeking are always a symbol plus a word: `eye.slash.fill` "Hiding", `binoculars.fill` "Seeking". Released pins are drawn in the hiding crew's color. The server's crew hex values are not used on iOS; the app maps crew A/B to adaptive tokens.
+- **Color = crew, never role.** Hiding and seeking are always a symbol plus a word: `eye.slash.fill` "Hiding", `binoculars.fill` "Seeking". Released pins are drawn in the hiding crew's color. The server's crew hex values are not used on iOS; the app maps crews A/B/C to adaptive tokens.
 - **Status is never color alone.** Every state has a distinct symbol shape (checkmark circle, triangle, octagon, minus circle) and the text stays primary.
 - Text sizes come from text styles only. The game clock uses `@ScaledMetric` with rounded design and monospaced digits, so it grows with Dynamic Type.
 - Spacing uses system defaults (`padding()`, default stack spacing). Explicit values exist only in the shared components.

@@ -55,7 +55,7 @@ Later deploys are step 3 only. `firebase deploy --only functions:api` (or `:tick
 | `APP_ENV` | Functions param, saved in `backend/.env.<project>` (git-ignored) | `dev` / `prod`; prod refuses emulator hosts |
 | `GCLOUD_PROJECT`, `FIREBASE_CONFIG` | set by Cloud Functions | project id |
 | `MEDIA_BUCKET` | optional override | default `<project>-manhunt-media` |
-| `INVITE_TTL_MINUTES`, `MAX_PHOTO_BYTES` | optional, in `backend/.env.<project>` | |
+| `INVITE_TTL_MINUTES`, `MAX_PHOTO_BYTES` | optional, in `backend/.env.<project>` | `INVITE_TTL_MINUTES` (default 60) × 12 sets the lifetime of direct friend invites (12 h). Night codes last until the night ends, at most 7 days. Photos default to 8 MB |
 
 Region (`us-central1`) and the runtime service account are set in `backend/src/functions/index.ts`; keep the region near the Firestore location and pass the same `REGION` to the setup script. Firebase Admin uses the function's service account (ADC). APNs credentials live in Firebase (uploaded .p8), not in this backend.
 
