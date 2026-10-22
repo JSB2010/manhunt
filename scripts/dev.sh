@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Local stack: Firebase emulators + public API (:8787) + private worker (:8788).
 # Uses the demo-manhunt project id: nothing here can touch production.
-#   scripts/dev.sh            # emulators + API/worker
-#   API_HOST=0.0.0.0 scripts/dev.sh   # reachable from a physical iPhone on your LAN
+#   scripts/dev.sh                    # emulators + API/worker; the API listens on all interfaces,
+#                                     # so a physical iPhone on your Wi-Fi can reach it
+#   API_HOST=127.0.0.1 scripts/dev.sh # this Mac only
 set -euo pipefail
 cd "$(dirname "$0")/.."
 (cd backend && [ -d node_modules ] || npm ci)
