@@ -55,6 +55,10 @@ Legend: ✅ automated and passing · 🟡 partially covered / simulator only · 
 
 Nights recorded before crews v2 were never migrated. The current code crashed on them. For an account with such a night, `GET /v1/sessions` returned 500, because the old crews have `operatorUid` instead of `operatorUids`. So did person stats, because the old rounds have no `operatorsByTeam`. Night analytics, export and delete-my-data broke on the same nights. Delete-my-data would also have left the hider's pins unredacted in `pings/p{index}`: those pins have no `sourceUid`, and the check required `null`. Their stored views (schema 1) came back to a night's detail screen in a shape the app can't decode. Old documents are now upgraded as they're read (`domain/legacy.ts`), a schema-1 stored view is replaced by a freshly rendered one, and the pin check treats a missing source like `null`. `integration/legacy-nights.test.ts` fails without these changes: all four cases, with the same 500 the app showed as "Internal error". On the app side, a person's stats screen swallowed the error and showed a spinner forever. It now shows the error with Try Again.
 
+## Push notifications on production (2026-10-23)
+
+Every Live Activity push on 2026-10-22 failed with `messaging/third-party-auth-error`. The cause was in the Firebase console, not the code: the production project had no APNs authentication key or certificate, so no notification of any kind reached an iPhone. The team's existing production APNs key, limited to the app's bundle id, was uploaded (Project settings › Cloud Messaging). A test notification sent through FCM HTTP v1 to one TestFlight iPhone then returned `200` and arrived on the phone. ✅ Ordinary pushes. ⏳ Live Activity pushes, which need a real round.
+
 ## Found playing a full night (2026-10-22, 5 rounds, 7 phones, crews reshuffled 4 times; reviewed 2026-10-23)
 
 Read from the production records and logs, then replayed in the emulator:

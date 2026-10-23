@@ -30,6 +30,7 @@ Below, `<bundle-id>` is your `MH_BUNDLE_ID` and `<prod-project-id>` your Firebas
    ```
    The first time `codesign` uses the key, macOS asks for keychain access; choose **Always Allow**. If the script says the certificate isn't trusted, run the command it prints, which installs Apple's WWDR intermediate.
 5. **Keys → +** → name "Manhunt Crews APNs" → enable **Apple Push Notifications service (APNs)**.
+   - **Configure**: environment **Production** (TestFlight and App Store builds use it) and **Topic Specific** with the app's bundle id, so the key can't send for the team's other apps. Live Activity pushes need a key like this one: they work only over a token-based (`.p8`) connection, never with a certificate.
    - Download the `.p8`. You can download it only once.
    - Note its **Key ID** and your **Team ID**.
    - Never put the file in the repo.
@@ -51,7 +52,8 @@ Below, `<bundle-id>` is your `MH_BUNDLE_ID` and `<prod-project-id>` your Firebas
 
 ## 3. Firebase console (console.firebase.google.com → your project)
 1. **Upgrade to Blaze** (Usage and billing → Modify plan) and link a billing account. Set a budget.
-2. **Project settings → Cloud Messaging → Apple app configuration** → upload the APNs `.p8` with its Key ID and Team ID. The same key carries the Live Activity pushes (ADR 0017); there's nothing else to configure.
+2. **Project settings → Cloud Messaging → Apple app configuration** → upload the APNs `.p8` with its Key ID and Team ID as the **production** APNs auth key. Firebase lists it as the development key too; with a Production-only key sandbox pushes would fail, which doesn't matter because Debug builds use the dev project. The same key carries the Live Activity pushes (ADR 0017); there's nothing else to configure.
+   - Check afterwards that the page lists the key. Without it FCM can't reach APNs at all: every notification and Live Activity push to iPhones fails with `messaging/third-party-auth-error`, which is what happened on 2026-10-22.
 
 ## 4. Backend (terminal, after Blaze)
 1. Choose a public contact email for the privacy and support pages. Put it in `hosting/contact-email.local` (git-ignored) or export `CONTACT_EMAIL`. The Hosting predeploy (`scripts/build-hosting.mjs`) fills it in, and the deploy refuses to publish without it.
