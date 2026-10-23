@@ -1,0 +1,16 @@
+# ADR 0018 — A phone's owner plays on the phone's crew
+
+**Status:** accepted · **Updates:** ADR 0013 (joining, crews edited between rounds) · **Spec:** §2 (people and crews), §6.3 (crew-attributed person stats)
+
+**Context.** Rounds are credited to people through the crew rosters frozen at each round's start (`round.rosterSnapshot`); person statistics follow those rosters. On the night of 2026-10-22 (five rounds, seven phones, crews reshuffled four times) the rosters drifted away from the phones:
+* The organizer typed everyone's full names ("Sasha Okafor", "Marco Bellini", "Riley Quinn", "Theo Marsh"). Phones joined with accounts named "Sasha", "Marco", "rileyquinn", "Theo". A join added the account's own person unless a roster held exactly the same name, so four people were listed twice and counted as two people each.
+* Moving a phone to another crew moved only the phone. Its owner's name stayed on the old crew. Marco's phone sought for crews A and B and hid for crew C; his statistics said he hid twice for crew B. A crew made of moved phones (crew C) hid with an empty roster.
+* Deleting crew C logged its phones as moved "from null".
+
+**Decision.**
+* **The link.** Each member records the roster person its owner plays as in the night: `MemberDoc.rosterPersonId`. Older members fall back to their own person record, or a roster name equal to their display name (`crews.ownerPersonId`). Views expose it as `operators[].personId`, as before; no new data reaches other phones.
+* **Joining.** `POST /v1/invites/preview` returns `suggestedPersonId`, the roster name this account most likely is, and `claimedPersonIds`, the names other phones already play as. `crews.matchRosterPerson` tries, in order: the account's own person on a roster; the same name ignoring case and spacing; the same letters ("rileyquinn" = "Riley Quinn"); a one-word name that is a word of exactly one longer name ("Sasha" = "Sasha Okafor", "whitfield" = "Dana Whitfield", and the reverse). Names other phones play as are skipped, and an ambiguous match is no match. The app asks "Who are you?" with that suggestion selected, and `POST /v1/invites/redeem` takes the answer as `personId` (400 if the name is not in the night or another phone plays as it). Without a name the account's own person is added, as before. Joining without a crew picks the crew that lists the name.
+* **Moves.** Moving a phone to another crew moves its owner's roster entry to that crew (`movePhone`), whether or not the client moved it. When a crew is deleted, each displaced phone's owner goes with it. `OPERATOR_MOVED` names the deleted crew as `from`. The app's crew editor moves the name in its draft as soon as a phone's crew is changed.
+* Names of people without a phone stay where the editor puts them.
+
+**Consequences.** Rosters, and so round snapshots, scorecards and person statistics, follow the people who actually played on each crew. The night of 2026-10-22 stays as it was recorded; correcting it is a one-off data repair, not part of this change. Nothing new is readable by other phones: `personId` already linked a phone to a roster name. Proven by `tests/unit/crews.test.ts` (matching, ownership, moves) and `tests/integration/night-replay.test.ts` (that night's joins, moves and crew deletion, and the resulting person statistics).

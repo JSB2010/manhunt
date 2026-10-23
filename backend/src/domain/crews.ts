@@ -67,3 +67,69 @@ export const roundUids = (r: Pick<RoundDoc, 'hidingTeam' | 'seekingTeams' | 'ope
 export function rosterFingerprint(roster: readonly { personId: string }[] | undefined): string {
   return [...(roster ?? [])].map((p) => p.personId).sort().join(',');
 }
+
+// ---------------------------------------------------------------------------
+// A phone's owner on the rosters (ADR 0018)
+// ---------------------------------------------------------------------------
+
+/** The crew whose roster lists a person, or null. */
+export function crewOfPerson(session: SessionDoc, personId: string): TeamKey | null {
+  for (const k of teamKeysOf(session)) if (session.teams[k]!.roster.some((p) => p.personId === personId)) return k;
+  return null;
+}
+
+const nameKey = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
+const compactKey = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+const words = (s: string) => nameKey(s).split(' ').filter((w) => w.length >= 2);
+
+/**
+ * The roster entry a joining phone's owner most likely already is: their own person record,
+ * then the same name, the same letters ("rileyquinn" = "Riley Quinn"), and finally a
+ * one-word name that is a word of exactly one longer name ("Sasha" = "Sasha Okafor", or the
+ * reverse). Entries already linked to another phone are skipped; an ambiguous match is no match.
+ */
+export function matchRosterPerson(
+  session: SessionDoc,
+  owner: { displayName: string; selfPersonId: string | null },
+  claimed: ReadonlySet<string> = new Set(),
+): string | null {
+  const entries = teamKeysOf(session).flatMap((k) => session.teams[k]!.roster);
+  if (owner.selfPersonId && entries.some((p) => p.personId === owner.selfPersonId)) return owner.selfPersonId;
+  const free = entries.filter((p) => !claimed.has(p.personId) && p.personId !== owner.selfPersonId);
+  const unique = (pred: (p: { displayName: string }) => boolean) => {
+    const hits = free.filter(pred);
+    return hits.length === 1 ? hits[0]!.personId : null;
+  };
+  const name = owner.displayName;
+  if (!nameKey(name)) return null;
+  const oneWord = (a: string, b: string) => {
+    const [wa, wb] = [words(a), words(b)];
+    return (wa.length === 1 && wb.length > 1 && wb.includes(wa[0]!)) || (wb.length === 1 && wa.length > 1 && wa.includes(wb[0]!));
+  };
+  return (
+    unique((p) => nameKey(p.displayName) === nameKey(name)) ??
+    (compactKey(name).length >= 3 ? unique((p) => compactKey(p.displayName) === compactKey(name)) : null) ??
+    unique((p) => oneWord(name, p.displayName))
+  );
+}
+
+/**
+ * The roster person a phone's owner plays as: the link made when the phone joined, else
+ * their own person record or (nights from before the link) a roster name equal to theirs.
+ */
+export function ownerPersonId(session: SessionDoc, member: { rosterPersonId?: string | null; selfPersonId: string | null; displayName: string }): string | null {
+  if (member.rosterPersonId && crewOfPerson(session, member.rosterPersonId)) return member.rosterPersonId;
+  if (member.selfPersonId && crewOfPerson(session, member.selfPersonId)) return member.selfPersonId;
+  const named = teamKeysOf(session).flatMap((k) => session.teams[k]!.roster).filter((p) => nameKey(p.displayName) === nameKey(member.displayName));
+  return named.length === 1 ? named[0]!.personId : null;
+}
+
+/** Move a person's roster entry to crew `to` (in place). Returns the crew it left, or null if it didn't move. */
+export function movePersonToCrew(session: SessionDoc, personId: string, to: TeamKey): TeamKey | null {
+  const from = crewOfPerson(session, personId);
+  if (!from || from === to || !session.teams[to]) return null;
+  const entry = session.teams[from]!.roster.find((p) => p.personId === personId)!;
+  session.teams[from]!.roster = session.teams[from]!.roster.filter((p) => p.personId !== personId);
+  session.teams[to]!.roster.push(entry);
+  return from;
+}

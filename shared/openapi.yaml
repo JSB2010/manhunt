@@ -245,7 +245,7 @@ components:
             myTeam: { type: [string, 'null'] }
             completedRoundCount: { type: integer }
             rules: { $ref: '#/components/schemas/Rules' }
-            teams: { type: object, description: 'Per crew: {teamId, key, name, color, roster, operators: [{uid, personId, displayName, isMe, consentGiven}], isMine}' }
+            teams: { type: object, description: 'Per crew: {teamId, key, name, color, roster, operators: [{uid, personId (the roster name the phone''s owner plays as), displayName, isMe, consentGiven}], isMine}' }
             joinCode: { type: [string, 'null'], description: reusable night code; null once the night ends }
             revoked: { type: boolean }
         round: { oneOf: [{ $ref: '#/components/schemas/RoundView' }, { type: 'null' }] }
@@ -380,11 +380,11 @@ paths:
     post:
       summary: Night summary for a code or direct invite, with each crew's phone count. Only failed lookups count toward the brute-force limit.
       requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { code: { type: string }, inviteId: { type: string } } } } } }
-      responses: { '200': { description: '{sessionId, title, scheduledDate, teams, suggestedTeam, myTeam, hostDisplayName, rules, expiresAt}' }, '410': { $ref: '#/components/responses/Error' } }
+      responses: { '200': { description: '{sessionId, title, scheduledDate, teams, suggestedTeam, myTeam, hostDisplayName, rules, expiresAt, claimedPersonIds (roster names another phone plays as), suggestedPersonId (the roster name this account most likely is, or null)}' }, '410': { $ref: '#/components/responses/Error' } }
   /v1/invites/redeem:
     post:
-      summary: 'Join the night as an operator phone of a crew (default: the crew with the fewest phones; at most 5 per crew). Re-joining is a no-op.'
-      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { code: { type: string }, inviteId: { type: string }, teamKey: { $ref: '#/components/schemas/TeamKey' } } } } } }
+      summary: 'Join the night as an operator phone of a crew (default: the crew listing the joiner''s name, else the crew with the fewest phones; at most 5 per crew). The phone plays as `personId` (a roster name of this night no other phone plays as), else the name it matches, else its own person record is added (ADR 0018). Re-joining is a no-op.'
+      requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { code: { type: string }, inviteId: { type: string }, teamKey: { $ref: '#/components/schemas/TeamKey' }, personId: { type: string } } } } } }
       responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK }, '410': { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}/setup:
     patch:

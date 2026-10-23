@@ -85,7 +85,7 @@ Paths are relative to the base URL. The OpenAPI file has the request bodies and 
 | `GET /v1/sessions/{id}` | **My sanitized view** of the night (the same document as the Firestore listener). ETag / 304 |
 | `DELETE /v1/sessions/{id}` | Organizer deletes the whole night: the Firestore subtree and GCS objects |
 | `POST /v1/sessions/{id}/invites` | Show or regenerate the night code, or directly invite a friend |
-| `POST /v1/invites/preview` · `POST /v1/invites/redeem` | Look up a code · join, choosing a crew |
+| `POST /v1/invites/preview` · `POST /v1/invites/redeem` | Look up a code (with `suggestedPersonId`, the roster name this account most likely is, and `claimedPersonIds`, names other phones play as) · join, choosing a crew and optionally `personId`, the roster name the joiner plays as (ADR 0018) |
 | `PATCH /v1/sessions/{id}/setup` | Between-round editor: title, rules, crews, rosters, phone moves (ADR 0014) |
 | `POST /v1/sessions/{id}/consent` | Tracking and route-sharing consent for this night |
 | `POST /v1/sessions/{id}/ready` | Ready mark for my crew, with a preflight health report |

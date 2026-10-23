@@ -51,7 +51,7 @@ A ping only uses a GPS fix that meets the last two rules. If none does, the ping
 Every phone that plays needs to join the night:
 
 - The night code is on **Night Code** in the lobby, and anyone on the night can show it. It works for every crew until the night ends. **New Code** replaces it, and the old code stops working.
-- Others tap **Join with a Code** (or open the shared link), check the night under **Review & Join**, and pick their crew. The app suggests the crew with the fewest phones.
+- Others tap **Join with a Code** (or open the shared link), check the night under **Review & Join**, and pick their crew. Under **Who Are You?** they pick the name the organizer typed for them (the app suggests one), so their rounds count for them and nobody is listed twice; **Not listed — add me** adds their own name. Picking a name picks that name's crew, and otherwise the app suggests the crew with the fewest phones.
 - You can also invite a friend directly from your friends list.
 
 ## 3. Ready and start
@@ -107,7 +107,7 @@ The round shows as a **Live Activity** on the Lock Screen and in the Dynamic Isl
   - Routes appear only after the round, only to the phones that played it, and only if every phone agreed.
   - Distances are per crew: the hiders on foot for the whole round and for the chase, and each seeking crew for the chase.
 - **Next round:** any phone taps **Next: Round N**. The app suggests the crew that has hidden least, and **Someone Else Hides…** picks another.
-- **Between rounds:** **Crews & Rules…** renames, adds or removes crews, edits rosters and rules, and moves phones between crews. A phone that joins or moves mid-round watches until the next round.
+- **Between rounds:** **Crews & Rules…** renames, adds or removes crews, edits rosters and rules, and moves phones between crews. A phone's owner moves with the phone, so the rounds they play count for their new crew. A phone that joins or moves mid-round watches until the next round.
 - **End Night:** any phone can end the night, and the night code stops working.
 
 ## Scores

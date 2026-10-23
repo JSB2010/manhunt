@@ -2,7 +2,22 @@ import { createHash, randomInt } from 'node:crypto';
 import { Timestamp, type Transaction } from 'firebase-admin/firestore';
 import type { z } from 'zod';
 import { effectiveChaseMs } from '../domain/clock.js';
-import { crewOfUid, hiderUids, operatorUidsOf, roleOf, roundTeams, roundUids, rosterFingerprint, seekerUids, snapshotTeamOf, teamKeysOf } from '../domain/crews.js';
+import {
+  crewOfPerson,
+  crewOfUid,
+  hiderUids,
+  matchRosterPerson,
+  movePersonToCrew,
+  operatorUidsOf,
+  ownerPersonId,
+  roleOf,
+  roundTeams,
+  roundUids,
+  rosterFingerprint,
+  seekerUids,
+  snapshotTeamOf,
+  teamKeysOf,
+} from '../domain/crews.js';
 import {
   abortRound,
   createRound,
@@ -377,7 +392,9 @@ export class GameService {
       health: emptyHealth(),
       displayName: user!.displayName as string,
       selfPersonId: (user!.selfPersonId as string | undefined) ?? null,
+      rosterPersonId: null,
     };
+    member.rosterPersonId = matchRosterPerson(session, member);
     const t = createRound({ id: rid, session, index: 1, hidingTeam: input.firstHidingTeam ?? suggestedHidingTeam(session), seekMode: input.seekMode ?? 'TOGETHER', actorUid: uid, now });
     const members = { [uid]: member };
     const inviteRef = this.p.invites().doc();
@@ -573,6 +590,10 @@ export class GameService {
     const session = (await this.p.session(inv.sessionId).get()).data() as SessionDoc | undefined;
     if (!session || session.revokedAt || session.status === 'COMPLETED') fail('INVITE_INVALID', 'That night has ended');
     const myTeam = crewOfUid(session!, uid);
+    const [user, memberSnap] = await Promise.all([this.p.user(uid).get(), this.p.members(session!.id).get()]);
+    const members = memberSnap.docs.map((d) => d.data() as MemberDoc).filter((m) => m.active && m.uid !== uid);
+    const claimed = new Set(members.map((m) => ownerPersonId(session!, m)).filter((x): x is string => !!x));
+    const owner = { displayName: (user.get('displayName') as string | undefined) ?? '', selfPersonId: (user.get('selfPersonId') as string | undefined) ?? null };
     return {
       sessionId: session!.id,
       title: session!.title,
@@ -585,13 +606,19 @@ export class GameService {
       ),
       suggestedTeam: emptiestCrew(session!),
       myTeam,
+      // Roster names already played by another phone, and the name this account most likely is (ADR 0018).
+      claimedPersonIds: [...claimed],
+      suggestedPersonId: matchRosterPerson(session!, owner, claimed),
       hostDisplayName: inv.hostDisplayName as string | null,
       rules: session!.rules,
       expiresAt: new Date(inv.expiresAt).toISOString(),
     };
   }
 
-  async redeemInvite(uid: string, input: { code?: string | undefined; inviteId?: string | undefined; teamKey?: TeamKey | undefined }): Promise<ViewDoc> {
+  async redeemInvite(
+    uid: string,
+    input: { code?: string | undefined; inviteId?: string | undefined; teamKey?: TeamKey | undefined; personId?: string | undefined },
+  ): Promise<ViewDoc> {
     const db = this.d.db;
     const user = (await this.p.user(uid).get()).data();
     if (!user) fail('NOT_FOUND', 'Profile not found');
@@ -609,18 +636,30 @@ export class GameService {
         return { view: renderView({ uid, session: session!, round, members, activeClaim: null, now }), notify: null };
       }
       const s = structuredClone(session!);
-      const teamKey = input.teamKey ?? emptiestCrew(s);
+      const selfPersonId = (user!.selfPersonId as string | undefined) ?? null;
+      // A name the joiner picked ("That's me") or the one they most likely are; never one another phone plays as.
+      const claimed = new Set(
+        Object.values(members)
+          .filter((m) => m.active && m.uid !== uid)
+          .map((m) => ownerPersonId(s, m))
+          .filter((x): x is string => !!x),
+      );
+      if (input.personId && (!crewOfPerson(s, input.personId) || claimed.has(input.personId))) {
+        fail('VALIDATION_FAILED', 'That name is not available in this night');
+      }
+      let rosterPersonId = input.personId ?? matchRosterPerson(s, { displayName, selfPersonId }, claimed);
+      const teamKey = input.teamKey ?? (rosterPersonId ? crewOfPerson(s, rosterPersonId) : null) ?? emptiestCrew(s);
       const crew = s.teams[teamKey];
       if (!crew) fail('VALIDATION_FAILED', 'That crew is not part of this night');
       if (crew!.operatorUids.length >= MAX_OPERATORS_PER_TEAM) fail('CONFLICT', `${crew!.name} already has ${MAX_OPERATORS_PER_TEAM} phones`);
       crew!.operatorUids.push(uid);
-      // The phone's owner plays on its crew; add their own person record unless a crew already
-      // lists them — by record, or by name (a guest entry the organizer typed for them).
-      const selfPersonId = (user!.selfPersonId as string | undefined) ?? null;
-      const sameName = (p: PersonRef) => p.personId === selfPersonId || p.displayName.trim().toLowerCase() === displayName.trim().toLowerCase();
-      if (selfPersonId && !teamKeysOf(s).some((k) => s.teams[k]!.roster.some(sameName))) {
+      // The phone's owner plays on its crew (ADR 0018): their roster name moves here, or
+      // their own person record is added when no crew lists them yet.
+      if (rosterPersonId) movePersonToCrew(s, rosterPersonId, teamKey);
+      else if (selfPersonId) {
         crew!.roster.push({ personId: selfPersonId, displayName });
         s.participantPersonIds = [...new Set([...s.participantPersonIds, selfPersonId])];
+        rosterPersonId = selfPersonId;
       }
       if (!s.memberUids.includes(uid)) s.memberUids.push(uid);
       s.updatedAt = now;
@@ -631,6 +670,7 @@ export class GameService {
         active: true,
         displayName,
         selfPersonId,
+        rosterPersonId,
       };
       const nextMembers = { ...members, [uid]: member };
       let r = round;
@@ -734,11 +774,18 @@ export class GameService {
         if (tp === undefined) continue;
         if (tp === null) {
           if (!s.teams[k]) continue;
-          const displaced = s.teams[k]!.operatorUids;
+          const removed = s.teams[k]!;
           delete s.teams[k];
           delete s.keepPhotos[k];
           if (teamKeysOf(s).length < MIN_TEAMS) fail('VALIDATION_FAILED', 'A night needs at least two crews');
-          for (const u of displaced) this.movePhone(s, nextMembers, u, emptiestCrew(s), uid, now, events);
+          for (const u of removed.operatorUids) {
+            const to = emptiestCrew(s);
+            // The phone's owner goes with it; the crew's other names leave the crews with it.
+            const owner = nextMembers[u] && ownerPersonId({ ...s, teams: { ...s.teams, [k]: removed } }, nextMembers[u]!);
+            const entry = owner ? removed.roster.find((p) => p.personId === owner) : undefined;
+            if (entry && !crewOfPerson(s, entry.personId)) s.teams[to]!.roster.push(entry);
+            this.movePhone(s, nextMembers, u, to, uid, now, events, k);
+          }
           continue;
         }
         if (!s.teams[k]) {
@@ -785,12 +832,22 @@ export class GameService {
     return out;
   }
 
-  private movePhone(s: SessionDoc, members: Record<string, MemberDoc>, phone: string, to: TeamKey, actor: string, now: number, events: DomainEvent[]) {
-    const from = crewOfUid(s, phone);
+  /**
+   * Move a phone to another crew. Its owner's roster name goes with it (ADR 0018): crews are
+   * credited by roster, so a name left behind would be credited with the wrong crew's rounds.
+   * `removedFrom`: the crew the phone was on when that crew was deleted in the same edit.
+   */
+  private movePhone(s: SessionDoc, members: Record<string, MemberDoc>, phone: string, to: TeamKey, actor: string, now: number, events: DomainEvent[], removedFrom: TeamKey | null = null) {
+    const from = crewOfUid(s, phone) ?? removedFrom;
     if (from === to) return;
-    if (from) s.teams[from]!.operatorUids = s.teams[from]!.operatorUids.filter((u) => u !== phone);
+    if (from && s.teams[from]) s.teams[from]!.operatorUids = s.teams[from]!.operatorUids.filter((u) => u !== phone);
     s.teams[to]!.operatorUids.push(phone);
-    if (members[phone]) members[phone] = { ...members[phone]!, teamKey: to };
+    const m = members[phone];
+    if (m) {
+      const owner = ownerPersonId(s, m);
+      if (owner) movePersonToCrew(s, owner, to);
+      members[phone] = { ...m, teamKey: to, rosterPersonId: owner ?? m.rosterPersonId ?? null };
+    }
     events.push({ type: 'OPERATOR_MOVED', at: now, actorUid: actor, roundId: null, details: { uid: phone, from, to } });
   }
 

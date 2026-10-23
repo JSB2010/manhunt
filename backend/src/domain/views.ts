@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { chaseStartDeadline, effectiveChaseMs, effectiveHeadStartMs, hasOpenPause, pingDeadline, runningSince, timeCapDeadline } from './clock.js';
-import { crewOfUid, roleOfTeam, roundTeams, sideOfRole, snapshotTeamOf, teamKeysOf } from './crews.js';
+import { crewOfUid, ownerPersonId, roleOfTeam, roundTeams, sideOfRole, snapshotTeamOf, teamKeysOf } from './crews.js';
 import { suggestedHidingTeam } from './engine.js';
 import {
   isFinishedState,
@@ -76,7 +76,7 @@ export interface RulesView extends Rules {}
 export interface OperatorView {
   /** the phone's account id, so any operator can move it between crews (members of the night only) */
   uid: string;
-  /** the operator's own roster person (links the phone to a roster name) */
+  /** the roster person the phone's owner plays as (links the phone to a roster name, ADR 0018) */
   personId: string | null;
   displayName: string;
   isMe: boolean;
@@ -388,7 +388,7 @@ export function renderView(params: {
       roster: t.roster,
       operators: t.operatorUids.map((u) => ({
         uid: u,
-        personId: members[u]?.selfPersonId ?? null,
+        personId: members[u] ? ownerPersonId(session, members[u]!) : null,
         displayName: members[u]?.displayName ?? 'Phone',
         isMe: u === uid,
         consentGiven: !!(members[u]?.consent && !members[u]?.consentRevokedAt),

@@ -38,7 +38,7 @@ struct EditNightSheet: View {
                 } header: {
                     Text("Phones")
                 } footer: {
-                    Text("Every crew needs at least one phone to play.")
+                    Text("Every crew needs at least one phone to play. A phone’s owner moves with it.")
                 }
                 RulesEditor(rules: $rules)
             }
@@ -68,7 +68,21 @@ struct EditNightSheet: View {
     private func phoneCount(_ k: TeamKey) -> Int { phoneCrew.values.filter { $0 == k }.count }
 
     private func binding(_ uid: String) -> Binding<TeamKey?> {
-        Binding(get: { phoneCrew[uid] ?? nil }, set: { phoneCrew[uid] = $0 })
+        Binding(get: { phoneCrew[uid] ?? nil }, set: { k in
+            phoneCrew[uid] = k
+            if let k { followPhone(uid, to: k) }
+        })
+    }
+
+    /// A moved phone takes its owner's name to the new crew (the server does the same, ADR 0018):
+    /// rounds are credited to the names on each crew.
+    private func followPhone(_ uid: String, to k: TeamKey) {
+        guard let pid = phones.first(where: { $0.uid == uid })?.personId,
+              let from = crews.firstIndex(where: { $0.roster.contains { $0.personId == pid } }),
+              let to = crews.firstIndex(where: { $0.key == k }), from != to,
+              let entry = crews[from].roster.first(where: { $0.personId == pid }) else { return }
+        crews[from].roster.removeAll { $0.personId == pid }
+        crews[to].roster.append(entry)
     }
 
     private func load() {

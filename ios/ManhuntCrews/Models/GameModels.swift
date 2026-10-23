@@ -377,8 +377,16 @@ struct InvitePreview: Codable, Sendable {
     var hostDisplayName: String?
     var rules: Rules
     var expiresAt: Date
+    /// Roster names another phone already plays as (ADR 0018).
+    var claimedPersonIds: [String]?
+    /// The roster name this account most likely is.
+    var suggestedPersonId: String?
 
     var teamKeys: [TeamKey] { TeamKey.allCases.filter { teams[$0.rawValue] != nil } }
+    /// The crew whose roster lists a person.
+    func crew(of personId: String) -> TeamKey? {
+        teamKeys.first { k in teams[k.rawValue]?.roster.contains { $0.personId == personId } ?? false }
+    }
 }
 
 struct CaptureTicket: Codable, Sendable {

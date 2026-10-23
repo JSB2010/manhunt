@@ -72,7 +72,7 @@ export const PreviewInviteBody = z
   .strict()
   .refine((b) => !!b.code !== !!b.inviteId, 'Provide exactly one of code or inviteId');
 export const RedeemInviteBody = z
-  .object({ code: z.string().trim().min(6).max(16).optional(), inviteId: id.optional(), teamKey: teamKey.optional() })
+  .object({ code: z.string().trim().min(6).max(16).optional(), inviteId: id.optional(), teamKey: teamKey.optional(), personId: id.optional() })
   .strict()
   .refine((b) => !!b.code !== !!b.inviteId, 'Provide exactly one of code or inviteId');
 

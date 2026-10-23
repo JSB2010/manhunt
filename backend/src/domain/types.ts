@@ -139,8 +139,14 @@ export interface MemberDoc {
   consentRevokedAt: number | null;
   health: DeviceHealth;
   displayName: string;
-  /** the account's own roster person, linking the phone to a roster name */
+  /** the account's own person record */
   selfPersonId: string | null;
+  /**
+   * The roster person this phone's owner plays as in this night (their own record, or the
+   * name the organizer typed for them). Moving the phone moves this name (ADR 0018).
+   * Absent on nights from before the link: `crews.ownerPersonId` falls back.
+   */
+  rosterPersonId?: string | null;
   /** content hash of the phone's stored view; views are rewritten only when it changes */
   viewHash?: string | null;
 }

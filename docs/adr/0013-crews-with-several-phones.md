@@ -1,6 +1,6 @@
 # ADR 0013 — Crews with several equal phones, up to three crews, one night code
 
-**Status:** accepted · **Supersedes:** ADR 0004 (in part), ADR 0008 (pause/resume parties) · **Spec:** §1 ("exactly two participating phone operators"), §3.2, §7.1
+**Status:** accepted, joining and moves updated by ADR 0018 · **Supersedes:** ADR 0004 (in part), ADR 0008 (pause/resume parties) · **Spec:** §1 ("exactly two participating phone operators"), §3.2, §7.1
 
 **Context.** Real nights have more than two phones. Several people on a crew want to follow the game, any of them may need to act (confirm a catch, pause), and some nights split into two seeking crews. The v1 model had exactly one operator phone per crew, two crews, and a host who alone could start, invite and set up rounds.
 

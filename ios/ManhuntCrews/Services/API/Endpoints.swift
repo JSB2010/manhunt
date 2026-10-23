@@ -185,9 +185,10 @@ extension APIClient {
         struct Body: Encodable { var code: String?; var inviteId: String? }
         return try await post("/v1/invites/preview", Body(code: code, inviteId: inviteId))
     }
-    func redeemInvite(code: String? = nil, inviteId: String? = nil, teamKey: TeamKey? = nil) async throws -> SessionViewDoc {
-        struct Body: Encodable { var code: String?; var inviteId: String?; var teamKey: TeamKey? }
-        return try await post("/v1/invites/redeem", Body(code: code, inviteId: inviteId, teamKey: teamKey))
+    /// `personId`: the roster name the joiner plays as ("That's me", ADR 0018).
+    func redeemInvite(code: String? = nil, inviteId: String? = nil, teamKey: TeamKey? = nil, personId: String? = nil) async throws -> SessionViewDoc {
+        struct Body: Encodable { var code: String?; var inviteId: String?; var teamKey: TeamKey?; var personId: String? }
+        return try await post("/v1/invites/redeem", Body(code: code, inviteId: inviteId, teamKey: teamKey, personId: personId))
     }
     func editSetup(_ sid: String, _ body: SetupPatchBody) async throws { let _: OkResponse = try await patch("/v1/sessions/\(sid)/setup", body) }
     func consent(_ sid: String, accepted: Bool) async throws {
