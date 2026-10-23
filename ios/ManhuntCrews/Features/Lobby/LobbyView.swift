@@ -13,6 +13,7 @@ struct LobbyView: View {
     }
     @State private var sheet: Sheet?
     @State private var confirmEndNight = false
+    @State private var confirmUndoReady = false
     @State private var busy = false
     @State private var error: String?
     @State private var startWarnings: [String] = []
@@ -88,6 +89,7 @@ struct LobbyView: View {
             } message: {
                 Text("Played rounds stay in history.")
             }
+
             .task(id: crewReady) { await lobbyHeartbeat() }
             .errorAlert($error)
         }
@@ -129,13 +131,19 @@ struct LobbyView: View {
     }
 
     @ViewBuilder private var readyButton: some View {
-        Button { toggleReady() } label: {
-            ActionLabel(title: crewReady ? "Ready" : "We’re Ready", systemImage: crewReady ? "checkmark.circle.fill" : "figure.run", busy: busy && !allReady)
+        Button { if crewReady { confirmUndoReady = true } else { markReady() } } label: {
+            ActionLabel(title: crewReady ? "Crew Ready" : "We’re Ready", systemImage: crewReady ? "checkmark.circle.fill" : "figure.run", busy: busy && !allReady)
         }
         .floatingButton(prominent: !crewReady)
         .disabled(busy)
         .accessibilityIdentifier("lobby.ready")
         .accessibilityValue(crewReady ? "Your crew is ready. Double-tap to undo." : "Not ready")
+        // Ready is one mark per crew: a second phone tapping "Ready" used to clear it for everyone.
+        .confirmationDialog("Undo Ready for \(myTeam.map { view.session.name($0) } ?? "your crew")?", isPresented: $confirmUndoReady, titleVisibility: .visible) {
+            Button("Undo Ready", role: .destructive) { undoReady() }
+        } message: {
+            Text("Your crew is already marked ready. Undoing it means a phone on your crew has to tap Ready again before the round can start.")
+        }
     }
 
     private var statusHint: String? {
@@ -154,14 +162,16 @@ struct LobbyView: View {
         }
     }
 
-    private func toggleReady() {
+    private func undoReady() {
+        perform($busy, $error) {
+            try await model.api.setReady(view.sessionId, ready: false, preflight: model.location.health())
+            await model.location.stop(flush: false)
+        }
+    }
+
+    private func markReady() {
         guard let role = myRole else { return }
         perform($busy, $error) {
-            if crewReady {
-                try await model.api.setReady(view.sessionId, ready: false, preflight: model.location.health())
-                await model.location.stop(flush: false)
-                return
-            }
             let status = await model.location.requestPermission()
             guard status == .authorizedWhenInUse || status == .authorizedAlways else {
                 throw SimpleError("Location is needed to play. Turn it on in Settings › Manhunt Crews › Location.")
@@ -265,7 +275,7 @@ struct PreflightSection: View {
             StatusRow(title: "Location",
                       value: loc.isAuthorized ? (loc.authorization == .authorizedAlways ? "Always" : "While Using") : "Off",
                       state: loc.isAuthorized ? .ok : .problem)
-            StatusRow(title: "Precise Location", value: loc.preciseLocation ? "On" : "Approximate", state: loc.preciseLocation ? .ok : .warning)
+            StatusRow(title: "Precise Location", value: !loc.isAuthorized ? "—" : loc.preciseLocation ? "On" : "Approximate", state: !loc.isAuthorized ? .neutral : loc.preciseLocation ? .ok : .warning)
             StatusRow(title: "Notifications", value: model.notifications.authorized ? "On" : "Off", state: model.notifications.authorized ? .ok : .neutral)
             StatusRow(title: "Network", value: loc.networkReachable ? "Online" : "Offline", state: loc.networkReachable ? .ok : .problem)
             if let fix = loc.lastFix {

@@ -58,7 +58,8 @@ struct NightSummaryView: View {
         VStack(alignment: .leading, spacing: 8) {
             switch c.status {
             case "COMPARABLE":
-                if let k = c.strongerHidingTeam, let name = d.teams[k.rawValue]?.name {
+                if let k = c.strongerHidingTeam {
+                    let name = crewName(d, k)
                     Label { Text("\(name) lasted longest while hiding") } icon: {
                         Image(systemName: "medal.fill").foregroundStyle(Theme.crew(k))
                     }
@@ -108,21 +109,26 @@ struct NightSummaryView: View {
     private func trend(_ d: SessionAnalytics) -> some View {
         Chart(d.scorecard.trend) { t in
             BarMark(x: .value("Round", "R\(t.roundIndex)"), y: .value("Minutes", Double(t.observedChaseSeconds) / 60))
-                .foregroundStyle(by: .value("Hiding crew", d.teams[t.hidingTeam.rawValue]?.name ?? t.hidingTeam.rawValue))
+                .foregroundStyle(by: .value("Hiding crew", crewName(d, t.hidingTeam)))
                 .annotation(position: .top) {
                     Text(t.outcome == "ABORTED" ? "aborted" : (t.isRightCensored ? "≥" : "") + Fmt.clock(Double(t.observedChaseSeconds)))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
                 .opacity(t.outcome == "ABORTED" ? 0.3 : 1)
-                .accessibilityLabel("Round \(t.roundIndex), \(d.teams[t.hidingTeam.rawValue]?.name ?? "") hid")
+                .accessibilityLabel("Round \(t.roundIndex), \(crewName(d, t.hidingTeam)) hid")
                 .accessibilityValue(t.outcome == "ABORTED" ? "aborted" : (t.isRightCensored ? "at least " : "") + Fmt.spokenDuration(Double(t.observedChaseSeconds)))
         }
-        .chartForegroundStyleScale(domain: chartCrews(d).map { d.teams[$0.rawValue]?.name ?? $0.rawValue },
+        .chartForegroundStyleScale(domain: chartCrews(d).map { crewName(d, $0) },
                                    range: chartCrews(d).map(Theme.crew))
         .chartYAxisLabel("Minutes")
         .frame(height: 200)
         .padding(.vertical, 8)
+    }
+
+    /// A crew removed mid-night keeps the name it played under.
+    private func crewName(_ d: SessionAnalytics, _ k: TeamKey) -> String {
+        d.teams[k.rawValue]?.name ?? d.scorecard.teams[k.rawValue]?.name ?? "Crew \(k.rawValue)"
     }
 
     /// Crews in the scorecard (a crew removed mid-night still has its rounds).

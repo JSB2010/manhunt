@@ -102,6 +102,8 @@ export interface RoundBrief {
   rulesFingerprint: string;
   /** Fingerprint of the hiding crew's roster this round (detects roster changes between a crew's own hiding rounds). */
   hidingRosterFingerprint: string;
+  /** Crew names as they were this round (a crew removed later keeps its name in history). Absent on older briefs. */
+  teamNames?: Partial<Record<TeamKey, string>>;
 }
 
 export type PermissionStatus = 'NOT_DETERMINED' | 'DENIED' | 'RESTRICTED' | 'WHEN_IN_USE' | 'ALWAYS';

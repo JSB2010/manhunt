@@ -291,7 +291,14 @@ struct RoundBrief: Codable, Identifiable, Equatable, Sendable {
     var outcome: String
     var observedChaseSeconds: Int
     var isRightCensored: Bool
+    /// Crew names that round (absent on nights from before 2026-10-23).
+    var teamNames: [String: String]?
     var id: String { roundId }
+
+    /// The crew's name that round; a crew removed later keeps its name.
+    func name(_ k: TeamKey, current: (TeamKey) -> String?) -> String {
+        teamNames?[k.rawValue] ?? current(k) ?? "Crew \(k.rawValue)"
+    }
 }
 
 struct SessionHeader: Codable, Sendable {

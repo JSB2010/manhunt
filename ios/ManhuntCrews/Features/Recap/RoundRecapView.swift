@@ -277,10 +277,12 @@ struct RoundRecapView: View {
     }
 
     private func timeline(_ s: RoundSummary) -> some View {
-        Section {
-            DisclosureGroup("Timeline (\(s.timeline.count) events)") {
-                ForEach(s.timeline) { e in
-                    LabeledContent(e.type.replacingOccurrences(of: "_", with: " ").capitalized, value: Fmt.time(e.at))
+        // The round itself: recaps from before 2026-10-23 also listed the lobby before it.
+        let events = s.timeline.filter { !RoundSummary.TimelineEvent.lobbyTypes.contains($0.type) && ($0.at ?? .distantFuture) >= (s.roundStartAt ?? .distantPast) }
+        return Section {
+            DisclosureGroup("Timeline (\(events.count) events)") {
+                ForEach(events) { e in
+                    LabeledContent(e.label { k in s.teamNames[k.rawValue] ?? "Crew \(k.rawValue)" }, value: Fmt.time(e.at))
                         .font(.subheadline)
                         .monospacedDigit()
                 }

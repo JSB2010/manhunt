@@ -57,7 +57,7 @@ Every phone that plays needs to join the night:
 ## 3. Ready and start
 
 - Once per night, each phone taps **Review Tracking**, reads how tracking works and taps **I Agree**. Agreeing includes showing every crew's route to the round's phones after each round.
-- Each crew taps **Ready**. One ready phone per crew is enough.
+- Each crew taps **We're Ready**. One ready phone per crew is enough: once it shows **Crew Ready**, the whole crew is ready, and tapping it again asks before undoing it.
 - Any phone on a playing crew can then tap **Start Round**. The app warns first (**Can't Start Cleanly**) if a phone has location turned off, which must be fixed, or a weak or old GPS fix, which you can start anyway.
 
 ## 4. Head start

@@ -134,7 +134,7 @@ struct SessionDetailView: View {
                             Text(Fmt.outcome(b.outcome, seconds: b.observedChaseSeconds)).monospacedDigit()
                         } label: {
                             Text("Round \(b.index)")
-                            Text("\(item.teams[b.hidingTeam.rawValue]?.name ?? "") hid")
+                            Text("\(b.name(b.hidingTeam) { item.teams[$0.rawValue]?.name }) hid")
                         }
                     }
                 }
@@ -144,9 +144,15 @@ struct SessionDetailView: View {
             }
             Section {
                 Button("Delete My Tracks & Photos From This Night", role: .destructive) { confirmMyData = true }
-                if item.isHost { Button("Delete This Night for Everyone", role: .destructive) { confirmDelete = true } }
             } footer: {
                 Text("Removes this phone’s routes, raw GPS and photos. Crew scores stay.")
+            }
+            if item.isHost {
+                Section {
+                    Button("Delete This Night for Everyone", role: .destructive) { confirmDelete = true }
+                } footer: {
+                    Text("Removes every round, route and photo of this night for every phone.")
+                }
             }
         }
         .navigationTitle(item.title)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideClaim, requestPause, startRound, submitClaim } from '../../src/domain/engine.js';
+import { decideClaim, requestPause, roundBrief, startRound, submitClaim } from '../../src/domain/engine.js';
 import { tickRound } from '../../src/domain/tick.js';
 import type { GpsPoint, RoundDoc } from '../../src/domain/types.js';
 import { liveActivityAttributes, liveActivityState, renderView } from '../../src/domain/views.js';
@@ -216,5 +216,24 @@ describe('per-user view privacy invariant', () => {
     const v3 = renderView({ uid: SEEKER, session: { ...s, version: s.version + 1 }, round: { ...round, version: 1 }, members: members(s), activeClaim: null, now: T0 - 9000 }).stateVersion;
     expect(v2).toBeGreaterThan(v1);
     expect(v3).toBeGreaterThan(v2);
+  });
+
+  it('round briefs carry crew names only, and a phone links to a roster name, never another phone’s id (ADR 0018)', async () => {
+    const { session: s0, round: r0 } = readyRound();
+    const all = track(T0 + 30 * MIN);
+    const sampleCoords = new Set(all.flatMap((p) => [p.latitude, p.longitude]));
+    let r = startRound(r0, s0, HIDER, allPhones(s0), [], T0).round;
+    for (const m of [10, 20]) r = (await tick(r, T0 + m * MIN, all)).round;
+    r = submitClaim(r, claim(), SEEKER, T0 + 25 * MIN).round;
+    r = decideClaim(r, { ...claim(), status: 'PENDING', submittedAt: T0 + 25 * MIN }, HIDER, 'CONFIRM', null, T0 + 26 * MIN).round;
+    const s = { ...s0, roundBriefs: [roundBrief(r, '')!] };
+    const m = members(s);
+    m[SEEKER] = { ...m[SEEKER]!, selfPersonId: 'self-taylor', rosterPersonId: 'p-taylor' };
+    const v = renderView({ uid: HIDER, session: s, round: r, members: m, activeClaim: null, now: T0 + 27 * MIN });
+    expect(v.previousRounds[0]!.teamNames).toEqual({ A: 'Crew A', B: 'Crew B' });
+    expect(numbers(v.previousRounds).filter((n) => sampleCoords.has(n))).toEqual([]);
+    expect(v.session.teams.B!.operators.find((o) => o.uid === SEEKER)!.personId).toBe('p-taylor');
+    expect(JSON.stringify(v)).not.toContain('rosterPersonId');
+    expect(JSON.stringify(v)).not.toContain('trackingNudge');
   });
 });

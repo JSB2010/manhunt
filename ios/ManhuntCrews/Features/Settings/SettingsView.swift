@@ -43,7 +43,8 @@ struct SettingsView: View {
             Section {
                 let loc = model.location
                 StatusRow(title: "Permission", value: loc.permissionString.replacingOccurrences(of: "_", with: " ").capitalized, state: loc.isAuthorized ? .ok : .problem)
-                StatusRow(title: "Precise Location", value: loc.preciseLocation ? "On" : "Off", state: loc.preciseLocation ? .ok : .warning)
+                // Accuracy means nothing until location is allowed (it reads "full" before the first prompt).
+                StatusRow(title: "Precise Location", value: !loc.isAuthorized ? "—" : loc.preciseLocation ? "On" : "Off", state: !loc.isAuthorized ? .neutral : loc.preciseLocation ? .ok : .warning)
                 LabeledContent("Tracking", value: loc.mode == .tracking ? "Active (round)" : loc.mode == .preflight ? "Ready check" : "Off")
                 LabeledContent("Last fix", value: loc.lastFix.map { "\(Fmt.ago($0.timestamp, now: Date())) · ±\(Int($0.horizontalAccuracy)) m" } ?? "—")
                 LabeledContent("Unsent samples", value: "\(loc.queuedSamples)")

@@ -212,6 +212,17 @@ final class TokenBrokerTests: XCTestCase {
         }
         XCTAssertEqual(TokenErrorMapping.map(APIError.unauthenticated), .unauthenticated)
     }
+
+    /// 2026-10-22: the "Can't Reach the Game Server" screen showed Firebase's developer text.
+    func testTransientErrorsReadAsPlainWords() {
+        let internalError = NSError(domain: AuthErrors.domain, code: AuthErrorCode.internalError.rawValue, userInfo: [NSLocalizedDescriptionKey: "An internal error has occurred, print and inspect the error details for more information."])
+        let shown = TokenErrorMapping.map(internalError).localizedDescription
+        XCTAssertFalse(shown.contains("inspect the error details"), shown)
+        XCTAssertTrue(shown.hasPrefix("No connection to the game server."), shown)
+        // Network errors keep the system's own wording.
+        let offline = URLError(.notConnectedToInternet)
+        XCTAssertTrue(TokenErrorMapping.map(offline).localizedDescription.contains(offline.localizedDescription))
+    }
 }
 
 // MARK: Retry policy and 429 handling

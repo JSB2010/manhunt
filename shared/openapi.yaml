@@ -249,7 +249,7 @@ components:
             joinCode: { type: [string, 'null'], description: reusable night code; null once the night ends }
             revoked: { type: boolean }
         round: { oneOf: [{ $ref: '#/components/schemas/RoundView' }, { type: 'null' }] }
-        previousRounds: { type: array, items: { type: object } }
+        previousRounds: { type: array, items: { type: object, description: 'Round briefs: {roundId, index, hidingTeam, seekingTeams, seekMode, catchCreditTeams, outcome, observedChaseSeconds, isRightCensored, rulesFingerprint, hidingRosterFingerprint, teamNames (crew names that round; absent on older nights)}' } }
         nextRound: { type: [object, 'null'], description: '{index, suggestedHidingTeam} whenever the night is open and no round is set up' }
 
 paths:

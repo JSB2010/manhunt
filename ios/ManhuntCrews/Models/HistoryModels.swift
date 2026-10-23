@@ -34,9 +34,63 @@ struct RoundSummary: Codable, Sendable {
         var id: String { claimId }
     }
     struct TimelineEvent: Codable, Identifiable, Sendable {
+        /// Audit details are flat strings, numbers and booleans (never coordinates).
+        enum Detail: Codable, Sendable {
+            case string(String), number(Double), bool(Bool), null
+            init(from decoder: Decoder) throws {
+                let c = try decoder.singleValueContainer()
+                if c.decodeNil() { self = .null }
+                else if let b = try? c.decode(Bool.self) { self = .bool(b) }
+                else if let n = try? c.decode(Double.self) { self = .number(n) }
+                else { self = .string(try c.decode(String.self)) }
+            }
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.singleValueContainer()
+                switch self {
+                case let .string(v): try c.encode(v)
+                case let .number(v): try c.encode(v)
+                case let .bool(v): try c.encode(v)
+                case .null: try c.encodeNil()
+                }
+            }
+            var int: Int? { if case let .number(n) = self { Int(n) } else { nil } }
+            var string: String? { if case let .string(v) = self { v } else { nil } }
+            var isTrue: Bool { if case .bool(true) = self { true } else { false } }
+        }
         var type: String
         var at: Date?
-        var id: String { "\(type)-\(at?.timeIntervalSince1970 ?? 0)" }
+        var details: [String: Detail]?
+        var id: String { "\(type)-\(at?.timeIntervalSince1970 ?? 0)-\(details?["pingIndex"]?.int ?? -1)" }
+
+        /// Lobby events (ready taps, setup edits) that recaps from before 2026-10-23 still list.
+        static let lobbyTypes: Set<String> = ["ROUND_CREATED", "SETUP_EDITED", "READY_CHANGED", "CONSENT_GIVEN", "OPERATOR_JOINED", "OPERATOR_MOVED", "PING_DELAYED"]
+
+        /// What happened, in words ("Ping 2 released", "Crew B claimed a catch").
+        func label(name: (TeamKey) -> String) -> String {
+            let ping = details?["pingIndex"]?.int.map { "Ping \($0)" } ?? "Ping"
+            let crew = details?["team"]?.string.flatMap(TeamKey.init(rawValue:)).map(name)
+            switch type {
+            case "ROUND_STARTED": return "Round started"
+            case "CHASE_STARTED": return "Chase started"
+            case "PING_RELEASED": return details?["late"]?.isTrue == true ? "\(ping) released late" : "\(ping) released"
+            case "PING_WAITING": return "\(ping) waiting for the hiders’ GPS"
+            case "PING_MISSING": return "\(ping) missed (no GPS)"
+            case "CLAIM_SUBMITTED": return "\(crew ?? "Seekers") claimed a catch"
+            case "CLAIM_CONFIRMED": return "Catch confirmed"
+            case "CLAIM_REJECTED": return "Claim rejected"
+            case "CLAIM_EXPIRED": return "Claim expired (no answer)"
+            case "PAUSE_REQUESTED": return "\(crew ?? "A crew") asked to pause"
+            case "PAUSE_STARTED": return details?["kind"]?.string == "SAFETY" ? "Safety pause" : "Paused"
+            case "RESUME_VOTE": return "\(crew ?? "A crew") ready to resume"
+            case "RESUMED": return "Resumed"
+            case "ROUND_TIMED_OUT": return "Time cap reached"
+            case "ROUND_ABORTED": return "Round aborted"
+            case "OPERATOR_REMOVED": return "A phone left the round"
+            case "DISPUTE_PROPOSED": return "\(crew ?? "A crew") proposed a settlement"
+            case "DISPUTE_RESOLVED": return "Claim settled"
+            default: return type.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+        }
     }
     struct Pause: Codable, Sendable {
         var kind: String

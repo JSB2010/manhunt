@@ -112,6 +112,26 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(chase.elapsedMs(at: fiveMinIn), 300_000, accuracy: 1)
     }
 
+    /// 2026-10-22: Round 4 was hidden by Crew C, removed later that night; History showed " hid".
+    func testRoundBriefKeepsTheNameOfARemovedCrew() throws {
+        let json = #"[{"roundId":"r4","index":4,"hidingTeam":"C","seekingTeams":["A","B"],"seekMode":"TOGETHER","catchCreditTeams":["A","B"],"outcome":"CAUGHT","observedChaseSeconds":1372,"isRightCensored":false,"teamNames":{"A":"Crew A","B":"Crew B","C":"Night Owls"}},{"roundId":"r1","index":1,"hidingTeam":"C","seekingTeams":["A"],"seekMode":"TOGETHER","catchCreditTeams":["A"],"outcome":"CAUGHT","observedChaseSeconds":531,"isRightCensored":false}]"#
+        let briefs = try JSONCoding.decoder.decode([RoundBrief].self, from: Data(json.utf8))
+        let current: (TeamKey) -> String? = { $0 == .A ? "Crew A" : nil }
+        XCTAssertEqual(briefs[0].name(.C, current: current), "Night Owls")
+        // Briefs from before the names were kept fall back to the crew letter, never an empty name.
+        XCTAssertEqual(briefs[1].name(.C, current: current), "Crew C")
+        XCTAssertEqual(briefs[1].name(.A, current: current), "Crew A")
+    }
+
+    func testRecapTimelineReadsAsWordsAndSkipsTheLobby() throws {
+        let json = #"[{"type":"READY_CHANGED","at":"2026-10-23T03:45:49.990Z","details":{"team":"B","ready":true}},{"type":"PING_RELEASED","at":"2026-10-23T03:56:16.576Z","details":{"pingIndex":0,"dispatchLatencyMs":3663,"ageSeconds":4}},{"type":"PING_RELEASED","at":"2026-10-23T04:03:16.576Z","details":{"pingIndex":1,"late":true}},{"type":"CLAIM_SUBMITTED","at":"2026-10-23T04:19:09.065Z","details":{"claimId":"x","team":"B","chaseSecondsAtClaim":1372}},{"type":"PAUSE_STARTED","at":"2026-10-23T04:19:10.000Z","details":{"kind":"SAFETY","team":"A","reason":null}},{"type":"SOMETHING_NEW","at":null}]"#
+        let events = try JSONCoding.decoder.decode([RoundSummary.TimelineEvent].self, from: Data(json.utf8))
+        let name: (TeamKey) -> String = { "Crew \($0.rawValue)" }
+        XCTAssertTrue(RoundSummary.TimelineEvent.lobbyTypes.contains(events[0].type))
+        XCTAssertEqual(events.dropFirst().map { $0.label(name: name) }, ["Ping 0 released", "Ping 1 released late", "Crew B claimed a catch", "Safety pause", "Something New"])
+        XCTAssertEqual(Set(events.map(\.id)).count, events.count)
+    }
+
     func testRulesPatchEncodesExplicitNulls() throws {
         var r = Rules.defaults
         r.visiblePingHistoryCount = nil

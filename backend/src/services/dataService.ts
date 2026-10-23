@@ -11,6 +11,8 @@ import { deletedAccountRef, SocialService, type PersonDoc, type UserDoc } from '
 const iso = (ms: number | null | undefined) => (ms === null || ms === undefined ? null : new Date(ms).toISOString());
 const PHOTO_RETENTION_UNCONFIRMED_MS = 7 * 24 * 3600_000;
 const PHOTO_RETENTION_CONFIRMED_MS = 30 * 24 * 3600_000;
+/** Default crew colours (gameService) for crews no longer in the night. */
+const CREW_COLORS: Record<TeamKey, string> = { A: '#1E88E5', B: '#F4511E', C: '#43A047' };
 
 /**
  * Post-round data access, analytics, exports, deletion and retention.
@@ -169,7 +171,15 @@ export class DataService {
       scheduledDate: s.scheduledDate,
       status: s.status,
       playedRounds: results.length,
-      teams: Object.fromEntries(teamKeysOf(s).map((k) => [k, { name: s.teams[k]!.name, color: s.teams[k]!.color, roster: s.teams[k]!.roster }])),
+      teams: {
+        // A crew removed later in the night is listed as it last played.
+        ...Object.fromEntries(
+          [...results]
+            .sort((a, b) => a.roundIndex - b.roundIndex)
+            .flatMap((r) => TEAM_KEYS.filter((k) => r.teamNames[k] && !s.teams[k]).map((k) => [k, { name: r.teamNames[k]!, color: CREW_COLORS[k], roster: r.rosterSnapshot[k] ?? [] }] as const)),
+        ),
+        ...Object.fromEntries(teamKeysOf(s).map((k) => [k, { name: s.teams[k]!.name, color: s.teams[k]!.color, roster: s.teams[k]!.roster }])),
+      },
       scorecard: sc,
       notDirectlyComparable: !sc.rulesConsistent,
     };

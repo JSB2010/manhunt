@@ -176,8 +176,9 @@ enum TokenErrorMapping {
             if definitive.contains(ns.code) { return .unauthenticated }
             if ns.code == AuthErrorCode.tooManyRequests.rawValue { return .rateLimited(retryAfter: nil) }
         }
-        // Network errors, keychain hiccups, anything unrecognised: transient.
-        return .offline(ns.localizedDescription)
+        // Network errors, keychain hiccups, anything unrecognised: transient. Firebase's own text is
+        // written for developers ("An internal error has occurred, print and inspect the error details…").
+        return .offline(ns.domain == NSURLErrorDomain ? ns.localizedDescription : "Couldn’t reach the sign-in service.")
     }
 }
 

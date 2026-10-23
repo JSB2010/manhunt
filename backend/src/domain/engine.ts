@@ -812,6 +812,7 @@ export function roundBrief(r: RoundDoc, hidingRosterFingerprint: string): RoundB
     isRightCensored: r.result.isRightCensored,
     rulesFingerprint: r.result.rulesFingerprint,
     hidingRosterFingerprint,
+    teamNames: { ...r.teamNames },
   };
 }
 

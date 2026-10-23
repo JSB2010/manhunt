@@ -75,7 +75,7 @@ A phone's view (`ViewDoc` in `domain/views.ts`) has:
   - `captureRequest` (hiding crew only) or `myClaim` (the claiming phone), plus `claimByTeam`;
   - pause, pending-pause and resume-vote state, `lastClaimOutcome`, and `result` once the round ends;
   - `crewStatus` per crew: phones live/total, the best tracking state and coarse issues, with no timestamps;
-- `previousRounds` (round briefs) and `nextRound` (index and suggested hiding crew);
+- `previousRounds` (round briefs, with the crew names of that round so a crew removed later keeps its name) and `nextRound` (index and suggested hiding crew);
 - `viewHash` (content hash, also the REST ETag) and `stateVersion` (only grows, so an older REST response never replaces a newer snapshot).
 
 It never contains raw samples, the latest hider position, hider routes during a round, which phone a pin came from, or another phone's detailed health. `tests/unit/views.privacy.test.ts` enforces this.
