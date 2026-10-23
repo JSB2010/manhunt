@@ -66,8 +66,10 @@ Region (`us-central1`) and the runtime service account are set in `backend/src/f
 
 ## Observability
 * Structured JSON logs (`severity`, `service`, `reqId`), coordinates redacted by key, request bodies never logged. Functions log as `resource.type="cloud_run_revision"` with `service_name` = function name.
-* `watchdog pass` log line per minute: `activeRounds`, `ticked`, `overdue`, `rescheduled`, `finalized`, `errors` → log metric `manhunt_watchdog_overdue` → alert.
+* `watchdog pass` log line per minute: `activeRounds`, `ticked`, `overdue`, `rescheduled`, `nudged` ("your phone isn't tracking" pushes), `finalized`, `errors` → log metric `manhunt_watchdog_overdue` → alert.
 * Ping releases record `dispatchLatencyMs` and `delayed` in the round and audit events.
+* Push delivery: `push delivery failed` (warning) counts failed notifications by FCM code; `live activity pushes rejected by APNs` (error) means APNs refused the project's credentials and Live Activity pushes paused for 10 minutes. For either with `messaging/third-party-auth-error`, check Firebase › Project settings › Cloud Messaging › Apple app configuration: an APNs authentication key (`.p8`) with the right Key ID and Team ID. On 2026-10-22 every Live Activity push failed this way.
+* `MaxListenersExceededWarning … [PassThrough]` once per catch-photo download comes from `@google-cloud/storage`'s download stream (one per request, not a growing leak).
 * API 5xx alert (`service_name="api"`); budget alerts at 50/90/100 %.
 
 ## Data deletion runbook

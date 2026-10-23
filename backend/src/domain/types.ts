@@ -147,6 +147,8 @@ export interface MemberDoc {
    * Absent on nights from before the link: `crews.ownerPersonId` falls back.
    */
   rosterPersonId?: string | null;
+  /** last "your phone isn't tracking" push (engine.trackingNudges) */
+  trackingNudge?: { roundId: string; at: number } | null;
   /** content hash of the phone's stored view; views are rewritten only when it changes */
   viewHash?: string | null;
 }

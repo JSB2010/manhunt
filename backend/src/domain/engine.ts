@@ -15,6 +15,7 @@ import {
   type CaptureClaim,
   type DomainEvent,
   type GpsPoint,
+  type MemberDoc,
   type NotificationIntent,
   type PauseInterval,
   type PauseKind,
@@ -865,4 +866,44 @@ export function proposeDisputeResolution(
     r.version++;
   }
   return { round: r, claim: c, events, resolved };
+}
+
+/** A phone in a running round that hasn't reported since the start for this long is nudged. */
+export const TRACKING_NUDGE_AFTER_MS = 60_000;
+/** A phone that goes quiet mid-round (no report for this long) is nudged again. */
+export const TRACKING_SILENT_MS = 5 * 60_000;
+/** At most one nudge per phone this often. */
+export const TRACKING_NUDGE_EVERY_MS = 10 * 60_000;
+
+/**
+ * "Your phone isn't tracking" pushes for phones in the round's snapshot that haven't
+ * reported since the start, or went quiet. Tracking starts when the app sees the round
+ * start, so a phone left in a pocket since the last round (or killed) records nothing
+ * until someone opens it: on 2026-10-22 a hiding phone sent nothing for the first
+ * 8½ minutes of a round. One push per phone per 10 minutes; never during a pause.
+ */
+export function trackingNudges(r: RoundDoc, members: Record<string, MemberDoc>, now: number): NotificationIntent[] {
+  if ((r.state !== 'HEAD_START' && r.state !== 'CHASE') || hasOpenPause(r.pauses) || r.roundStartAt === null) return [];
+  const out: NotificationIntent[] = [];
+  for (const uid of roundUids(r)) {
+    const m = members[uid];
+    if (!m?.active) continue;
+    const last = m.health.lastHeartbeatAt;
+    // A report from the start's own millisecond is the Ready check, not tracking.
+    const reported = last !== null && last > r.roundStartAt;
+    const quiet = reported ? now - last! >= TRACKING_SILENT_MS : now - r.roundStartAt >= TRACKING_NUDGE_AFTER_MS;
+    if (!quiet) continue;
+    if (m.trackingNudge?.roundId === r.id && now - m.trackingNudge.at < TRACKING_NUDGE_EVERY_MS) continue;
+    const hiding = r.operatorsByTeam[r.hidingTeam]?.includes(uid);
+    out.push(
+      notify(
+        r,
+        [uid],
+        'TRACKING_NUDGE',
+        'Your phone isn’t tracking',
+        `Round ${r.index} is on. Open Manhunt Crews so ${hiding ? 'your crew’s pings can go out' : 'your crew’s route counts'}.`,
+      ),
+    );
+  }
+  return out;
 }

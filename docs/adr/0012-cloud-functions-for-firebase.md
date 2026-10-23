@@ -27,7 +27,7 @@
    - `functions/task-already-exists` counts as success.
    - Retry and rate settings match the old queue: 20 attempts, 1–30 s backoff, 20 concurrent.
    - Correctness still never depends on delivery: the tick is idempotent and the watchdog repairs (ADR 0003).
-   - A wake-up that arrives before its deadline would find nothing due and spend its task id. So `tick` waits out an early arrival of up to 30 s, and returns 503 for a longer one so that Cloud Tasks retries. In production Cloud Tasks never dispatches early, so this only covers clock skew.
+   - A wake-up that arrives before its deadline would find nothing due and spend its task id. So `tick` waits out an early arrival of up to 30 s, and returns 503 for a longer one so that Cloud Tasks retries. Cloud Tasks never dispatches before `scheduleTime`, so wake-ups are scheduled `WAKE_LEAD_MS` (8 s) before their deadline on purpose: `tick` scales to zero between deadlines, and its 3–4 s cold start delayed every chase-start ping on 2026-10-22. The function starts up early and releases on the deadline.
 4. **One least-privilege runtime identity, `manhunt-backend@`, for all four functions.**
    - Roles: `datastore.user`, `firebaseauth.admin`, `firebasecloudmessaging.admin`, log/metric writer, `objectAdmin` on the media bucket, and `serviceAccountUser` on itself.
    - It needs `serviceAccountUser` on itself to attach its own OIDC token to tasks.

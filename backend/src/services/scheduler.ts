@@ -31,9 +31,17 @@ export interface WakeQueue {
 }
 
 /**
+ * How long before its deadline a wake-up is dispatched. The `tick` function scales to
+ * zero between deadlines and a cold start took 3–4 s (every chase start on 2026-10-22
+ * released late by that much); arriving early, the handler starts up and then waits
+ * out the gap (`EARLY_WAIT_MAX_MS`), so the release lands on the deadline itself.
+ */
+export const WAKE_LEAD_MS = 8_000;
+
+/**
  * Production: enqueue onto the Cloud Tasks queue that Firebase creates for the
  * `tick` task-queue function. Cloud Tasks calls the function with an OIDC
- * token for the backend service account at `at`.
+ * token for the backend service account `WAKE_LEAD_MS` before `at`.
  */
 export class TaskQueueScheduler implements Scheduler {
   constructor(
@@ -48,7 +56,7 @@ export class TaskQueueScheduler implements Scheduler {
   async scheduleWake(t: WakeTask): Promise<void> {
     try {
       // Deterministic id → Cloud Tasks deduplicates retries of the same schedule call.
-      await this.queue.enqueue(payload(t), { id: taskName(t), scheduleTime: new Date(t.at) });
+      await this.queue.enqueue(payload(t), { id: taskName(t), scheduleTime: new Date(t.at - WAKE_LEAD_MS) });
     } catch (e: unknown) {
       if ((e as { code?: string }).code === 'functions/task-already-exists') return;
       this.log.error({ err: e, roundId: t.roundId, eventKey: t.eventKey }, 'task enqueue failed; watchdog will repair');

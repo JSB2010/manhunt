@@ -56,7 +56,10 @@ describe('ActivityKit payload (developer.apple.com: Starting and updating Live A
     expect(await t.send({ ...base, priority: 10 })).toEqual({ ok: true });
     expect(sent[0]).toEqual({ token: 'fcm', apns: { liveActivityToken: 'abcd', headers: { 'apns-priority': '10' }, payload: { aps: apsPayload(base) } } });
     const failing = new FcmLiveActivityTransport(() => ({ send: async () => Promise.reject(Object.assign(new Error('x'), { code: 'messaging/invalid-argument' })) }) as never);
-    expect(await failing.send(base)).toEqual({ ok: false, invalidToken: true, error: 'messaging/invalid-argument' });
+    expect(await failing.send(base)).toEqual({ ok: false, invalidToken: true, credentialsRejected: false, error: 'messaging/invalid-argument' });
+    // A rejected APNs key is the project's problem, not the token's: the token stays.
+    const keyRejected = new FcmLiveActivityTransport(() => ({ send: async () => Promise.reject(Object.assign(new Error('x'), { code: 'messaging/third-party-auth-error' })) }) as never);
+    expect(await keyRejected.send(base)).toEqual({ ok: false, invalidToken: false, credentialsRejected: true, error: 'messaging/third-party-auth-error' });
   });
 
   it('actionable requests stay regular pushes', () => {
@@ -85,5 +88,31 @@ describe('FcmNotifier with Live Activity alerts', () => {
       ['fcm-1', 'fcm-2'],
       ['fcm-1', 'fcm-2'],
     ]);
+  });
+});
+
+describe('FcmNotifier delivery failures', () => {
+  it('prunes dead tokens and logs every other failure by code, never the token', async () => {
+    const devices = [
+      { id: 'a', fcmToken: 'fcm-dead' },
+      { id: 'b', fcmToken: 'fcm-apns' },
+      { id: 'c', fcmToken: 'fcm-ok' },
+    ];
+    const deleted: string[] = [];
+    const db = {
+      collection: () => ({
+        doc: () => ({ collection: () => ({ get: async () => ({ docs: devices.map((d) => ({ id: d.id, get: () => d.fcmToken, ref: { delete: async () => void deleted.push(d.id) } })) }) }) }),
+      }),
+    };
+    const codes: Record<string, string> = { 'fcm-dead': 'messaging/registration-token-not-registered', 'fcm-apns': 'messaging/third-party-auth-error' };
+    const messaging = {
+      sendEachForMulticast: async (m: { tokens: string[] }) => ({ responses: m.tokens.map((t) => (codes[t] ? { success: false, error: { code: codes[t] } } : { success: true })) }),
+    };
+    const logged: unknown[] = [];
+    const n = new FcmNotifier(db as never, () => messaging as never, { warn: (o: unknown) => void logged.push(o) } as never);
+    await n.send([{ toUids: ['u1'], kind: 'CLAIM_SUBMITTED', title: 't', body: 'b', sessionId: 's', roundId: 'r' }]);
+    expect(deleted).toEqual(['a']);
+    expect(logged).toEqual([{ kind: 'CLAIM_SUBMITTED', failures: { 'messaging/third-party-auth-error': 1 } }]);
+    expect(JSON.stringify(logged)).not.toContain('fcm-');
   });
 });

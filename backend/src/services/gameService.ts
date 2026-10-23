@@ -32,6 +32,7 @@ import {
   startRound as engineStartRound,
   submitClaim,
   suggestedHidingTeam,
+  trackingNudges,
   voteResume,
   type Transition,
 } from '../domain/engine.js';
@@ -89,6 +90,8 @@ const NIGHT_CODE_TTL_MS = 7 * 24 * 3600_000;
 const NIGHT_CODE_MAX_USES = 1000;
 /** Hider candidates read per ping decision (newest first). */
 const CANDIDATE_LIMIT = 300;
+/** The watchdog leaves a just-ended round to the request finalizing it. */
+const FINALIZE_GRACE_MS = 30_000;
 
 export const hashCode = (code: string) => createHash('sha256').update(code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')).digest('hex');
 const newCode = () => Array.from({ length: 8 }, () => INVITE_ALPHABET[randomInt(INVITE_ALPHABET.length)]).join('');
@@ -984,22 +987,33 @@ export class GameService {
       });
     }
 
-    // Idempotent insert: existing pointIds are skipped (first receipt time wins).
+    // Idempotent insert: existing pointIds are skipped (first receipt time wins). A retry that
+    // races its own first attempt (same points, both in flight) can lose the create: re-check
+    // and count those as duplicates instead of failing the upload.
     let duplicates = 0;
     const refs = candidates.map((c) => this.p.points(sid, rid).doc(c.pointId));
     for (let i = 0; i < refs.length; i += 200) {
       const chunk = refs.slice(i, i + 200);
-      const snaps = chunk.length ? await this.d.db.getAll(...chunk) : [];
-      const batch = this.d.db.batch();
-      snaps.forEach((snap, j) => {
-        if (snap.exists) {
-          duplicates++;
-          return;
+      for (let attempt = 0; ; attempt++) {
+        const snaps = chunk.length ? await this.d.db.getAll(...chunk) : [];
+        const batch = this.d.db.batch();
+        let dup = 0;
+        snaps.forEach((snap, j) => {
+          if (snap.exists) {
+            dup++;
+            return;
+          }
+          const c = candidates[i + j]!;
+          batch.create(snap.ref, { ...c, expireAt: Timestamp.fromMillis(c.recordedAt + RAW_POINT_RETENTION_MS) });
+        });
+        try {
+          await batch.commit();
+          duplicates += dup;
+          break;
+        } catch (err) {
+          if ((err as { code?: number }).code !== 6 || attempt >= 2) throw err; // 6 = ALREADY_EXISTS
         }
-        const c = candidates[i + j]!;
-        batch.create(snap.ref, { ...c, expireAt: Timestamp.fromMillis(c.recordedAt + RAW_POINT_RETENTION_MS) });
-      });
-      await batch.commit();
+      }
     }
 
     const inserted = candidates.length - duplicates;
@@ -1009,7 +1023,11 @@ export class GameService {
     await this.afterIngest(uid, sid, rid, body.health, now, newest ? { recordedAt: newest.recordedAt, accuracy: newest.horizontalAccuracyMeters } : undefined, releaseCheck).catch((err) =>
       this.d.log.warn({ err, roundId: rid }, 'post-ingest update failed'),
     );
-    if (finished && inserted > 0) {
+    // Points that reach a finished round change its recap. The round may also have ended while
+    // this batch was being written (a catch confirmed at the same moment): check again, or the
+    // recap computed for the ending could miss them.
+    const endedMeanwhile = !finished && inserted > 0 && isFinishedState(((await this.p.round(sid, rid).get()).data() as RoundDoc | undefined)?.state ?? 'READY');
+    if ((finished || endedMeanwhile) && inserted > 0) {
       await finalizeRound(this.d, sid, rid, { force: true }).catch((err) => this.d.log.warn({ err }, 're-finalize after late upload failed'));
     }
     return { accepted: inserted, duplicates, rejected, clockSkewMs: skew, serverTime: new Date(now).toISOString() };
@@ -1386,7 +1404,7 @@ export class GameService {
   async watchdog() {
     const now = this.d.clock.now();
     const active = await this.d.db.collectionGroup('rounds').where('active', '==', true).limit(200).get();
-    const report = { activeRounds: active.size, ticked: 0, overdue: 0, rescheduled: 0, finalized: 0, errors: 0 };
+    const report = { activeRounds: active.size, ticked: 0, overdue: 0, rescheduled: 0, nudged: 0, finalized: 0, errors: 0 };
     for (const doc of active.docs) {
       const r = doc.data() as RoundDoc;
       try {
@@ -1401,6 +1419,7 @@ export class GameService {
           await this.scheduleNext(r.sessionId, r);
           report.rescheduled++;
         }
+        report.nudged += await this.nudgeSilentPhones(r, now);
       } catch (err) {
         report.errors++;
         this.d.log.error({ err, roundId: r.id }, 'watchdog tick failed');
@@ -1410,6 +1429,8 @@ export class GameService {
     for (const doc of unfinalized.docs) {
       const r = doc.data() as RoundDoc;
       if (!isFinishedState(r.state)) continue;
+      // A round that just ended is being finalized by the request that ended it.
+      if (r.endedAt !== null && now - r.endedAt < FINALIZE_GRACE_MS) continue;
       try {
         await finalizeRound(this.d, r.sessionId, r.id);
         report.finalized++;
@@ -1420,5 +1441,17 @@ export class GameService {
     }
     this.d.log.info({ watchdog: report }, 'watchdog pass');
     return report;
+  }
+
+  /** Push "your phone isn't tracking" to round phones that stay silent (engine.trackingNudges). */
+  private async nudgeSilentPhones(r: RoundDoc, now: number): Promise<number> {
+    const snap = await this.p.members(r.sessionId).get();
+    const members: Record<string, MemberDoc> = {};
+    for (const d of snap.docs) members[d.id] = d.data() as MemberDoc;
+    const intents = trackingNudges(r, members, now);
+    if (!intents.length) return 0;
+    await Promise.all(intents.flatMap((n) => n.toUids.map((u) => this.p.member(r.sessionId, u).update({ trackingNudge: { roundId: r.id, at: now } }))));
+    this.d.notifier.send(intents).catch((err) => this.d.log.warn({ err }, 'notify failed'));
+    return intents.length;
   }
 }

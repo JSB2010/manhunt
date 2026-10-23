@@ -89,7 +89,31 @@ export interface LiveActivityPush {
   priority: 5 | 10;
 }
 
-export type LiveActivitySendResult = { ok: true } | { ok: false; invalidToken: boolean; error: string };
+/**
+ * `credentialsRejected`: APNs refused the project's credentials (not this token) — every other
+ * push would fail the same way until the APNs key in Firebase is fixed.
+ */
+export type LiveActivitySendResult = { ok: true } | { ok: false; invalidToken: boolean; credentialsRejected?: boolean; error: string };
+
+/** FCM codes that mean APNs rejected the project's credentials rather than one token. */
+const CREDENTIAL_ERRORS: ReadonlySet<string> = new Set([
+  'messaging/third-party-auth-error',
+  'messaging/mismatched-credential',
+  'messaging/invalid-apns-credentials',
+  'messaging/authentication-error',
+]);
+/** After a credentials rejection, Live Activity pushes pause this long (per instance); alerts fall back to regular pushes. */
+export const LIVE_ACTIVITY_BACKOFF_MS = 10 * 60_000;
+/** Pushes in flight at once per publish. */
+const PUSH_CONCURRENCY = 8;
+
+/** Run `fn` over `items` with at most `limit` in flight. */
+async function eachLimited<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>) {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) await fn(items[next++]!);
+  }));
+}
 
 export interface LiveActivityTransport {
   send(push: LiveActivityPush): Promise<LiveActivitySendResult>;
@@ -127,7 +151,7 @@ export class FcmLiveActivityTransport implements LiveActivityTransport {
       const code = (err as { code?: string }).code ?? 'unknown';
       // FCM reports a dead device token, or an ActivityKit token APNs rejects, as one of these.
       const invalidToken = code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token' || code === 'messaging/invalid-argument';
-      return { ok: false, invalidToken, error: code };
+      return { ok: false, invalidToken, credentialsRejected: CREDENTIAL_ERRORS.has(code), error: code };
     }
   }
 }
@@ -145,7 +169,12 @@ export class RecordingLiveActivityTransport implements LiveActivityTransport {
   readonly sent: LiveActivityPush[] = [];
   /** activity tokens that fail as invalid */
   readonly invalid = new Set<string>();
+  /** APNs rejects the project's credentials (every push fails) */
+  rejectCredentials = false;
+  attempts = 0;
   async send(p: LiveActivityPush): Promise<LiveActivitySendResult> {
+    this.attempts++;
+    if (this.rejectCredentials) return { ok: false, invalidToken: false, credentialsRejected: true, error: 'messaging/third-party-auth-error' };
     if (this.invalid.has(p.activityToken)) return { ok: false, invalidToken: true, error: 'messaging/invalid-argument' };
     this.sent.push(structuredClone(p));
     return { ok: true };
@@ -157,8 +186,37 @@ const seconds = (ms: number) => ms / 1000;
 
 export class LiveActivityService {
   private p;
+  /** Live Activity pushes are paused until then: APNs rejected the project's credentials. */
+  private static credentialsRejectedUntil = 0;
   constructor(private d: Deps) {
     this.p = paths(d.db);
+  }
+
+  /** For tests: forget a credentials rejection. */
+  static resetBackoff() {
+    LiveActivityService.credentialsRejectedUntil = 0;
+  }
+
+  private pushesPaused(now: number) {
+    return now < LiveActivityService.credentialsRejectedUntil;
+  }
+
+  /** Send one push; a credentials rejection pauses the rest (logged once, with the fix). */
+  private async send(push: LiveActivityPush, roundId: string, now: number): Promise<LiveActivitySendResult> {
+    if (this.pushesPaused(now)) return { ok: false, invalidToken: false, credentialsRejected: true, error: 'paused' };
+    const res = await this.d.liveActivityTransport.send(push);
+    if (!res.ok && res.credentialsRejected) {
+      if (!this.pushesPaused(now)) {
+        this.d.log.error(
+          { error: res.error, roundId },
+          'live activity pushes rejected by APNs: check the APNs auth key (.p8) in Firebase > Cloud Messaging; pausing them and sending regular pushes',
+        );
+      }
+      LiveActivityService.credentialsRejectedUntil = now + LIVE_ACTIVITY_BACKOFF_MS;
+    } else if (!res.ok) {
+      this.d.log.warn({ error: res.error, roundId, event: push.event }, 'live activity push failed');
+    }
+    return res;
   }
 
   private registrations(sid: string) {
@@ -230,49 +288,58 @@ export class LiveActivityService {
     const activeClaim = p.claim && round.activeClaimId === p.claim.claimId ? p.claim : null;
     const alertFor = (uid: string) => p.notifications.find((n) => n.roundId === round.id && LIVE_ACTIVITY_ALERT_KINDS.has(n.kind) && n.toUids.includes(uid));
     try {
+      // Paused after APNs rejected the credentials: the app still updates its own activity, and
+      // every alert goes out as a regular push. Registrations keep their version for later.
+      if (this.pushesPaused(now)) return deliveries;
       const regs = await this.registrations(session.id).where('roundId', '==', round.id).get();
-      const registered = new Set<string>();
-      for (const doc of regs.docs) {
+      const registered = new Set(regs.docs.map((doc) => (doc.data() as LiveActivityRegistration).uid));
+      // Pushes go out in parallel: one slow or failing push no longer holds up the request (and the next one).
+      await eachLimited(regs.docs, PUSH_CONCURRENCY, async (doc) => {
         const reg = doc.data() as LiveActivityRegistration;
-        registered.add(reg.uid);
-        if (round.version <= reg.sentVersion) continue;
+        if (round.version <= reg.sentVersion) return;
         const view = renderRound({ uid: reg.uid, session, round, members, activeClaim, now });
         const state = liveActivityState(view, reg.clockOffsetMs);
         if (!state) {
           // Off the round (phone removed): the app ends its activity when it sees its view.
           await doc.ref.delete();
-          continue;
+          return;
         }
         const hash = hashState(state);
-        if (hash === reg.stateHash) continue;
+        if (hash === reg.stateHash) return;
         const fcmToken = await this.fcmToken(reg.uid, reg.deviceId);
-        if (!fcmToken) continue;
+        if (!fcmToken || this.pushesPaused(now)) return;
         // Claim this version; a concurrent publish for the same doc loses the precondition and skips.
         const claimed = await doc.ref.update({ sentVersion: round.version, stateHash: hash, updatedAt: now }, { lastUpdateTime: doc.updateTime }).then(
           () => true,
           () => false,
         );
-        if (!claimed) continue;
+        if (!claimed) return;
         const ended = state.phase === 'ENDED';
         const alert = alertFor(reg.uid);
-        const res = await this.d.liveActivityTransport.send({
-          fcmToken,
-          activityToken: reg.pushToken,
-          event: ended ? 'end' : 'update',
-          timestamp: Math.floor(seconds(now)),
-          contentState: state,
-          staleDate: liveActivityStaleDate(state),
-          ...(ended ? { dismissalDate: seconds(now + LIVE_ACTIVITY_DISMISS_AFTER_MS + reg.clockOffsetMs) } : {}),
-          ...(alert ? { alert: { title: alert.title, body: alert.body } } : {}),
-          priority: alert ? 10 : 5,
-        });
+        const res = await this.send(
+          {
+            fcmToken,
+            activityToken: reg.pushToken,
+            event: ended ? 'end' : 'update',
+            timestamp: Math.floor(seconds(now)),
+            contentState: state,
+            staleDate: liveActivityStaleDate(state),
+            ...(ended ? { dismissalDate: seconds(now + LIVE_ACTIVITY_DISMISS_AFTER_MS + reg.clockOffsetMs) } : {}),
+            ...(alert ? { alert: { title: alert.title, body: alert.body } } : {}),
+            priority: alert ? 10 : 5,
+          },
+          round.id,
+          now,
+        );
         if (res.ok && alert) deliveries.push({ uid: reg.uid, deviceId: reg.deviceId, roundId: round.id, kind: alert.kind });
-        if (!res.ok) this.d.log.warn({ error: res.error, roundId: round.id }, 'live activity push failed');
+        // Not sent (credentials): let a later version try again once pushes work.
+        if (!res.ok && res.credentialsRejected) await doc.ref.update({ sentVersion: reg.sentVersion, stateHash: reg.stateHash }).catch(() => undefined);
         if ((res.ok && ended) || (!res.ok && res.invalidToken)) await doc.ref.delete();
-      }
+      });
 
       // Round just started: push-to-start on the other phones of the round (iOS 17.2+).
       if (p.started) {
+        const starts: { uid: string; dev: FirebaseFirestore.QueryDocumentSnapshot; push: LiveActivityPush; alertKind: string | null }[] = [];
         for (const uid of roundUids(round)) {
           if (uid === p.actorUid || registered.has(uid)) continue;
           const view = renderView({ uid, session, round, members, activeClaim, now });
@@ -285,23 +352,30 @@ export class LiveActivityService {
             const startToken = dev.get('liveActivityStartToken') as string | null | undefined;
             const fcmToken = dev.get('fcmToken') as string | undefined;
             if (!startToken || !fcmToken) continue;
-            const res = await this.d.liveActivityTransport.send({
-              fcmToken,
-              activityToken: startToken,
-              event: 'start',
-              timestamp: Math.floor(seconds(now)),
-              attributes,
-              // The phone's offset isn't known until its activity registers; the first update corrects it.
-              contentState: state,
-              staleDate: liveActivityStaleDate(state),
-              ...(alert ? { alert: { title: alert.title, body: alert.body } } : {}),
-              priority: 10,
+            starts.push({
+              uid,
+              dev,
+              alertKind: alert?.kind ?? null,
+              push: {
+                fcmToken,
+                activityToken: startToken,
+                event: 'start',
+                timestamp: Math.floor(seconds(now)),
+                attributes,
+                // The phone's offset isn't known until its activity registers; the first update corrects it.
+                contentState: state,
+                staleDate: liveActivityStaleDate(state),
+                ...(alert ? { alert: { title: alert.title, body: alert.body } } : {}),
+                priority: 10,
+              },
             });
-            if (res.ok && alert) deliveries.push({ uid, deviceId: dev.id, roundId: round.id, kind: alert.kind });
-            if (!res.ok && res.invalidToken) await dev.ref.update({ liveActivityStartToken: null });
-            if (!res.ok) this.d.log.warn({ error: res.error, roundId: round.id }, 'live activity start push failed');
           }
         }
+        await eachLimited(starts, PUSH_CONCURRENCY, async ({ uid, dev, push, alertKind }) => {
+          const res = await this.send(push, round.id, now);
+          if (res.ok && alertKind) deliveries.push({ uid, deviceId: dev.id, roundId: round.id, kind: alertKind });
+          if (!res.ok && res.invalidToken) await dev.ref.update({ liveActivityStartToken: null });
+        });
       }
     } catch (err) {
       this.d.log.warn({ err, roundId: round.id }, 'live activity publish failed');

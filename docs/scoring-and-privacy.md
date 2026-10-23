@@ -36,7 +36,7 @@ Timed-out rounds are recorded as `observed ≥ cap, outcome TIMED_OUT, isRightCe
 |---|---|---|
 | Raw GPS points | 30 days after recording | `expireAt` Firestore TTL + daily sweep backstop |
 | Simplified routes + stats | Until the night is deleted or a phone deletes its data (its crew's route is then recomputed from the crew's other phones) | `routes/{rid}`, `roundSummaries/{rid}` |
-| Raw track archives (GCS) | Until session/my-data deletion; bucket backstop 400 days | `sessions/{sid}/rounds/{rid}/tracks/{phoneKey}/{rev}.geojson.gz` (one per phone) |
+| Raw track archives (GCS) | Until session/my-data deletion; bucket backstop 400 days | `sessions/{sid}/rounds/{rid}/tracks/{phoneKey}/{rev}.geojson.gz` (one per phone; superseded revisions are removed when the recap is recomputed) |
 | Unconfirmed/rejected/expired photos | 7 days | daily retention sweep deletes the object |
 | Confirmed photos | 30 days unless **every crew** opts in to keep (`keep-photos`) | retention sweep |
 | Idempotency records | 24 h | TTL |

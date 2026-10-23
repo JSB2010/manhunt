@@ -11,14 +11,15 @@ Where the data lives, who can read it and how long it's kept. The types are in `
 | Path | Contents | Notes |
 |---|---|---|
 | `sessions/{sid}` | `SessionDoc`: title, date, `hostUid` (organizer), status, default `rules`, crews embedded as `teams.{A,B,C}` (name, colour, `operatorUids`, roster of `{personId, displayName}`), `memberUids`, `participantPersonIds`, `currentRoundId`, `roundIds`, `joinCode`, `keepPhotos`, `version` | The crews are tiny and always read with the session in the same transaction |
-| `sessions/{sid}/members/{uid}` | `MemberDoc`: crew, `isHost`, `active`, consent, device health, `selfPersonId`, `rosterPersonId` (the roster name the phone's owner plays as, ADR 0018), `viewHash` | Health is written without a transaction unless what others see changes (ADR 0016) |
+| `sessions/{sid}/members/{uid}` | `MemberDoc`: crew, `isHost`, `active`, consent, device health, `selfPersonId`, `rosterPersonId` (the roster name the phone's owner plays as, ADR 0018), `trackingNudge` (last "not tracking" push: round and time), `viewHash` | Health is written without a transaction unless what others see changes (ADR 0016) |
 | `sessions/{sid}/views/{uid}` | **The sanitized per-phone view**, rendered only by `domain/views.ts` | The only client-readable document. Written only when its content hash changes |
 | `sessions/{sid}/rounds/{rid}` | `RoundDoc`: state, hiding and seeking crews, `seekMode`, `operatorsByTeam` snapshot, `rules` snapshot, roster snapshot, ready marks, `roundStartAt`, `chaseStartAt`, `pauses[]`, `phaseGeneration`, `pings[]` (`PingRelease`, with server-only `sourceUid`), `waitingPing`, the active claim, `result`, `routeSourceUids`, `active`, `summaryReady`, `version` | Authoritative. Every deadline derives from it |
 | `…/rounds/{rid}/points/{pointId}` | `GpsPoint`: raw sample, `operatorUid`, `team`, `role` (stamped by the server), `recordedAt` (skew-corrected), `receivedAt`, flags, `expireAt` | Idempotent by `pointId`. **30-day TTL**. Never in any view |
 | `…/rounds/{rid}/pings/p{index}` | One doc per released ping | `tx.create` makes a duplicate release impossible |
 | `…/rounds/{rid}/captures/{claimId}` | `CaptureClaim`: claiming crew, `submittedAt`, `officialChaseMsAtClaim`, status, decision, dispute, photo object key and hash | 20 claims per crew per round |
 | `sessions/{sid}/events/{id}` | Audit events | No coordinates |
-| `sessions/{sid}/roundSummaries/{rid}` | Post-round recap: distances, coverage, ping list | Served only after the round, only to its phones |
+| `…/rounds/{rid}/locks/finalize` | Lease for the round's recap computation: `token`, `until`, `rerun` | Server-only; exists only while a recap is computed (60 s lease) |
+| `sessions/{sid}/roundSummaries/{rid}` | Post-round recap: distances, coverage, ping list, timeline from the round's start | Served only after the round, only to its phones |
 | `sessions/{sid}/routes/{rid}` | Simplified per-crew polylines | Served only after the round, to its phones, with every phone's route-sharing consent |
 | `sessions/{sid}/liveActivities/{uid}_{deviceId}` | Live Activity push token, clock offset, `sentVersion` (the round version last pushed; only newer versions go out) | **12 h TTL**. Removed on revoke, delete-my-data and account deletion |
 
@@ -62,7 +63,7 @@ Bucket: `<project>-manhunt-media` in production (private, uniform bucket-level a
 | Object | Written by | Removed by |
 |---|---|---|
 | `sessions/{sid}/rounds/{rid}/captures/{claimId}.jpg` | `PUT …/captures/{cid}/photo`, after the server strips metadata segments | Retention: 7 days if unconfirmed, rejected or expired; 30 days if confirmed, unless every crew opts in to keep. Also delete-my-data, delete-night and account deletion |
-| `sessions/{sid}/rounds/{rid}/tracks/{phoneKey}/{rev}.geojson.gz` | `finalize.ts`, one per phone | Delete-my-data, delete-night, account deletion, the bucket backstop |
+| `sessions/{sid}/rounds/{rid}/tracks/{phoneKey}/{rev}.geojson.gz` | `finalize.ts`, one per phone (a recomputation writes the next revision and removes the previous one) | Delete-my-data, delete-night, account deletion, the bucket backstop |
 
 ## What a view contains
 

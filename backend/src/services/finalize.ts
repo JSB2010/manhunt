@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { roundTeams } from '../domain/crews.js';
 import { buildRouteSegments, computeDistance, DEFAULT_DISTANCE_OPTIONS, ROLE_MAX_SPEED_MPS, type DistanceResult } from '../domain/geo.js';
@@ -10,10 +10,20 @@ import { paths, txGet, txMembers, writeViews, type Deps } from './repo.js';
  * simplified route polylines, raw-track archive in GCS and the authorized
  * round summary. Runs after the finishing transition commits; idempotent and
  * retried by the watchdog when `summaryReady === false`.
+ *
+ * One computation per round at a time: at the end of a round the decision and
+ * every phone's final upload arrive within a second or two, and each used to
+ * recompute the whole recap at once (2–9 s per request, results racing). The
+ * caller holding the lease reruns once more for requests that came in while it
+ * worked; the others return at once.
  */
 
 const SIMPLIFY_TOLERANCE_M = 8;
 const MAX_ROUTE_POINTS_PER_TEAM = 4000;
+/** A recap computation holds the lease this long; a crashed holder's lease just expires. */
+export const FINALIZE_LEASE_MS = 60_000;
+/** Reruns a holder makes for requests that arrived while it worked (late uploads settle within seconds). */
+const MAX_FINALIZE_PASSES = 3;
 
 export interface RouteTeam {
   team: TeamKey;
@@ -104,10 +114,50 @@ function crewTrack(pre: RoundDoc, team: TeamKey, pts: GpsPoint[], deletedUids: R
 }
 
 export async function finalizeRound(d: Deps, sid: string, rid: string, opts: { force?: boolean } = {}) {
+  const lock = paths(d.db).finalizeLock(sid, rid);
+  const token = randomUUID();
+  // Take the lease, or leave the holder a note to run once more and return.
+  const acquired = await d.db.runTransaction(async (tx) => {
+    const now = d.clock.now();
+    const held = (await tx.get(lock)).data() as { token: string; until: number } | undefined;
+    if (held && held.until > now) {
+      tx.set(lock, { rerun: true }, { merge: true });
+      return false;
+    }
+    tx.set(lock, { token, until: now + FINALIZE_LEASE_MS, rerun: false });
+    return true;
+  });
+  if (!acquired) return;
+  let force = !!opts.force;
+  try {
+    for (let pass = 0; pass < MAX_FINALIZE_PASSES; pass++) {
+      await computeRecap(d, sid, rid, force);
+      const again = await d.db.runTransaction(async (tx) => {
+        const held = (await tx.get(lock)).data() as { token: string; rerun?: boolean } | undefined;
+        if (held?.token !== token) return false;
+        if (held.rerun && pass + 1 < MAX_FINALIZE_PASSES) {
+          tx.set(lock, { token, until: d.clock.now() + FINALIZE_LEASE_MS, rerun: false });
+          return true;
+        }
+        tx.delete(lock);
+        return false;
+      });
+      if (!again) return;
+      force = true;
+    }
+  } catch (err) {
+    // Let the watchdog (summaryReady === false) recompute, including any rerun that was asked for.
+    await lock.delete().catch(() => undefined);
+    await paths(d.db).round(sid, rid).update({ summaryReady: false }).catch(() => undefined);
+    throw err;
+  }
+}
+
+async function computeRecap(d: Deps, sid: string, rid: string, force: boolean) {
   const p = paths(d.db);
   const pre = (await p.round(sid, rid).get()).data() as RoundDoc | undefined;
   if (!pre || !isFinishedState(pre.state) || !pre.result) return;
-  if (pre.summaryReady === true && !opts.force) return;
+  if (pre.summaryReady === true && !force) return;
 
   const existingRoute = (await p.route(sid, rid).get()).data() as RouteDoc | undefined;
   const deletedUids = new Set<string>(existingRoute?.deletedUids ?? []);
@@ -157,20 +207,30 @@ export async function finalizeRound(d: Deps, sid: string, rid: string, opts: { f
   // Raw track archive (private bucket), one object per phone so a phone's data can be deleted on its own.
   const session = (await p.session(sid).get()).data() as SessionDoc | undefined;
   if (!session) return;
-  for (const uid of new Set(pts.map((x) => x.operatorUid))) {
-    const samples = pts.filter((x) => x.operatorUid === uid).sort((a, b) => a.recordedAt - b.recordedAt);
-    const geo = {
-      type: 'Feature',
-      properties: { sessionId: sid, roundId: rid, team: samples[0]!.teamKey, revision },
-      geometry: { type: 'LineString', coordinates: samples.map((s) => [s.longitude, s.latitude]) },
-    };
-    const key = `sessions/${sid}/rounds/${rid}/tracks/${phoneKey(uid)}/${revision}.geojson.gz`;
-    await d.store.put(key, gzipSync(Buffer.from(JSON.stringify(geo))), 'application/gzip').catch((err) => d.log.warn({ err }, 'track archive write failed'));
-  }
+  // Written in parallel; the superseded revision is removed so a phone keeps one archive per round.
+  const archiveKey = (uid: string, rev: number) => `sessions/${sid}/rounds/${rid}/tracks/${phoneKey(uid)}/${rev}.geojson.gz`;
+  await Promise.all(
+    [...new Set(pts.map((x) => x.operatorUid))].map(async (uid) => {
+      const samples = pts.filter((x) => x.operatorUid === uid).sort((a, b) => a.recordedAt - b.recordedAt);
+      const geo = {
+        type: 'Feature',
+        properties: { sessionId: sid, roundId: rid, team: samples[0]!.teamKey, revision },
+        geometry: { type: 'LineString', coordinates: samples.map((s) => [s.longitude, s.latitude]) },
+      };
+      try {
+        await d.store.put(archiveKey(uid, revision), gzipSync(Buffer.from(JSON.stringify(geo))), 'application/gzip');
+        if (revision > 1) await d.store.delete(archiveKey(uid, revision - 1));
+      } catch (err) {
+        d.log.warn({ err }, 'track archive write failed');
+      }
+    }),
+  );
 
   const eventsSnap = await p.events(sid).where('roundId', '==', rid).get();
   const timeline = eventsSnap.docs
     .map((x) => x.data() as { type: string; at: number; actorUid: string | null; details: Record<string, unknown> })
+    // The recap's timeline is the round itself, not the lobby before it (ready taps, setup edits).
+    .filter((e) => pre.roundStartAt === null || e.at >= pre.roundStartAt)
     .sort((a, b) => a.at - b.at)
     // Audit details may name phones (uids); the recap timeline only needs type, time and crew-level details.
     .map((e) => ({ type: e.type, at: e.at, details: Object.fromEntries(Object.entries(e.details).filter(([k]) => k !== 'uid')) }));

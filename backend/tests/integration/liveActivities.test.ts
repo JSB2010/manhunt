@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { LiveActivityPush } from '../../src/services/liveActivities.js';
+import { LiveActivityService, type LiveActivityPush } from '../../src/services/liveActivities.js';
 import { batch, clearEmulators, consentBody, harness, healthyPreflight, jpegWithExif, MIN, type Harness, type TestUser } from './helpers.js';
 
 /**
@@ -178,6 +178,27 @@ describe('Live Activities', () => {
     const [m] = toPhone(sentSince(h.liveActivities.sent.length - 2), morgan);
     expect(m).toMatchObject({ event: 'update', priority: 5, contentState: { lastPing: { index: 1 } } });
     expect(m!.alert).toBeUndefined();
+  });
+
+  it('APNs rejecting the credentials pauses activity pushes; alerts go out as regular pushes, and updates resume once fixed', async () => {
+    // 2026-10-22: every activity push failed with messaging/third-party-auth-error, one by one, on every change.
+    h.liveActivities.rejectCredentials = true;
+    const alertsBefore = h.notifier.liveActivityAlerts.length;
+    const pushesBefore = h.notifier.sent.length;
+    await hiderUploads(T0 + 4 * MIN, T0 + 6 * MIN);
+    h.clock.set(T0 + 6 * MIN);
+    await h.tick(sid, rid);
+    const attempts = h.liveActivities.attempts;
+    expect(h.notifier.liveActivityAlerts.length).toBe(alertsBefore);
+    expect(h.notifier.sent.slice(pushesBefore).some((n) => n.kind === 'PING_RELEASED' && n.toUids.includes(taylor.uid))).toBe(true);
+    // Paused: the next change doesn't try again.
+    await hiderUploads(T0 + 6 * MIN, T0 + 8 * MIN);
+    h.clock.set(T0 + 8 * MIN);
+    await h.tick(sid, rid);
+    expect(h.liveActivities.attempts).toBe(attempts);
+    // Nothing was marked as sent, so the next change after the fix brings each activity up to date.
+    h.liveActivities.rejectCredentials = false;
+    LiveActivityService.resetBackoff();
   });
 
   it('a catch claim goes to the hiders’ activities as an alert; confirming ends every activity with a 15-minute dismissal', async () => {

@@ -13,6 +13,8 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mes
     private(set) var authorized = false
     private var api: APIClient?
     private let env: AppEnvironment
+    /// Tapping a night's notification opens that night (where tracking starts if a round is on).
+    var onOpenSession: ((String) -> Void)?
 
     init(env: AppEnvironment) {
         self.env = env
@@ -88,6 +90,13 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mes
 
     func clearAll() {
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+    }
+
+    /// Pushes carry the night's id (never coordinates). A phone that missed the round's start —
+    /// in a pocket since the last round — starts tracking as soon as it's tapped.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard let sid = response.notification.request.content.userInfo["sessionId"] as? String, !sid.isEmpty else { return }
+        await MainActor.run { self.onOpenSession?(sid) }
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {

@@ -84,6 +84,10 @@ final class AppModel {
         location.attach(api: client)
         location.onReconnect = { [weak self] in Task { await self?.reconcile(force: true) } }
         notifications.attach(api: client)
+        notifications.onOpenSession = { [weak self] sid in
+            guard let self, self.auth.uid != nil, self.activeSessionId != sid else { return }
+            self.openSession(sid)
+        }
         if firebaseError == nil { auth.start() }
         // Tokens expire while the app is suspended; refresh once on return, before the screen's requests pile in.
         foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in

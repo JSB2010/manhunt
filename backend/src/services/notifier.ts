@@ -40,16 +40,22 @@ export class FcmNotifier implements Notifier {
             data: { kind: n.kind, sessionId: n.sessionId, roundId: n.roundId ?? '' },
             apns: { payload: { aps: { sound: 'default', 'interruption-level': n.kind === 'SAFETY_PAUSE' ? 'time-sensitive' : 'active' } } },
           });
-          // Prune tokens FCM reports as permanently invalid.
+          // Prune tokens FCM reports as permanently invalid; count every other failure by code
+          // (these were invisible before: a rejected APNs key failed every push without a log line).
+          const failures: Record<string, number> = {};
           await Promise.all(
             res.responses.map(async (r, i) => {
               const code = r.error?.code;
+              if (!code) return;
               if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
                 const bad = snap.docs.find((d) => d.get('fcmToken') === tokens[i]);
                 if (bad) await bad.ref.delete();
+                return;
               }
+              failures[code] = (failures[code] ?? 0) + 1;
             }),
           );
+          if (Object.keys(failures).length) this.log.warn({ kind: n.kind, failures }, 'push delivery failed');
         } catch (err) {
           this.log.warn({ err, kind: n.kind, uid }, 'push send failed');
         }

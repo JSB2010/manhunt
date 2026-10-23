@@ -140,6 +140,7 @@ People's stats on the **People** tab are always their *crew's* results in the ro
 |---|---|
 | Pings are late or missing | On the hiders' phones: Location *While Using the App*, Precise Location on, Low Power Mode off, and don't force-quit the app. Check **Phone Status** |
 | "Tracking stopped" | The app was closed or location was turned off. Open the app, and tap Resume on the banner if it shows one |
+| "Your phone isn't tracking" | The round started while the app was closed or in the background since the last round. Tap the notification (it opens the night) or open the app; tracking starts on its own |
 | Notifications are late | The game doesn't depend on them: the clock comes from the server. Open the app to see the current phase |
 | Can't join | Ask someone in the night for the current code. **New Code** replaces the old one, and codes stop working when the night ends |
 | The map looks stuck | The app re-checks with the server on its own. Bring it back to the foreground, or check your connection |

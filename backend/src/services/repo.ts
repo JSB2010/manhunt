@@ -58,6 +58,8 @@ export const paths = (db: Firestore) => ({
   view: (sid: string, uid: string) => db.collection('sessions').doc(sid).collection('views').doc(uid),
   summary: (sid: string, rid: string) => db.collection('sessions').doc(sid).collection('roundSummaries').doc(rid),
   route: (sid: string, rid: string) => db.collection('sessions').doc(sid).collection('routes').doc(rid),
+  /** Server-only lease that serializes a round's recap computation (finalize.ts). */
+  finalizeLock: (sid: string, rid: string) => db.collection('sessions').doc(sid).collection('rounds').doc(rid).collection('locks').doc('finalize'),
   invites: () => db.collection('invites'),
   invite: (id: string) => db.collection('invites').doc(id),
   idempotency: (id: string) => db.collection('idempotency').doc(id),

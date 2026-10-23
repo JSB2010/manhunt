@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { crewOfPerson, matchRosterPerson, movePersonToCrew, ownerPersonId } from '../../src/domain/crews.js';
+import { startRound, trackingNudges, TRACKING_NUDGE_AFTER_MS, TRACKING_NUDGE_EVERY_MS, TRACKING_SILENT_MS } from '../../src/domain/engine.js';
 import type { SessionDoc } from '../../src/domain/types.js';
-import { session } from './fixtures.js';
+import { allPhones, health, HIDER, members, MIN, readyRound, SEEKER, session, T0 } from './fixtures.js';
 
 /** The rosters typed by the organizer on 2026-10-22 (names only; the accounts that joined used shorter names). */
 function typedNight(): SessionDoc {
@@ -71,5 +72,45 @@ describe('a phone’s owner on the rosters', () => {
     expect(s.teams.A!.roster.at(-1)).toEqual({ personId: 'p-marco', displayName: 'Marco Bellini' });
     expect(movePersonToCrew(s, 'p-marco', 'A')).toBeNull(); // already there
     expect(movePersonToCrew(s, 'p-unknown', 'B')).toBeNull();
+  });
+});
+
+describe('tracking nudges', () => {
+  const started = () => {
+    const { session: s, round } = readyRound();
+    return { s, round: startRound(round, s, HIDER, allPhones(s), [], T0).round };
+  };
+
+  it('nudges a phone that hasn’t reported since the start, once, after a minute', () => {
+    const { s, round } = started();
+    const m = members(s);
+    m[HIDER]!.health = health({ lastHeartbeatAt: T0 + 5_000 });
+    m[SEEKER]!.health = health({ lastHeartbeatAt: T0 - 2 * MIN }); // its Ready check, before the start
+    expect(trackingNudges(round, m, T0 + TRACKING_NUDGE_AFTER_MS - 1)).toEqual([]);
+    const [n, ...rest] = trackingNudges(round, m, T0 + TRACKING_NUDGE_AFTER_MS);
+    expect(rest).toEqual([]);
+    expect(n).toMatchObject({ toUids: [SEEKER], kind: 'TRACKING_NUDGE', title: 'Your phone isn’t tracking' });
+    expect(n!.body).toContain('Round 1');
+    expect(JSON.stringify(n)).not.toMatch(/\d+\.\d{3,}/); // no coordinates
+    m[SEEKER]!.trackingNudge = { roundId: round.id, at: T0 + TRACKING_NUDGE_AFTER_MS };
+    expect(trackingNudges(round, m, T0 + 5 * MIN)).toEqual([]);
+    m[HIDER]!.health = health({ lastHeartbeatAt: T0 + 10 * MIN });
+    expect(trackingNudges(round, m, T0 + TRACKING_NUDGE_AFTER_MS + TRACKING_NUDGE_EVERY_MS).map((x) => x.toUids)).toEqual([[SEEKER]]);
+  });
+
+  it('nudges a hider phone that goes quiet mid-round, with the hider wording; never while paused or after the round', () => {
+    const { s, round } = started();
+    const m = members(s);
+    m[SEEKER]!.health = health({ lastHeartbeatAt: T0 + 6 * MIN });
+    m[HIDER]!.health = health({ lastHeartbeatAt: T0 + 1 * MIN });
+    const [n] = trackingNudges(round, m, T0 + 1 * MIN + TRACKING_SILENT_MS);
+    expect(n).toMatchObject({ toUids: [HIDER] });
+    expect(n!.body).toContain('pings');
+    const paused = { ...round, state: 'PAUSED' as const, pauses: [{ id: 'p', kind: 'SAFETY' as const, startAt: T0 + 2 * MIN, endAt: null, phase: 'HEAD_START' as const, requestedByUid: SEEKER, confirmedByUid: null, reason: null }] };
+    expect(trackingNudges(paused, m, T0 + 9 * MIN)).toEqual([]);
+    expect(trackingNudges({ ...round, state: 'COMPLETED' }, m, T0 + 9 * MIN)).toEqual([]);
+    // A phone that left the night is never nudged.
+    m[HIDER]!.active = false;
+    expect(trackingNudges(round, m, T0 + 9 * MIN)).toEqual([]);
   });
 });

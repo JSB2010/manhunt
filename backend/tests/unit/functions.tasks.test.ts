@@ -4,7 +4,7 @@ import { AppError } from '../../src/domain/errors.js';
 import { EARLY_WAIT_MAX_MS, runTickTask } from '../../src/functions/tasks.js';
 import { loadConfig } from '../../src/config.js';
 import { createLogger } from '../../src/observability/logger.js';
-import { TaskQueueScheduler, taskName, type WakeTask } from '../../src/services/scheduler.js';
+import { TaskQueueScheduler, taskName, WAKE_LEAD_MS, type WakeTask } from '../../src/services/scheduler.js';
 
 process.env.APP_ENV = 'test';
 const log = createLogger(loadConfig({ env: 'test', projectId: 'demo-manhunt' }), 'functions-tasks');
@@ -80,14 +80,25 @@ describe('task-queue scheduler', () => {
     expect(TaskQueueScheduler.functionPath(cfg)).toBe('locations/europe-west1/functions/tick');
   });
 
-  it('enqueues ids only, at the deadline, under a deterministic task id', async () => {
+  it('enqueues ids only, a cold start ahead of the deadline, under a deterministic task id', async () => {
     const queue = { enqueue: vi.fn(async () => undefined) };
     await new TaskQueueScheduler(queue, log).scheduleWake(wake);
     expect(queue.enqueue).toHaveBeenCalledTimes(1);
     const [payload, opts] = queue.enqueue.mock.calls[0] as unknown as [Record<string, unknown>, { id: string; scheduleTime: Date }];
+    // The payload keeps the deadline itself: the handler waits until then, so selection never runs early.
     expect(payload).toEqual({ sessionId: 's1', roundId: 'r1', generation: 2, eventKey: 'ping-3', at: wake.at });
     expect(opts.id).toBe(taskName(wake));
-    expect(opts.scheduleTime.getTime()).toBe(wake.at);
+    expect(opts.scheduleTime.getTime()).toBe(wake.at - WAKE_LEAD_MS);
+  });
+
+  it('dispatches early by less than the handler waits out, so an early wake-up is never retried', async () => {
+    expect(WAKE_LEAD_MS).toBeGreaterThan(0);
+    expect(WAKE_LEAD_MS).toBeLessThan(EARLY_WAIT_MAX_MS);
+    const game = { tick: vi.fn(async () => ({ processed: [] })) };
+    const sleep = vi.fn(async () => undefined);
+    await runTickTask({ data: { ...data, at: 1_000 + WAKE_LEAD_MS } }, { game, allowedCallers: null, log, now, sleep });
+    expect(sleep).toHaveBeenCalledWith(WAKE_LEAD_MS);
+    expect(game.tick).toHaveBeenCalledTimes(1);
   });
 
   it('treats a duplicate id as success and never throws on enqueue failure (the watchdog repairs)', async () => {

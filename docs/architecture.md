@@ -132,7 +132,7 @@ With no qualifying sample the ping **waits** (ADR 0015). The next hiding-crew up
 
 Crew health is coarse: live/total phones and a state. A view is written only when its content hash changes, and `GET /v1/sessions/{id}` serves the stored view with an ETag (ADR 0016).
 
-**Live Activities (ADR 0017).** `views.ts` renders the activity's content from that phone's own `RoundView`: phase, clock anchors, ping index and times, claim crew and outcome, never coordinates.
+**Live Activities (ADR 0017).** `views.ts` renders the activity's content from that phone's own `RoundView`: phase, clock anchors, ping index and times, claim crew and outcome, never coordinates. Pushes go out in parallel (8 at a time). If APNs rejects the project's credentials (`messaging/third-party-auth-error`), activity pushes pause for 10 minutes on that instance, the error is logged once with the fix, and every alert goes out as a regular push instead.
 - The app updates the activity from every applied view.
 - After each committed round change, the server push-starts it on the round's other phones, updates registered activities, and ends them with the round. These are ActivityKit pushes through FCM.
 - A moment's notification rides on the activity update as its alert, in place of a duplicate push.
@@ -150,8 +150,8 @@ App and server share one mapping, pinned by `shared/fixtures/live-activity.json`
 
 - After every state change, the API or worker enqueues one task on the `tick` queue for the next event, with id `r-{roundId}-g{generation}-{event}`. Cloud Tasks dedups ids. `phaseGeneration` increments on every pause, resume and claim transition.
 - The tick is idempotent: it processes whatever is due at `now`, in order, against state read in the transaction. Stale or duplicate tasks are harmless no-ops (ADR 0003).
-- `tick` waits out an early arrival of up to 30 s and returns 503 for a longer one, so Cloud Tasks retries (ADR 0012).
-- The watchdog (every minute) ticks every active round. That repairs missed wake-ups, re-checks a waiting ping and refreshes coarse crew status. It also re-enqueues the next wake-up, counts overdue deadlines (alerted) and retries unfinished finalization (`summaryReady === false`).
+- Wake-ups are dispatched 8 s before their deadline (`WAKE_LEAD_MS`) so the `tick` function's cold start is over by then; `tick` waits out an early arrival of up to 30 s and returns 503 for a longer one, so Cloud Tasks retries (ADR 0012).
+- The watchdog (every minute) ticks every active round. That repairs missed wake-ups, re-checks a waiting ping and refreshes coarse crew status. It also re-enqueues the next wake-up, counts overdue deadlines (alerted), retries unfinished finalization (`summaryReady === false`, leaving rounds that ended in the last 30 s to the request that ended them), and sends **"your phone isn't tracking"** pushes (`engine.trackingNudges`): to a round phone that hasn't reported a minute after the start, or has gone quiet for 5 minutes, at most every 10 minutes (`member.trackingNudge`). Tracking starts when the app sees the round start, so a phone left in a pocket since the last round records nothing until it's opened; tapping any of the night's notifications opens the night.
 - Late processing never changes *which* sample is eligible, because selection is by deadline. A late release is labelled `delayed` with the measured dispatch latency.
 - API writes accept an `Idempotency-Key`, and successful responses are replayed for 24 h.
 
@@ -160,8 +160,10 @@ App and server share one mapping, pinned by `shared/fixtures/live-activity.json`
 `finalize.ts` computes, per crew:
 - walking distance (total and chase) or driving distance (chase), coverage and quality, from the crew's best-covered phone;
 - simplified polylines (Douglas–Peucker at 8 m, split at gaps over 120 s);
-- a gzip GeoJSON raw-track archive per phone in GCS;
-- the round summary.
+- a gzip GeoJSON raw-track archive per phone in GCS (one per phone: a recomputation removes the superseded one);
+- the round summary, whose timeline starts at the round's start (no lobby events).
+
+One computation per round runs at a time, under a lease (`rounds/{rid}/locks/finalize`, 60 s). At a catch the decision and every phone's final upload arrive within a second or two; each used to recompute the whole recap concurrently (2–9 s per request on 2026-10-22, results racing). Now a request that finds the lease held marks it for one more pass and returns; the holder reruns until nobody asked again. A failure releases the lease and clears `summaryReady`, so the watchdog recomputes. An upload that lands while the round ends re-checks the round after writing, so its points always reach the recap.
 
 Routes are served only after the round ends, only to the round's phones, and only when every phone in the round consented to post-round route sharing. "Delete my data" removes one phone's tracks and the pins released from its fixes, then recomputes its crew's route from the crew's other phones.
 
