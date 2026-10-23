@@ -1,6 +1,6 @@
 # ADR 0017 — Live Activities: the round on the Lock Screen and in the Dynamic Island
 
-**Status:** accepted · **Spec:** §7 (outdoors-readable clocks, obvious phase labels), §10.2 (sanitized per-user state), §14 (push is supplementary, never coordinates) · **Related:** ADR 0010, 0011, 0016
+**Status:** accepted, the crew label (`crewName`) updated by ADR 0019 · **Spec:** §7 (outdoors-readable clocks, obvious phase labels), §10.2 (sanitized per-user state), §14 (push is supplementary, never coordinates) · **Related:** ADR 0010, 0011, 0016
 
 **Context.** During a round the phone spends most of its time locked in a pocket or mounted in a car. The answers people need at a glance — what phase it is, how long is left, when the next ping goes out — were only on the game screen, and local deadline notifications stood in for them. Apple's Live Activities are made for this: an event with a defined start and end, under eight hours, with frequent updates. Apple documentation read for this work (October 2026): HIG › Live Activities (updated 13 October 2026 with limited-width guidance), *Displaying live data with Live Activities*, *Starting and updating Live Activities with ActivityKit push notifications*, *Creating custom views for Live Activities*, *Launching your app from a Live Activity*, ActivityKit updates, and the API pages for every call used. Firebase: *Send Live Activity updates* through FCM HTTP v1.
 

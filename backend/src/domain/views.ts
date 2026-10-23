@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { chaseStartDeadline, effectiveChaseMs, effectiveHeadStartMs, hasOpenPause, pingDeadline, runningSince, timeCapDeadline } from './clock.js';
-import { crewOfUid, ownerPersonId, roleOfTeam, roundTeams, sideOfRole, snapshotTeamOf, teamKeysOf } from './crews.js';
+import { benchOf, crewColourName, crewOfUid, ownerPersonId, roleOfTeam, roundTeams, sideOfRole, snapshotTeamOf, teamKeysOf } from './crews.js';
 import { suggestedHidingTeam } from './engine.js';
 import {
   isFinishedState,
@@ -154,6 +154,8 @@ export interface ViewDoc {
     completedRoundCount: number;
     rules: RulesView;
     teams: Partial<Record<TeamKey, TeamView>>;
+    /** people sitting out, and their phones (in the night, not on a crew: no tracking, no pins) — ADR 0019 */
+    sittingOut: { roster: PersonRef[]; operators: OperatorView[] };
     /** reusable night code for adding phones (members only; null once the night ends) */
     joinCode: string | null;
     revoked: boolean;
@@ -378,24 +380,22 @@ export function renderView(params: {
 }): ViewDoc {
   const { uid, session, round, members, now } = params;
   const myTeam = crewOfUid(session, uid);
+  const operator = (u: string): OperatorView => ({
+    uid: u,
+    personId: members[u] ? ownerPersonId(session, members[u]!) : null,
+    displayName: members[u]?.displayName ?? 'Phone',
+    isMe: u === uid,
+    consentGiven: !!(members[u]?.consent && !members[u]?.consentRevokedAt),
+  });
   const team = (k: TeamKey): TeamView => {
     const t = session.teams[k]!;
-    return {
-      teamId: t.teamId,
-      key: k,
-      name: t.name,
-      color: t.color,
-      roster: t.roster,
-      operators: t.operatorUids.map((u) => ({
-        uid: u,
-        personId: members[u] ? ownerPersonId(session, members[u]!) : null,
-        displayName: members[u]?.displayName ?? 'Phone',
-        isMe: u === uid,
-        consentGiven: !!(members[u]?.consent && !members[u]?.consentRevokedAt),
-      })),
-      isMine: myTeam === k,
-    };
+    return { teamId: t.teamId, key: k, name: t.name, color: t.color, roster: t.roster, operators: t.operatorUids.map(operator), isMine: myTeam === k };
   };
+  // Phones in the night whose owners sit out, in joining order (deterministic for the view hash).
+  const sittingOutPhones = Object.values(members)
+    .filter((m) => m.active && session.memberUids.includes(m.uid) && !crewOfUid(session, m.uid))
+    .sort((a, b) => a.joinedAt - b.joinedAt || a.uid.localeCompare(b.uid))
+    .map((m) => operator(m.uid));
   const roundOpen = !!round && !isFinishedState(round.state);
   const ended = session.status === 'COMPLETED' || session.revokedAt !== null;
   const nextRound = !ended && !roundOpen ? { index: session.roundIds.length + 1, suggestedHidingTeam: suggestedHidingTeam(session) } : null;
@@ -415,6 +415,7 @@ export function renderView(params: {
       completedRoundCount: session.completedRoundCount,
       rules: { ...session.rules },
       teams: Object.fromEntries(teamKeysOf(session).map((k) => [k, team(k)])),
+      sittingOut: { roster: benchOf(session), operators: sittingOutPhones },
       joinCode: ended ? null : session.joinCode,
       revoked: session.revokedAt !== null,
     },
@@ -486,7 +487,8 @@ export function liveActivityAttributes(view: ViewDoc): LiveActivityAttributes | 
     roundIndex: r.index,
     role: r.myRole,
     crew: r.myTeam,
-    crewName: view.session.teams[r.myTeam]?.name ?? `Crew ${r.myTeam}`,
+    // The crew's colour, never its people's names: a Lock Screen is readable by anyone nearby (ADR 0019).
+    crewName: crewColourName(r.myTeam),
   };
 }
 

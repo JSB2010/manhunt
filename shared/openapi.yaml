@@ -90,11 +90,12 @@ components:
       properties: { personId: { type: string }, displayName: { type: string, maxLength: 60 } }
     TeamInput:
       type: object
+      description: A crew's people. Crews are named after their people by the server (ADR 0019); `name` and `color` are accepted from older apps and ignored.
       additionalProperties: false
-      required: [name, roster]
+      required: [roster]
       properties:
-        name: { type: string, maxLength: 60 }
-        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$' }
+        name: { type: string, maxLength: 60, deprecated: true }
+        color: { type: string, pattern: '^#[0-9A-Fa-f]{6}$', deprecated: true }
         roster: { type: array, maxItems: 30, items: { $ref: '#/components/schemas/RosterEntry' } }
     Health:
       type: object
@@ -245,7 +246,8 @@ components:
             myTeam: { type: [string, 'null'] }
             completedRoundCount: { type: integer }
             rules: { $ref: '#/components/schemas/Rules' }
-            teams: { type: object, description: 'Per crew: {teamId, key, name, color, roster, operators: [{uid, personId (the roster name the phone''s owner plays as), displayName, isMe, consentGiven}], isMine}' }
+            teams: { type: object, description: 'Per crew: {teamId, key, name (its people: "Sasha & Marco"; an empty crew is its colour, "Blue crew"), color, roster, operators: [{uid, personId (the roster name the phone''s owner plays as), displayName, isMe, consentGiven}], isMine}' }
+            sittingOut: { type: object, description: 'People sitting out (in the night, not on a crew) and their phones, which spectate: {roster: [PersonRef], operators: [same as a crew''s operators]} (ADR 0019)' }
             joinCode: { type: [string, 'null'], description: reusable night code; null once the night ends }
             revoked: { type: boolean }
         round: { oneOf: [{ $ref: '#/components/schemas/RoundView' }, { type: 'null' }] }
@@ -359,6 +361,7 @@ paths:
                 scheduledDate: { type: string, format: date }
                 myTeam: { $ref: '#/components/schemas/TeamKey' }
                 teams: { type: object, additionalProperties: false, required: [A, B], properties: { A: { $ref: '#/components/schemas/TeamInput' }, B: { $ref: '#/components/schemas/TeamInput' }, C: { $ref: '#/components/schemas/TeamInput' } } }
+                bench: { type: array, maxItems: 30, items: { $ref: '#/components/schemas/RosterEntry' }, description: People sitting out to begin with (not arrived yet) }
                 firstHidingTeam: { $ref: '#/components/schemas/TeamKey' }
                 seekMode: { $ref: '#/components/schemas/SeekMode' }
                 rules: { $ref: '#/components/schemas/Rules' }
@@ -372,7 +375,7 @@ paths:
     delete: { summary: Organizer deletes the whole night (Firestore subtree + GCS objects), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
   /v1/sessions/{id}/invites:
     post:
-      summary: Any operator gets the night's reusable code (regenerate revokes the old one); with targetUid also sends a friend a direct invite
+      summary: Any phone in the night gets the night's reusable code (regenerate revokes the old one); with targetUid also sends a friend a direct invite
       parameters: [{ $ref: '#/components/parameters/SessionId' }]
       requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { targetUid: { type: string }, regenerate: { type: boolean } } } } } }
       responses: { '200': { description: '{code, inviteId (direct invite or null), expiresAt, deepLink}' } }
@@ -380,15 +383,15 @@ paths:
     post:
       summary: Night summary for a code or direct invite, with each crew's phone count. Only failed lookups count toward the brute-force limit.
       requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { code: { type: string }, inviteId: { type: string } } } } } }
-      responses: { '200': { description: '{sessionId, title, scheduledDate, teams, suggestedTeam, myTeam, hostDisplayName, rules, expiresAt, claimedPersonIds (roster names another phone plays as), suggestedPersonId (the roster name this account most likely is, or null)}' }, '410': { $ref: '#/components/responses/Error' } }
+      responses: { '200': { description: '{sessionId, title, scheduledDate, teams, suggestedTeam, myTeam, hostDisplayName, rules, expiresAt, claimedPersonIds (roster names another phone plays as), suggestedPersonId (the roster name this account most likely is, or null), sittingOut (people sitting out: [PersonRef])}' }, '410': { $ref: '#/components/responses/Error' } }
   /v1/invites/redeem:
     post:
-      summary: 'Join the night as an operator phone of a crew (default: the crew listing the joiner''s name, else the crew with the fewest phones; at most 5 per crew). The phone plays as `personId` (a roster name of this night no other phone plays as), else the name it matches, else its own person record is added (ADR 0018). Re-joining is a no-op.'
+      summary: 'Join the night as an operator phone of a crew (default: the crew listing the joiner''s name, else the crew with the fewest phones; at most 5 per crew). The phone plays as `personId` (a roster name of this night no other phone plays as), else the name it matches, else its own person record is added (ADR 0018). Joining as a person who is sitting out puts them on a crew (ADR 0019). Re-joining is a no-op, also for a phone sitting out.'
       requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { code: { type: string }, inviteId: { type: string }, teamKey: { $ref: '#/components/schemas/TeamKey' }, personId: { type: string } } } } } }
       responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK }, '410': { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}/setup:
     patch:
-      summary: Any operator edits the night between rounds — title, default rules, crews (add/rename/remove, rosters) and which crew each phone is on. A READY round is refreshed.
+      summary: 'Any phone in the night edits it between rounds — title, default rules, crews (add/remove) and where everyone is: crew rosters and `bench` (sitting out). Every phone follows its owner; a person left out of every list leaves the night with their phone; a removed crew''s people sit out unless placed elsewhere (ADR 0019). A READY round is refreshed.'
       parameters: [{ $ref: '#/components/parameters/SessionId' }]
       requestBody:
         content:
@@ -401,7 +404,8 @@ paths:
                 scheduledDate: { type: string, format: date }
                 rules: { $ref: '#/components/schemas/Rules' }
                 teams: { type: object, description: 'Per crew A/B/C: partial TeamInput, or null to remove the crew' }
-                moves: { type: array, maxItems: 15, items: { type: object, required: [uid, teamKey], properties: { uid: { type: string }, teamKey: { type: [string, 'null'], description: null removes the phone from the night } } } }
+                bench: { type: array, maxItems: 30, items: { $ref: '#/components/schemas/RosterEntry' }, description: 'People sitting out. Omitted: unchanged, except people now listed on a crew' }
+                moves: { type: array, maxItems: 15, items: { type: object, required: [uid, teamKey], properties: { uid: { type: string }, teamKey: { type: [string, 'null'], description: 'null takes the phone out of the night (its owner keeps playing without it); a crew moves the phone and its owner (older apps)' } } } }
       responses: { '200': { $ref: '#/components/responses/Ok' } }
   /v1/sessions/{id}/consent:
     post:
@@ -417,12 +421,12 @@ paths:
       responses: { '200': { $ref: '#/components/responses/Ok' } }
   /v1/sessions/{id}/next-round:
     post:
-      summary: Any operator sets up the next round — any crew may hide (default the crew that hid least). Re-targets a READY round. Never auto-starts.
+      summary: Any phone in the night sets up the next round — any crew may hide (default the crew that hid least). Re-targets a READY round. Never auto-starts.
       parameters: [{ $ref: '#/components/parameters/SessionId' }]
       requestBody: { content: { application/json: { schema: { type: object, additionalProperties: false, properties: { hidingTeam: { $ref: '#/components/schemas/TeamKey' }, seekMode: { $ref: '#/components/schemas/SeekMode' } } } } } }
       responses: { '200': { content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } }, description: OK } }
   /v1/sessions/{id}/complete:
-    post: { summary: Any operator ends the night (an unstarted READY round is discarded; the night code stops working), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
+    post: { summary: Any phone in the night ends it (an unstarted READY round is discarded; the night code stops working), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { $ref: '#/components/responses/Ok' } } }
   /v1/sessions/{id}/keep-photos:
     post: { summary: Operator opts in to keeping confirmed photos past 30 days (every crew must opt in), parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
   /v1/sessions/{id}/my-data:
@@ -505,7 +509,7 @@ paths:
       parameters: [{ $ref: '#/components/parameters/SessionId' }, { $ref: '#/components/parameters/RoundId' }, { name: format, in: query, schema: { type: string, enum: [json, geojson] } }]
       responses: { '200': { description: Routes (JSON or application/geo+json) }, '409': { $ref: '#/components/responses/Error' }, '412': { $ref: '#/components/responses/Error' } }
   /v1/sessions/{id}/analytics:
-    get: { summary: Night scorecard with censoring and comparability flags, parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
+    get: { summary: 'Night scorecard with censoring and comparability flags. `scorecard.matchups`: rounds with the same people on each crew and the same rules, each with its own comparison; `scorecard.people`: crew-attributed tallies per person; `scorecard.changes`: who joined, left or moved and which rules changed before each round (ADR 0019)', parameters: [{ $ref: '#/components/parameters/SessionId' }], responses: { '200': { description: OK } } }
   /v1/analytics/people/{personId}:
     get: { summary: Crew-attributed statistics for a person across nights I played, parameters: [{ name: personId, in: path, required: true, schema: { type: string } }], responses: { '200': { description: OK } } }
   /v1/export/sessions/{file}:

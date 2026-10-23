@@ -43,7 +43,7 @@ final class ListenerIntegrationTests: XCTestCase {
 
         let created = try await host.createSession(CreateSessionBody(
             title: "listener probe", scheduledDate: "2026-10-18", myTeam: .A,
-            teams: ["A": .init(name: "A", roster: []), "B": .init(name: "B", roster: [])], rules: RulesPatch(.defaults), groupId: nil))
+            teams: ["A": .init(roster: []), "B": .init(roster: [])], rules: RulesPatch(.defaults), groupId: nil))
         let sid = created.sessionId
 
         var received: [SessionViewDoc] = []

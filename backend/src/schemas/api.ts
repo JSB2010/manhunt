@@ -20,13 +20,15 @@ const color = z.string().regex(/^#[0-9A-Fa-f]{6}$/);
 
 export const RosterEntry = z.object({ personId: id.optional(), displayName: name }).strict();
 
+/** A crew's people. `name` and `color` are accepted from older apps and ignored: crews are named after their people (ADR 0019). */
 export const TeamInput = z
   .object({
-    name,
+    name: name.optional(),
     color: color.optional(),
     roster: z.array(RosterEntry).max(30),
   })
   .strict();
+const Bench = z.array(RosterEntry).max(30);
 
 const teamKey = z.enum(['A', 'B', 'C']);
 const seekMode = z.enum(['TOGETHER', 'RACE']);
@@ -38,6 +40,8 @@ export const CreateSessionBody = z
     scheduledDate: isoDate,
     myTeam: teamKey,
     teams: z.object({ A: TeamInput, B: TeamInput, C: TeamInput.optional() }).strict(),
+    /** people sitting out to begin with (not arrived yet) */
+    bench: Bench.optional(),
     firstHidingTeam: teamKey.optional(),
     seekMode: seekMode.optional(),
     rules: RulesPatchSchema.optional(),
@@ -48,10 +52,12 @@ export const CreateSessionBody = z
   .refine((b) => !b.firstHidingTeam || !!b.teams[b.firstHidingTeam], 'firstHidingTeam must be one of the crews');
 
 /**
- * Between-rounds editor. A crew set to null is removed (its phones move to the
- * crew with the fewest phones); a crew that does not exist yet is added (needs a
- * name). `moves` re-assigns phones; teamKey null removes the phone from the night.
- * Operator lists can only change through `moves` — never by sending uids in a team.
+ * Between-rounds editor (ADR 0019). Crews' rosters and `bench` (sitting out) place people;
+ * every phone follows its owner, and a person left out of every list leaves the night with
+ * their phone. A crew set to null is removed (its people sit out unless placed elsewhere); a
+ * crew that does not exist yet is added. `moves`: teamKey null takes a phone out of the night
+ * (its owner keeps playing without it); a crew moves the phone and its owner (older apps).
+ * Phone lists are never sent: they are derived on the server.
  */
 export const SetupPatchBody = z
   .object({
@@ -59,6 +65,7 @@ export const SetupPatchBody = z
     scheduledDate: isoDate.optional(),
     rules: RulesPatchSchema.optional(),
     teams: z.object({ A: TeamPatch.nullable().optional(), B: TeamPatch.nullable().optional(), C: TeamPatch.nullable().optional() }).strict().optional(),
+    bench: Bench.optional(),
     moves: z
       .array(z.object({ uid: id, teamKey: teamKey.nullable() }).strict())
       .max(15)

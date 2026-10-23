@@ -16,12 +16,18 @@ Example (spec §3.4): start 8:00, head start 10 min → first ping & seekers sta
 ## No single-round winner
 `RoundResult` has no winner field. With two seeking crews, `catchCreditTeams` attributes a confirmed catch: RACE → the claiming crew, TOGETHER → every seeking crew. It is attribution, not a winner. The night scorecard (`scoring.ts`) computes per crew (two or three), **only over rounds it hid**: `hideRoundCount`, `hideSurvivalTotalSeconds`, `hideSurvivalAverageSeconds` (flagged `IncludesCensored` when any round timed out), `caughtOnlyHideAverageSeconds`, plus `seekCreditedCatches`/`seekCaptureAverageSeconds` over catches credited to it and `seekCaughtByOtherCrew` for RACE rounds another crew won.
 
-A stronger hiding crew is named only when the comparison is **COMPARABLE**: every crew hid equally often, identical rules fingerprints (which include the number of seeking crews and the seek mode), each crew hid with the same people in each of its own hiding rounds, no censored rounds, no aborted rounds. Otherwise status is **PROVISIONAL** (reasons `UNEQUAL_HIDE_ROUNDS`, `RULES_DIFFER`, `ROSTERS_CHANGED`, `CENSORED_ROUNDS`, `ABORTED_ROUNDS`) or **INSUFFICIENT** (some crew never hid), and only descriptive statistics are shown.
+A stronger hiding crew is named only when the comparison is **COMPARABLE**: every crew hid equally often, identical rules fingerprints (which include the number of seeking crews and the seek mode), every crew had the same people in every round, hiding or seeking (ADR 0019), no censored rounds, no aborted rounds. Otherwise status is **PROVISIONAL** (reasons `UNEQUAL_HIDE_ROUNDS`, `RULES_DIFFER`, `ROSTERS_CHANGED`, `CENSORED_ROUNDS`, `ABORTED_ROUNDS`) or **INSUFFICIENT** (some crew never hid), and only descriptive statistics are shown.
+
+Crews change during a night, so the scorecard also has (ADR 0019):
+* `matchups`: rounds grouped by the same crews (each crew a set of people, whatever its colour) under the same rules fingerprint. Each matchup has its own comparison with the tests above. The per-crew totals of a matchup include distances from each round's best-covered phone.
+* `people`: per person, rounds their crew hid and sought, their crew's average hiding time over the rounds they hid, and the catches credited to their crew while they sought. These are crew-level results, labelled as such.
+* `changes`: before each round, who joined, left (or sat out) or moved crews, and which rules changed.
+* The per-colour `teams` totals and the night-level `comparison` stay for older apps and exports.
 
 Timed-out rounds are recorded as `observed ≥ cap, outcome TIMED_OUT, isRightCensored`, never as a catch at the cap.
 
 ## Person analytics (crew-attributed)
-`personAnalytics` attributes everything to the crew a person was rostered on in that round (`rosterSnapshot[crew]`), never to the individual: rounds their crew hid/sought, crew averages, paired-night outcomes, crew compositions (fingerprint of sorted canonical person ids), co-players, and — only for a linked account — rounds they were the phone operator. Results include a small-sample note and use only nights the requesting user participated in. Merged duplicate people resolve to the canonical id; historical snapshot names are never rewritten.
+`personAnalytics` attributes everything to the crew a person was rostered on in that round (`rosterSnapshot[crew]`), never to the individual. People sitting out are on no round's roster, so a late arrival is never credited with rounds before they joined a crew: rounds their crew hid/sought, crew averages, paired-night outcomes, crew compositions (fingerprint of sorted canonical person ids), co-players, and — only for a linked account — rounds they were the phone operator. Results include a small-sample note and use only nights the requesting user participated in. Merged duplicate people resolve to the canonical id; historical snapshot names are never rewritten.
 
 ## Distances (`backend/src/domain/geo.ts`)
 * Inputs: accepted consecutive samples of one phone — per crew, the phone with the best coverage (a proxy for the crew, which moves together). Phones are never averaged.

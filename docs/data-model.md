@@ -10,7 +10,7 @@ Where the data lives, who can read it and how long it's kept. The types are in `
 
 | Path | Contents | Notes |
 |---|---|---|
-| `sessions/{sid}` | `SessionDoc`: title, date, `hostUid` (organizer), status, default `rules`, crews embedded as `teams.{A,B,C}` (name, colour, `operatorUids`, roster of `{personId, displayName}`), `memberUids`, `participantPersonIds`, `currentRoundId`, `roundIds`, `joinCode`, `keepPhotos`, `version` | The crews are tiny and always read with the session in the same transaction |
+| `sessions/{sid}` | `SessionDoc`: title, date, `hostUid` (organizer), status, default `rules`, crews embedded as `teams.{A,B,C}` (name derived from the roster, colour, roster of `{personId, displayName}`, and `operatorUids` derived from the roster: the phones of the people on it), `bench` (people sitting out, ADR 0019), `memberUids`, `participantPersonIds`, `currentRoundId`, `roundIds`, `joinCode`, `keepPhotos`, `version` | The crews are tiny and always read with the session in the same transaction |
 | `sessions/{sid}/members/{uid}` | `MemberDoc`: crew, `isHost`, `active`, consent, device health, `selfPersonId`, `rosterPersonId` (the roster name the phone's owner plays as, ADR 0018), `trackingNudge` (last "not tracking" push: round and time), `viewHash` | Health is written without a transaction unless what others see changes (ADR 0016) |
 | `sessions/{sid}/views/{uid}` | **The sanitized per-phone view**, rendered only by `domain/views.ts` | The only client-readable document. Written only when its content hash changes |
 | `sessions/{sid}/rounds/{rid}` | `RoundDoc`: state, hiding and seeking crews, `seekMode`, `operatorsByTeam` snapshot, `rules` snapshot, roster snapshot, ready marks, `roundStartAt`, `chaseStartAt`, `pauses[]`, `phaseGeneration`, `pings[]` (`PingRelease`, with server-only `sourceUid`), `waitingPing`, the active claim, `result`, `routeSourceUids`, `active`, `summaryReady`, `version` | Authoritative. Every deadline derives from it |
@@ -69,13 +69,13 @@ Bucket: `<project>-manhunt-media` in production (private, uniform bucket-level a
 
 A phone's view (`ViewDoc` in `domain/views.ts`) has:
 
-- `session`: title, status, crews (`TeamView`: name, roster, operator phones with consent state and the roster name each phone's owner plays as), the phone's own crew, default rules, and the reusable night code (members only, null once the night ends);
+- `session`: title, status, crews (`TeamView`: name (its people), roster, operator phones with consent state and the roster name each phone's owner plays as), `sittingOut` (people sitting out and their phones, in the same shape), the phone's own crew (null while sitting out), default rules, and the reusable night code (members only, null once the night ends);
 - `round` (`RoundView`): state, the phone's role and crew (null for a spectator), hiding and seeking crews, `seekMode`, rules, ready marks, the time anchors (`roundStartAt`, `headStartEndsAt`, `chaseStartAt`, `timeCapAt`), the clocks (`accumulatedMs` + `runningSince`), next ping time and index, `waitingPing` (index and times only), `pingCount` and the latest 10 `pingLog` entries;
   - `pins`: the last *N* released pins, each with index, times, the coordinates of the *released* sample, accuracy, age and `delayed`. There's no phone id. Spectators get none;
   - `captureRequest` (hiding crew only) or `myClaim` (the claiming phone), plus `claimByTeam`;
   - pause, pending-pause and resume-vote state, `lastClaimOutcome`, and `result` once the round ends;
   - `crewStatus` per crew: phones live/total, the best tracking state and coarse issues, with no timestamps;
-- `previousRounds` (round briefs, with the crew names of that round so a crew removed later keeps its name) and `nextRound` (index and suggested hiding crew);
+- `previousRounds` (round briefs, with the crew names of that round, its people, so History says who played each round) and `nextRound` (index and suggested hiding crew);
 - `viewHash` (content hash, also the REST ETag) and `stateVersion` (only grows, so an older REST response never replaces a newer snapshot).
 
 It never contains raw samples, the latest hider position, hider routes during a round, which phone a pin came from, or another phone's detailed health. `tests/unit/views.privacy.test.ts` enforces this.

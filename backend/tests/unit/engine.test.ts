@@ -112,7 +112,7 @@ describe('round lifecycle (spec §3.4 example)', () => {
 
   it('a crew needs an eligible phone, and its ready mark must come from one', () => {
     const { session: s, round } = readyRound();
-    expect(() => startRound(round, s, HIDER, new Set([HIDER]), [], T0)).toThrow(/needs a phone/);
+    expect(() => startRound(round, s, HIDER, new Set([HIDER]), [], T0)).toThrow(/needs? a phone in the game/);
     const r = setReady(round, 'B', 'someone-else', true, T0).round;
     expect(() => startRound(r, s, HIDER, allPhones(s), [], T0)).toThrow(/Ready again/);
   });

@@ -68,7 +68,7 @@ private struct OfflineBanner: View {
     }
 }
 
-/// One crew in the lobby: identity, role, roster, phones and readiness.
+/// One crew in the lobby: its colour and role, its people (a phone shows on its owner), readiness.
 struct CrewRow: View {
     let team: TeamView
     let role: Role?
@@ -78,8 +78,12 @@ struct CrewRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                CrewDot(key: team.key)
-                Text(team.name).font(.headline)
+                if let role {
+                    RoleLabel(role: role, crew: team.key).font(.headline)
+                } else {
+                    CrewDot(key: team.key)
+                    Text(team.key.colourName).font(.headline)
+                }
                 if team.isMine {
                     Text("You")
                         .font(.caption.weight(.semibold))
@@ -88,33 +92,52 @@ struct CrewRow: View {
                         .background(.fill.secondary, in: Capsule())
                 }
                 Spacer(minLength: 8)
-                if let role {
-                    RoleLabel(role: role, crew: team.key)
-                        .font(.subheadline.weight(.semibold))
+                if role != nil && team.hasPhone {
+                    if ready {
+                        StatusBadge(text: "Ready", systemImage: "checkmark.circle.fill", tint: Theme.ok)
+                    } else {
+                        StatusBadge(text: "Not ready", systemImage: "circle")
+                    }
                 }
-            }
-            if !team.roster.isEmpty {
-                Text(team.roster.map(\.displayName).formatted(.list(type: .and)))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             }
             FlowLayout(spacing: 6) {
-                if team.hasPhone {
-                    ForEach(team.operators, id: \.uid) { op in
-                        StatusBadge(text: op.isMe ? "\(op.displayName) (you)" : op.displayName,
-                                    systemImage: op.consentGiven ? "iphone" : "iphone.slash",
-                                    tint: op.consentGiven ? .secondary : Theme.warning)
-                    }
-                    if role != nil {
-                        if ready {
-                            StatusBadge(text: "Ready", systemImage: "checkmark.circle.fill", tint: Theme.ok)
-                        } else {
-                            StatusBadge(text: "Not ready", systemImage: "circle")
-                        }
-                    }
-                } else {
-                    StatusBadge(text: "No phone yet", systemImage: "hourglass", tint: Theme.warning)
+                ForEach(team.roster) { p in PersonBadge(person: p, phone: team.phone(of: p.personId)) }
+                // A phone with no name linked (nights from before names followed phones).
+                ForEach(team.operators.filter { op in op.personId.map { id in !team.roster.contains { $0.personId == id } } ?? true }, id: \.uid) { op in
+                    StatusBadge(text: op.isMe ? "\(op.displayName) (you)" : op.displayName, systemImage: "iphone", tint: op.consentGiven ? .secondary : Theme.warning)
                 }
+            }
+            if !team.hasPhone {
+                StatusBadge(text: "No phone yet", systemImage: "hourglass", tint: Theme.warning)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A person in the lobby: their name, with a phone if they carry one (warning tint until it has agreed to tracking).
+struct PersonBadge: View {
+    let person: PersonRef
+    let phone: OperatorView?
+
+    var body: some View {
+        StatusBadge(text: phone?.isMe == true ? "\(person.displayName) (you)" : person.displayName,
+                    systemImage: phone == nil ? "person.fill" : phone!.consentGiven ? "iphone" : "iphone.slash",
+                    tint: phone.map { $0.consentGiven ? .secondary : Theme.warning } ?? .secondary)
+            .accessibilityLabel(phone == nil ? person.displayName : "\(person.displayName), with a phone\(phone!.consentGiven ? "" : " that hasn’t agreed to tracking yet")")
+    }
+}
+
+/// People sitting out this round, and their phones (which spectate).
+struct SittingOutRow: View {
+    let bench: SittingOutView
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Sitting Out", systemImage: "chair.lounge").font(.headline)
+            FlowLayout(spacing: 6) {
+                ForEach(bench.roster) { p in PersonBadge(person: p, phone: bench.operators.first { $0.personId == p.personId }) }
             }
         }
         .padding(.vertical, 4)

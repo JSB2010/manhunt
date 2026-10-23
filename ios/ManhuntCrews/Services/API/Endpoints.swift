@@ -7,9 +7,8 @@ struct RosterEntryBody: Codable, Hashable, Sendable {
     var displayName: String
 }
 
+/// A crew's people. Crews are named after their people by the server (ADR 0019).
 struct TeamInputBody: Codable, Sendable {
-    var name: String
-    var color: String?
     var roster: [RosterEntryBody]
 }
 
@@ -54,14 +53,17 @@ struct CreateSessionBody: Encodable, Sendable {
     var myTeam: TeamKey
     /// two or three crews keyed A, B[, C]
     var teams: [String: TeamInputBody]
+    /// people sitting out to begin with (not here yet)
+    var bench: [RosterEntryBody]?
     var firstHidingTeam: TeamKey?
     var seekMode: SeekMode?
     var rules: RulesPatch
     var groupId: String?
 }
 
-/// Between-rounds editor. A crew set to `.remove` is deleted (its phones move to the emptiest crew);
-/// operator phones change only through `moves` (teamKey nil removes the phone from the night).
+/// Between-rounds editor (ADR 0019). Rosters and `bench` place people, and every phone follows its
+/// owner; someone on no list leaves the night (with their phone). `moves` with teamKey nil takes a
+/// phone out of the night while its owner keeps playing. A crew set to `.remove` is deleted.
 struct SetupPatchBody: Encodable, Sendable {
     enum CrewEdit: Encodable, Sendable {
         case edit(TeamPatch)
@@ -74,7 +76,7 @@ struct SetupPatchBody: Encodable, Sendable {
             }
         }
     }
-    struct TeamPatch: Encodable, Sendable { var name: String?; var roster: [RosterEntryBody]? }
+    struct TeamPatch: Encodable, Sendable { var roster: [RosterEntryBody]? }
     struct Move: Encodable, Sendable {
         var uid: String
         var teamKey: TeamKey?
@@ -88,6 +90,7 @@ struct SetupPatchBody: Encodable, Sendable {
     var title: String?
     var rules: RulesPatch?
     var teams: [String: CrewEdit]?
+    var bench: [RosterEntryBody]?
     var moves: [Move]?
 }
 

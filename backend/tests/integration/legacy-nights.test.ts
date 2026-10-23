@@ -39,14 +39,17 @@ async function playOneCaughtRound() {
   expect((await h.call(a, 'POST', `/v1/sessions/${sid}/complete`)).status).toBe(200);
 }
 
+/** Crew names as typed by the organizer, as nights from before ADR 0019 have them. */
+const TYPED: Record<string, string> = { A: 'Owls', B: 'Wolves' };
+
 /** Rewrites the stored night into the pre-crews shape, as old nights are stored in production. */
 async function storeAsBeforeCrews() {
   const sRef = raw(`sessions/${sid}`);
-  const { joinCode: _code, ...s } = (await sRef.get()).data()!;
+  const { joinCode: _code, bench: _bench, ...s } = (await sRef.get()).data()!;
   await sRef.set({
     ...s,
-    teams: Object.fromEntries(Object.entries(s.teams).map(([k, { operatorUids, ...t }]: [string, any]) => [k, { ...t, operatorUid: operatorUids[0] ?? null, operatorDisplayName: null }])),
-    roundBriefs: s.roundBriefs.map(({ seekingTeams: _s, seekMode: _m, catchCreditTeams: _c, hidingRosterFingerprint: _f, ...brief }: any) => brief),
+    teams: Object.fromEntries(Object.entries(s.teams).map(([k, { operatorUids, ...t }]: [string, any]) => [k, { ...t, name: TYPED[k], operatorUid: operatorUids[0] ?? null, operatorDisplayName: null }])),
+    roundBriefs: s.roundBriefs.map(({ seekingTeams: _s, seekMode: _m, catchCreditTeams: _c, hidingRosterFingerprint: _f, teamNames: _n, ...brief }: any) => brief),
   });
 
   const rRef = raw(`sessions/${sid}/rounds/${rid}`);
@@ -55,6 +58,7 @@ async function storeAsBeforeCrews() {
   const { seekingTeams: _rs, seekMode: _rm, teamNames, rosterSnapshot, catchCreditTeams: _cc, crews = {}, ...res } = result;
   await rRef.set({
     ...r,
+    teamNames: TYPED,
     seekingTeam: seeking,
     hiderUid: operatorsByTeam[hiding][0] ?? null,
     seekerUid: operatorsByTeam[seeking][0] ?? null,
@@ -62,8 +66,8 @@ async function storeAsBeforeCrews() {
     result: {
       ...res,
       seekingTeam: seeking,
-      hidingTeamName: teamNames[hiding],
-      seekingTeamName: teamNames[seeking],
+      hidingTeamName: TYPED[hiding] ?? teamNames[hiding],
+      seekingTeamName: TYPED[seeking] ?? teamNames[seeking],
       hidingRosterSnapshot: rosterSnapshot[hiding],
       seekingRosterSnapshot: rosterSnapshot[seeking],
       hidingDistanceTotalMeters: crews[hiding]?.distanceTotalMeters ?? null,
@@ -82,7 +86,7 @@ async function storeAsBeforeCrews() {
   // Views written before crews were schema 1, with no content hash and no seeking crews on their briefs.
   for (const d of (await sRef.collection('views').get()).docs) {
     const { viewHash: _h, previousRounds, ...v } = d.data();
-    await d.ref.set({ ...v, schemaVersion: 1, previousRounds: previousRounds.map(({ seekingTeams: _s, seekMode: _m, catchCreditTeams: _c, ...brief }: any) => brief) });
+    await d.ref.set({ ...v, schemaVersion: 1, previousRounds: previousRounds.map(({ seekingTeams: _s, seekMode: _m, catchCreditTeams: _c, teamNames: _n, ...brief }: any) => brief) });
   }
 }
 

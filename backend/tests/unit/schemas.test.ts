@@ -41,6 +41,14 @@ describe('crew request schemas', () => {
     expect(() => parse(SetupPatchBody, { moves: [{ uid: 'u1', teamKey: 'D' }] })).toThrow();
   });
 
+  it('crews are people: names are optional, and a night may start with people sitting out (ADR 0019)', () => {
+    const people = { roster: [{ displayName: 'Ana' }] };
+    expect(parse(CreateSessionBody, { title: 't', scheduledDate: '2026-10-20', myTeam: 'A', teams: { A: people, B: people }, bench: [{ displayName: 'Late' }] }).bench).toHaveLength(1);
+    expect(parse(SetupPatchBody, { teams: { A: people }, bench: [] }).bench).toEqual([]);
+    expect(() => parse(SetupPatchBody, { bench: [{ displayName: 'x', uid: 'phone' }] })).toThrow();
+    expect(() => parse(SetupPatchBody, { bench: Array.from({ length: 31 }, (_, i) => ({ displayName: `p${i}` })) })).toThrow();
+  });
+
   it('next round takes a hiding crew and a seek mode only', () => {
     expect(parse(NextRoundBody, { hidingTeam: 'C', seekMode: 'TOGETHER' })).toEqual({ hidingTeam: 'C', seekMode: 'TOGETHER' });
     expect(() => parse(NextRoundBody, { overrideReason: 'x' })).toThrow();

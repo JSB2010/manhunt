@@ -7,9 +7,10 @@ Manhunt Crews is hide-and-seek across a neighbourhood or a town, played in crews
 | Term | Meaning |
 |---|---|
 | **Night** | One evening of play, with a night code, crews and as many rounds as you want |
-| **Crew** | A group that moves together. A night has two or three crews |
-| **Roster** | Who's on a crew. People without the app are just names on it |
-| **Phone** | An iPhone running the app for a crew. A crew needs at least one, and can have up to five. All of a crew's phones are equal |
+| **Crew** | A group that moves together, named after its people ("Sasha & Marco", "Sasha, Marco & 2 more"). A night has two or three, shown in blue, orange and green. Crews can change between rounds |
+| **People** | Everyone in the night, with or without the app. Each person is on one crew or **sitting out** |
+| **Sitting out** | In the night but not playing the next round: taking a break, or not here yet. Their phone stays connected but isn't tracked |
+| **Phone** | An iPhone running the app. It belongs to the person carrying it and plays on that person's crew. A crew needs at least one phone, and can have up to five. All of a crew's phones are equal |
 | **Round** | One crew hides, and every other crew seeks |
 | **Head start** | Time the hiders get before the seekers set off. 10 minutes by default |
 | **Ping** | The hiders' position at a scheduled moment, sent to the seekers. The first goes out when the head start ends, then one every interval (10 minutes by default) |
@@ -30,7 +31,8 @@ The app tracks the **phones**, and each phone stands in for its crew. Keep each 
 On **Play**, tap **Create a Night**:
 
 - Give the night a name and choose **2 Crews** or **3 Crews**.
-- Add people to each crew. Use **Choose Saved People…** or a saved group, or type new names. **Shuffle Teams** makes random, even crews.
+- Add people to each crew: type a name, or tap the people button for saved people and groups. Put anyone who isn't here yet under **Sitting Out**. **Shuffle Crews** makes random, even crews. Crews are named after their people, so there's nothing to name.
+- Drag people between crews, or tap **•••** next to someone to move them. Your phone plays on whichever crew you're on.
 - Set the rules in **Crews & Rules** (you can change them between rounds):
 
 | Rule | Default | Range |
@@ -51,13 +53,14 @@ A ping only uses a GPS fix that meets the last two rules. If none does, the ping
 Every phone that plays needs to join the night:
 
 - The night code is on **Night Code** in the lobby, and anyone on the night can show it. It works for every crew until the night ends. **New Code** replaces it, and the old code stops working.
-- Others tap **Join with a Code** (or open the shared link), check the night under **Review & Join**, and pick their crew. Under **Who Are You?** they pick the name the organizer typed for them (the app suggests one), so their rounds count for them and nobody is listed twice; **Not listed — add me** adds their own name. Picking a name picks that name's crew, and otherwise the app suggests the crew with the fewest phones.
+- Others tap **Join with a Code** (or open the shared link), check the night under **Review & Join**, and pick their crew. Under **Who Are You?** they pick the name the organizer typed for them (the app suggests one), so their rounds count for them and nobody is listed twice; **Not listed — add me** adds their own name. Picking a name picks that name's crew, and otherwise the app suggests the crew with the fewest phones. Someone sitting out who joins has arrived: they go on the crew they pick.
 - You can also invite a friend directly from your friends list.
 
 ## 3. Ready and start
 
 - Once per night, each phone taps **Review Tracking**, reads how tracking works and taps **I Agree**. Agreeing includes showing every crew's route to the round's phones after each round.
 - Each crew taps **We're Ready**. One ready phone per crew is enough: once it shows **Crew Ready**, the whole crew is ready, and tapping it again asks before undoing it.
+- People sitting out don't play the round: no Ready, no tracking, no pins. Their phone shows **You're sitting out this round** and **Join a Crew**.
 - Any phone on a playing crew can then tap **Start Round**. The app warns first (**Can't Start Cleanly**) if a phone has location turned off, which must be fixed, or a weak or old GPS fix, which you can start anyway.
 
 ## 4. Head start
@@ -99,7 +102,7 @@ The clock and the ping schedule stop during every pause and pick up where they l
 
 ## On a locked phone
 
-The round shows as a **Live Activity** on the Lock Screen and in the Dynamic Island, and on an Apple Watch or CarPlay. It shows the phase, the clock and the next ping, and never a location. Tap it to open the game. Turn it off in **Account & Settings › Show Rounds on Lock Screen**.
+The round shows as a **Live Activity** on the Lock Screen and in the Dynamic Island, and on an Apple Watch or CarPlay. It shows the phase, the clock, the next ping and your crew's colour ("Blue crew"), and never a location or anyone's name. Tap it to open the game. Turn it off in **Account & Settings › Show Rounds on Lock Screen**.
 
 ## 7. After the round
 
@@ -107,15 +110,24 @@ The round shows as a **Live Activity** on the Lock Screen and in the Dynamic Isl
   - Routes appear only after the round, only to the phones that played it, and only if every phone agreed.
   - Distances are per crew: the hiders on foot for the whole round and for the chase, and each seeking crew for the chase.
 - **Next round:** any phone taps **Next: Round N**. The app suggests the crew that has hidden least, and **Someone Else Hides…** picks another.
-- **Between rounds:** **Crews & Rules…** renames, adds or removes crews, edits rosters and rules, and moves phones between crews. A phone's owner moves with the phone, so the rounds they play count for their new crew. A phone that joins or moves mid-round watches until the next round.
+- **Between rounds:** any phone in the night, including one sitting out, can open **Crews & Rules…** to add or remove a crew, change the rules, and move people. Drag people between crews and **Sitting Out**, or tap **•••** next to someone:
+  - **Move to** another crew. Their phone goes with them, so the rounds they play count for their new crew.
+  - **Sit Out** for a round or more. Their phone stays in the night and isn't tracked.
+  - **Take Their Phone Out** if their battery died: they keep playing as a name.
+  - **Remove** if they went home. Their phone leaves the night too. The organizer can sit out but can't be removed.
+  - Add someone who just arrived by typing their name, or they join with the code.
+  - Removing a crew puts its people with the other crews.
+  - A phone that joins mid-round watches until the next round.
 - **End Night:** any phone can end the night, and the night code stops working.
 
 ## Scores
 
 There's no winner of a single round. The **Night Summary & Scorecard** compares how long each crew survived while hiding:
 
-- It names the crew that **lasted longest while hiding** only if the comparison is fair: every crew hid equally often, with the same rules and the same people each time, and no round was aborted or ran out of time.
-- Otherwise it shows a **Provisional Comparison** and says why.
+- Crews change during a night, so crews are compared within a **matchup**: the rounds played by the same people on each crew, under the same rules. A night with one set of crews is one matchup.
+- A matchup names the crew that **lasted longest while hiding** only if the comparison is fair: every crew hid equally often, and no round was aborted or ran out of time. Otherwise it shows a **Provisional Comparison** and says why.
+- **People** lists everyone with their crews' results: how often they hid and sought, how long their crew lasted while they hid, and the catches it made while they sought.
+- **Rounds** lists who hid in each round, and what changed before it: who joined, left or moved, and which rules changed.
 - **Export CSV / Export JSON** saves the results. Exports never include GPS.
 
 People's stats on the **People** tab are always their *crew's* results in the rounds they played, never an individual time.

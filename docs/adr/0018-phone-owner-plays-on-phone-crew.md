@@ -1,6 +1,6 @@
 # ADR 0018 — A phone's owner plays on the phone's crew
 
-**Status:** accepted · **Updates:** ADR 0013 (joining, crews edited between rounds) · **Spec:** §2 (people and crews), §6.3 (crew-attributed person stats)
+**Status:** accepted, moves updated by ADR 0019 (phones follow people, not the other way round) · **Updates:** ADR 0013 (joining, crews edited between rounds) · **Spec:** §2 (people and crews), §6.3 (crew-attributed person stats)
 
 **Context.** Rounds are credited to people through the crew rosters frozen at each round's start (`round.rosterSnapshot`); person statistics follow those rosters. On the night of 2026-10-22 (five rounds, seven phones, crews reshuffled four times) the rosters drifted away from the phones:
 * The organizer typed everyone's full names ("Sasha Okafor", "Marco Bellini", "Riley Quinn", "Theo Marsh"). Phones joined with accounts named "Sasha", "Marco", "rileyquinn", "Theo". A join added the account's own person unless a roster held exactly the same name, so four people were listed twice and counted as two people each.

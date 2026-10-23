@@ -44,7 +44,7 @@ struct HiderConfirmView: View {
                             if let seekers {
                                 HStack(spacing: 8) {
                                     CrewDot(key: seekers.key)
-                                    Text("\(seekers.name) say they caught you")
+                                    Text("\(seekers.name) \(seekers.isPlural ? "say" : "says") they caught you")
                                 }
                                 .font(.title3.bold())
                                 .multilineTextAlignment(.center)

@@ -16,12 +16,13 @@ An ADR records a decision that departs from [the product spec](../product-spec.m
 | [0010](0010-realtime-reconciliation.md) | Firestore listener plus REST reconciliation | Accepted, cadence updated by 0016 |
 | [0011](0011-native-ios-design.md) | Native iOS 26 design: Liquid Glass, tab navigation, colour = crew | Accepted |
 | [0012](0012-cloud-functions-for-firebase.md) | Deploy on Cloud Functions for Firebase with one `firebase deploy` | Accepted, supersedes the v0.1 Cloud Run + Terraform deploy |
-| [0013](0013-crews-with-several-phones.md) | Crews with several equal phones, up to three crews, one night code | Accepted, joining and moves updated by 0018 |
-| [0014](0014-open-ended-nights.md) | Open-ended nights | Accepted |
+| [0013](0013-crews-with-several-phones.md) | Crews with several equal phones, up to three crews, one night code | Accepted, joining and moves updated by 0018, crews and editing by 0019 |
+| [0014](0014-open-ended-nights.md) | Open-ended nights | Accepted, editor and night comparison updated by 0019 |
 | [0015](0015-waiting-pings.md) | Waiting pings | Accepted |
 | [0016](0016-network-efficiency.md) | Network efficiency on cellular | Accepted |
-| [0017](0017-live-activities.md) | Live Activities | Accepted |
-| [0018](0018-phone-owner-plays-on-phone-crew.md) | A phone's owner plays on the phone's crew: joins link to typed names, moved phones take their owner's name | Accepted |
+| [0017](0017-live-activities.md) | Live Activities | Accepted, crew label updated by 0019 |
+| [0018](0018-phone-owner-plays-on-phone-crew.md) | A phone's owner plays on the phone's crew: joins link to typed names, moved phones take their owner's name | Accepted, moves updated by 0019 |
+| [0019](0019-people-make-the-crew.md) | People make the crew: phones follow their owners, people can sit out, crews are named after their people, crews are compared within matchups | Accepted |
 
 ## Spec sections changed by ADRs
 
@@ -35,6 +36,8 @@ An ADR records a decision that departs from [the product spec](../product-spec.m
 | Signed upload URLs | Upload through the API, which strips metadata | 0001 |
 | Opponent heartbeat | Coarse crew status, no timestamps | 0016 |
 | People and crews are edited separately | A phone's owner is linked to a roster name and moves with the phone | 0018 |
+| Crews have typed names; people are on a crew or not | Crews are named after their people; people can sit out; every phone follows its owner | 0019 |
+| A night comparison checks each crew's own hiding rosters | Crews must have the same people in every round; matchups compare crews within rounds played the same way | 0019 |
 
 ## Writing one
 

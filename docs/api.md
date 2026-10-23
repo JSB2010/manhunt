@@ -81,14 +81,14 @@ Paths are relative to the base URL. The OpenAPI file has the request bodies and 
 ### Nights
 | | |
 |---|---|
-| `POST /v1/sessions` · `GET /v1/sessions` | Create a night (it comes with a night code) · list my nights (paged, searchable) |
+| `POST /v1/sessions` · `GET /v1/sessions` | Create a night with its crews' people and, optionally, people sitting out (`bench`); it comes with a night code. Crew names in the request are ignored: crews are named after their people (ADR 0019) · list my nights (paged, searchable) |
 | `GET /v1/sessions/{id}` | **My sanitized view** of the night (the same document as the Firestore listener). ETag / 304 |
 | `DELETE /v1/sessions/{id}` | Organizer deletes the whole night: the Firestore subtree and GCS objects |
 | `POST /v1/sessions/{id}/invites` | Show or regenerate the night code, or directly invite a friend |
-| `POST /v1/invites/preview` · `POST /v1/invites/redeem` | Look up a code (with `suggestedPersonId`, the roster name this account most likely is, and `claimedPersonIds`, names other phones play as) · join, choosing a crew and optionally `personId`, the roster name the joiner plays as (ADR 0018) |
-| `PATCH /v1/sessions/{id}/setup` | Between-round editor: title, rules, crews, rosters, phone moves (ADR 0014) |
+| `POST /v1/invites/preview` · `POST /v1/invites/redeem` | Look up a code (with `suggestedPersonId`, the roster name this account most likely is, `claimedPersonIds`, names other phones play as, and `sittingOut`) · join, choosing a crew and optionally `personId`, the name the joiner plays as (ADR 0018). Joining as someone sitting out puts them on a crew (ADR 0019) |
+| `PATCH /v1/sessions/{id}/setup` | Between-round editor, for any phone in the night: title, rules, crews, and where everyone is (crew rosters and `bench`). Every phone follows its owner, and someone on no list leaves the night with their phone. A removed crew's people sit out unless placed elsewhere. `moves: [{uid, teamKey: null}]` takes a phone out while its owner keeps playing (ADR 0014, 0019) |
 | `POST /v1/sessions/{id}/consent` | Tracking and route-sharing consent for this night |
-| `POST /v1/sessions/{id}/ready` | Ready mark for my crew, with a preflight health report |
+| `POST /v1/sessions/{id}/ready` | Ready mark for my crew, with a preflight health report. Not for a phone sitting out |
 | `POST /v1/sessions/{id}/next-round` | Set up the next round (hiding crew, seek mode). Re-targets a READY round |
 | `POST /v1/sessions/{id}/complete` | End the night |
 | `POST /v1/sessions/{id}/keep-photos` | My crew opts in to keeping confirmed photos past 30 days |

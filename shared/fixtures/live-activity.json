@@ -111,6 +111,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -304,6 +308,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -389,7 +397,7 @@
         "roundIndex": 1,
         "role": "HIDING",
         "crew": "A",
-        "crewName": "Crew A"
+        "crewName": "Blue crew"
       },
       "state": {
         "phase": "HEAD_START",
@@ -519,6 +527,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -604,7 +616,7 @@
         "roundIndex": 1,
         "role": "SEEKING",
         "crew": "B",
-        "crewName": "Crew B"
+        "crewName": "Orange crew"
       },
       "state": {
         "phase": "HEAD_START",
@@ -734,6 +746,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -829,7 +845,7 @@
         "roundIndex": 1,
         "role": "SEEKING",
         "crew": "B",
-        "crewName": "Crew B"
+        "crewName": "Orange crew"
       },
       "state": {
         "phase": "PAUSED",
@@ -959,6 +975,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -1078,7 +1098,7 @@
         "roundIndex": 1,
         "role": "SEEKING",
         "crew": "B",
-        "crewName": "Crew B"
+        "crewName": "Orange crew"
       },
       "state": {
         "phase": "CHASE",
@@ -1212,6 +1232,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -1331,7 +1355,7 @@
         "roundIndex": 1,
         "role": "HIDING",
         "crew": "A",
-        "crewName": "Crew A"
+        "crewName": "Blue crew"
       },
       "state": {
         "phase": "CHASE",
@@ -1465,6 +1489,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -1588,7 +1616,7 @@
         "roundIndex": 1,
         "role": "HIDING",
         "crew": "A",
-        "crewName": "Crew A"
+        "crewName": "Blue crew"
       },
       "state": {
         "phase": "CHASE",
@@ -1722,6 +1750,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -1848,7 +1880,7 @@
         "roundIndex": 1,
         "role": "HIDING",
         "crew": "A",
-        "crewName": "Crew A"
+        "crewName": "Blue crew"
       },
       "state": {
         "phase": "CAPTURE_PENDING",
@@ -1985,6 +2017,10 @@
               "isMine": true
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -2110,7 +2146,7 @@
         "roundIndex": 1,
         "role": "SEEKING",
         "crew": "C",
-        "crewName": "Crew C"
+        "crewName": "Green crew"
       },
       "state": {
         "phase": "CAPTURE_PENDING",
@@ -2247,6 +2283,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -2366,7 +2406,7 @@
         "roundIndex": 1,
         "role": "SEEKING",
         "crew": "B",
-        "crewName": "Crew B"
+        "crewName": "Orange crew"
       },
       "state": {
         "phase": "CAPTURE_PENDING",
@@ -2502,6 +2542,10 @@
               ],
               "isMine": false
             }
+          },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
           },
           "joinCode": "NIGHTCODE",
           "revoked": false
@@ -2736,7 +2780,7 @@
         "roundIndex": 1,
         "role": "HIDING",
         "crew": "A",
-        "crewName": "Crew A"
+        "crewName": "Blue crew"
       },
       "state": {
         "phase": "ENDED",
@@ -2875,6 +2919,10 @@
               "isMine": false
             }
           },
+          "sittingOut": {
+            "roster": [],
+            "operators": []
+          },
           "joinCode": "NIGHTCODE",
           "revoked": false
         },
@@ -3108,7 +3156,7 @@
         "roundIndex": 1,
         "role": "SEEKING",
         "crew": "B",
-        "crewName": "Crew B"
+        "crewName": "Orange crew"
       },
       "state": {
         "phase": "ENDED",

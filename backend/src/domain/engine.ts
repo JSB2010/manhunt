@@ -7,7 +7,7 @@ import {
   timeCapDeadline,
   totalPauseMs,
 } from './clock.js';
-import { hiderUids, roleOfTeam, roundTeams, roundUids, seekerUids, sideOfRole, snapshotTeamOf, teamKeysOf } from './crews.js';
+import { crewColourName, hiderUids, isPlural, roleOfTeam, roundTeams, roundUids, seekerUids, sideOfRole, snapshotTeamOf, teamKeysOf } from './crews.js';
 import { fail } from './errors.js';
 import { rulesFingerprint } from './rules.js';
 import {
@@ -72,8 +72,11 @@ function notify(r: RoundDoc, toUids: (string | null)[], kind: string, title: str
   return { toUids: [...new Set(toUids.filter((u): u is string => !!u))], kind, title, body, sessionId: r.sessionId, roundId: r.id };
 }
 
-const name = (r: Pick<RoundDoc, 'teamNames'>, k: TeamKey) => r.teamNames[k] ?? `Crew ${k}`;
+// Crews are named after their people (ADR 0019): verbs agree with how many ("Sasha hides", "Sasha & Marco hide").
+const name = (r: Pick<RoundDoc, 'teamNames'>, k: TeamKey) => r.teamNames[k] ?? crewColourName(k);
 const joinNames = (r: Pick<RoundDoc, 'teamNames'>, ks: TeamKey[]) => ks.map((k) => name(r, k)).join(' and ');
+const verb = (r: Pick<RoundDoc, 'rosterSnapshot'>, ks: TeamKey[], one: string, many: string) =>
+  ks.length > 1 || ks.some((k) => isPlural(r.rosterSnapshot[k])) ? many : one;
 
 /**
  * Suggested hiding crew for the next round: the crew that has hidden least so
@@ -156,7 +159,7 @@ export function createRound(params: {
             toUids: allOperators(session),
             kind: 'NEXT_ROUND',
             title: `Get ready for Round ${params.index}`,
-            body: `${name(round, round.hidingTeam)} hide, ${joinNames(round, round.seekingTeams)} seek. Tap Ready.`,
+            body: `${name(round, round.hidingTeam)} ${verb(round, [round.hidingTeam], 'hides', 'hide')}, ${joinNames(round, round.seekingTeams)} ${verb(round, round.seekingTeams, 'seeks', 'seek')}. Tap Ready.`,
             sessionId: session.id,
             roundId: round.id,
           },
@@ -240,10 +243,10 @@ export function startRound(
     const crew = session.teams[k];
     if (!crew) fail('GAME_NOT_READY', 'A playing crew is missing');
     const phones = crew!.operatorUids.filter((u) => eligibleUids.has(u));
-    if (!phones.length) fail('GAME_NOT_READY', `${crew!.name} needs a phone in the game`);
+    if (!phones.length) fail('GAME_NOT_READY', `${crew!.name} ${isPlural(crew!.roster) ? 'need' : 'needs'} a phone in the game`);
     const mark = round.ready[k];
     if (!mark) fail('GAME_NOT_READY', 'Every crew must tap Ready');
-    if (!phones.includes(mark!.uid)) fail('GAME_NOT_READY', `${crew!.name}'s ready phone left the crew — tap Ready again`);
+    if (!phones.includes(mark!.uid)) fail('GAME_NOT_READY', `The phone that marked ${crew!.name} ready left the crew. Tap Ready again.`);
     operatorsByTeam[k] = phones;
   }
   const r = clone(round);
@@ -497,7 +500,7 @@ export function submitClaim(round: RoundDoc, claim: CaptureClaim, uid: string, n
     round: withWake(r),
     events: [ev('CLAIM_SUBMITTED', now, r.id, uid, { claimId: claim.claimId, team: claim.seekerTeam, chaseSecondsAtClaim: Math.round(chaseSeconds) })],
     notifications: [
-      notify(r, hiderUids(r), 'CLAIM_SUBMITTED', 'Photo catch submitted', `${name(r, claim.seekerTeam)} claim a catch at ${fmtClock(chaseSeconds)}. Review now.`),
+      notify(r, hiderUids(r), 'CLAIM_SUBMITTED', 'Photo catch submitted', `${name(r, claim.seekerTeam)} ${verb(r, [claim.seekerTeam], 'claims', 'claim')} a catch at ${fmtClock(chaseSeconds)}. Review now.`),
       notify(
         r,
         seekerUids(r).filter((u) => u !== uid),
@@ -683,7 +686,7 @@ export function voteResume(round: RoundDoc, uid: string, now: number): Transitio
     return {
       round: r,
       events: [ev('RESUME_VOTE', now, r.id, uid, { team, side })],
-      notifications: [notify(r, otherSide, 'RESUME_VOTE', 'Ready to resume?', `${name(r, team)} are ready. Tap Resume when your crew is.`)],
+      notifications: [notify(r, otherSide, 'RESUME_VOTE', 'Ready to resume?', `${name(r, team)} ${verb(r, [team], 'is', 'are')} ready. Tap Resume when your crew is.`)],
     };
   }
   let pausedMs = 0;

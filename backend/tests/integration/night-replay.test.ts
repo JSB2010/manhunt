@@ -113,8 +113,14 @@ describe('replay of 2026-10-22', () => {
     v = await view(jordan);
     expect(roster(v, 'C')).toEqual(['Marco Bellini', 'Riley Quinn']);
 
-    // As at 22:44: crew C removed; its phones go to the emptiest crews and their people with them.
-    const del = await h.call(jordan, 'PATCH', `/v1/sessions/${sid}/setup`, { teams: { C: null } });
+    // As at 22:44: crew C removed. The app sent its phones to the emptiest crews; their people go with them.
+    const del = await h.call(jordan, 'PATCH', `/v1/sessions/${sid}/setup`, {
+      teams: { C: null },
+      moves: [
+        { uid: marco.uid, teamKey: 'A' },
+        { uid: riley.uid, teamKey: 'B' },
+      ],
+    });
     expect(del.status, JSON.stringify(del.body)).toBe(200);
     v = await view(jordan);
     expect(v.session.teams.C).toBeUndefined();
@@ -131,7 +137,7 @@ describe('replay of 2026-10-22', () => {
     expect(moved.filter((x) => x.from === 'C').map((x) => x.uid).sort()).toEqual([marco.uid, riley.uid].sort());
   });
 
-  it('round results are credited to the people actually on each crew; briefs keep crew names', async () => {
+  it('round results are credited to the people actually on each crew; briefs name crews by their people', async () => {
     // Put Marco back on B with Riley, then play a round with B hiding.
     expect((await h.call(jordan, 'PATCH', `/v1/sessions/${sid}/setup`, { moves: [{ uid: marco.uid, teamKey: 'B' }, { uid: riley.uid, teamKey: 'B' }, { uid: sasha.uid, teamKey: 'A' }] })).status).toBe(200);
     for (const u of [jordan, sasha, marco, riley]) expect((await h.call(u, 'POST', `/v1/sessions/${sid}/consent`, consentBody)).status).toBe(200);
@@ -219,9 +225,9 @@ describe('replay of 2026-10-22', () => {
     expect(types).not.toContain('READY_CHANGED');
     expect(types).not.toContain('SETUP_EDITED');
 
-    // Briefs carry the crew names of the round.
+    // Briefs carry the crew names of the round: its people (ADR 0019).
     const after = await view(jordan);
-    expect(after.previousRounds.at(-1).teamNames).toEqual({ A: 'Crew A', B: 'Crew B' });
+    expect(after.previousRounds.at(-1).teamNames).toEqual({ A: 'Jordan, Dana & Sasha', B: 'Ezra, Riley & Marco' });
 
     // People are credited with their own crew's round: Marco hid, Sasha sought.
     const people = (await h.call(jordan, 'GET', '/v1/people')).body.people;

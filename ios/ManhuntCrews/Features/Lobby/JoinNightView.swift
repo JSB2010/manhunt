@@ -66,7 +66,7 @@ struct JoinNightView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { CancelButton { dismiss() } } }
             .bottomActionBar {
                 if preview != nil {
-                    Button { join() } label: { ActionLabel(title: "Join \(preview.flatMap { p in crew.flatMap { p.teams[$0.rawValue]?.name } } ?? "Night")", systemImage: "person.badge.plus", busy: busy) }
+                    Button { join() } label: { ActionLabel(title: crew.map { "Join \($0.colourName)" } ?? "Join Night", systemImage: "person.badge.plus", busy: busy) }
                         .floatingProminentButton()
                         .controlSize(.large)
                         .disabled(busy || crew == nil)
@@ -90,7 +90,7 @@ struct JoinNightView: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 CrewDot(key: k)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(t.name).foregroundStyle(.primary)
+                    Text(k.colourName).foregroundStyle(.primary)
                     Text(t.roster.isEmpty ? phones(t.phoneCount) : "\(t.roster.map(\.displayName).formatted(.list(type: .and))) · \(phones(t.phoneCount))")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -114,10 +114,10 @@ struct JoinNightView: View {
         }
     }
 
-    /// Roster names nobody else's phone plays as yet.
+    /// Names in the night nobody else's phone plays as yet, including people sitting out (not here yet).
     private func names(_ p: InvitePreview) -> [PersonRef] {
         let claimed = Set(p.claimedPersonIds ?? [])
-        return p.teamKeys.flatMap { p.teams[$0.rawValue]?.roster ?? [] }.filter { !claimed.contains($0.personId) }
+        return (p.teamKeys.flatMap { p.teams[$0.rawValue]?.roster ?? [] } + (p.sittingOut ?? [])).filter { !claimed.contains($0.personId) }
     }
 
     private func join() {

@@ -303,7 +303,7 @@ struct RoundRecapView: View {
             }
         } else if let next = live.nextRound {
             Section {
-                Label { Text("\(live.session.name(next.suggestedHidingTeam)) hide next") } icon: {
+                Label { Text("\(live.session.name(next.suggestedHidingTeam)) \(live.session.verb([next.suggestedHidingTeam], "hides", "hide")) next") } icon: {
                     Image(systemName: Role.HIDING.symbol).foregroundStyle(Theme.crew(next.suggestedHidingTeam))
                 }
                 .font(.headline)

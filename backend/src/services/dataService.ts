@@ -2,7 +2,7 @@ import { crewOfUid, hiderUids, operatorUidsOf, roundUids, snapshotTeamOf, teamKe
 import { removePhoneFromRound } from '../domain/engine.js';
 import { fail } from '../domain/errors.js';
 import { buildScorecard, personAnalytics, type SessionResults } from '../domain/scoring.js';
-import { isActiveState, isFinishedState, TEAM_KEYS, type CaptureClaim, type DomainEvent, type MemberDoc, type RoundDoc, type RoundResult, type SessionDoc, type TeamKey } from '../domain/types.js';
+import { isActiveState, isFinishedState, TEAM_KEYS, type CaptureClaim, type DomainEvent, type MemberDoc, type RoundDoc, type RoundResult, type Rules, type SessionDoc, type TeamKey } from '../domain/types.js';
 import { finalizeRound, phoneKey, type RouteDoc } from './finalize.js';
 import { LiveActivityService } from './liveActivities.js';
 import { paths, writeEvents, writeViews, type Deps } from './repo.js';
@@ -155,16 +155,20 @@ export class DataService {
     };
   }
 
-  private async sessionResults(sid: string): Promise<{ rounds: RoundDoc[]; results: RoundResult[] }> {
+  private async sessionResults(sid: string): Promise<{ rounds: RoundDoc[]; results: RoundResult[]; rulesByRound: Record<string, Rules> }> {
     const snap = await this.p.rounds(sid).get();
     const rounds = snap.docs.map((x) => x.data() as RoundDoc).sort((a, b) => a.index - b.index);
-    return { rounds, results: rounds.filter((r) => isFinishedState(r.state) && r.result).map((r) => r.result!) };
+    return {
+      rounds,
+      results: rounds.filter((r) => isFinishedState(r.state) && r.result).map((r) => r.result!),
+      rulesByRound: Object.fromEntries(rounds.map((r) => [r.id, r.rules])),
+    };
   }
 
   async sessionAnalytics(uid: string, sid: string) {
     const s = await this.memberSession(uid, sid);
-    const { results } = await this.sessionResults(sid);
-    const sc = buildScorecard(s, results);
+    const { results, rulesByRound } = await this.sessionResults(sid);
+    const sc = buildScorecard(s, results, rulesByRound);
     return {
       sessionId: sid,
       title: s.title,
@@ -211,8 +215,8 @@ export class DataService {
 
   async exportSession(uid: string, sid: string, format: 'csv' | 'json') {
     const s = await this.memberSession(uid, sid);
-    const { results } = await this.sessionResults(sid);
-    const sc = buildScorecard(s, results);
+    const { results, rulesByRound } = await this.sessionResults(sid);
+    const sc = buildScorecard(s, results, rulesByRound);
     if (format === 'json') {
       // Redacted: no GPS coordinates, no photo keys.
       return {

@@ -142,11 +142,14 @@ final class DecodingTests: XCTestCase {
     }
 
     func testSetupPatchEncodesCrewRemovalAndPhoneRemovalAsNull() throws {
-        let body = SetupPatchBody(title: nil, rules: nil, teams: ["C": .remove, "A": .edit(.init(name: "Owls", roster: nil))], moves: [.init(uid: "u1", teamKey: nil), .init(uid: "u2", teamKey: .B)])
+        let ana = RosterEntryBody(personId: "p-ana", displayName: "Ana")
+        let body = SetupPatchBody(title: nil, rules: nil, teams: ["C": .remove, "A": .edit(.init(roster: [ana]))], bench: [], moves: [.init(uid: "u1", teamKey: nil), .init(uid: "u2", teamKey: .B)])
         let json = try JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(body)) as! [String: Any]
         let teams = json["teams"] as! [String: Any]
         XCTAssertTrue(teams["C"] is NSNull)
-        XCTAssertEqual((teams["A"] as! [String: Any])["name"] as? String, "Owls")
+        // Crews are named by the server after their people: the app never sends a name (ADR 0019).
+        XCTAssertEqual(Set((teams["A"] as! [String: Any]).keys), ["roster"])
+        XCTAssertEqual((json["bench"] as? [Any])?.count, 0)
         let moves = json["moves"] as! [[String: Any]]
         XCTAssertTrue(moves[0]["teamKey"] is NSNull)
         XCTAssertEqual(moves[1]["teamKey"] as? String, "B")

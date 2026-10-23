@@ -6,12 +6,15 @@ Product terms with their names in code. Where the spec and the code differ, the 
 |---|---|---|
 | Night | `SessionDoc`, `sessions/{sid}`, "session" | One evening of play. Open-ended: no round count, ended by any phone (ADR 0014) |
 | Organizer | `hostUid`, `isHost` | The phone that created the night. Its only extra power is deleting or revoking the night, and it gets **no** extra visibility (ADR 0004, 0013) |
-| Crew | `Team`, `TeamKey` `A`/`B`/`C` | A group that moves together. Two or three per night |
-| Roster | `Team.roster`, `PersonRef` | The names on a crew. They need no account |
+| Crew | `Team`, `TeamKey` `A`/`B`/`C` | A group that moves together. Two or three per night, shown blue, orange and green. Named after its people (`Team.name`, "Sasha & Marco"); an empty crew is its colour ("Blue crew") (ADR 0019) |
+| Roster | `Team.roster`, `PersonRef` | The people on a crew, with or without a phone. They need no account |
+| Sitting out | `SessionDoc.bench`, `session.sittingOut`, `Place` `BENCH` | People in the night not playing the next round. Their phones spectate (ADR 0019) |
+| Crew label | `crews.crewLabel`, `CrewNames.label` | First names in roster order, "& N more" past three; a last initial where two share a first name |
 | Person | `people/{id}`, `personId` | A saved name with a stable id across nights, optionally linked to an account |
-| Phone / operator | `operatorUids`, `operatorUid` | An account's iPhone playing for a crew. 1–5 per crew, all equal (ADR 0013) |
+| Phone / operator | `operatorUids`, `operatorUid` | An account's iPhone playing for a crew. 1–5 per crew, all equal (ADR 0013). It belongs to the person carrying it (`rosterPersonId`) and is always on that person's crew (`crews.placePhones`, ADR 0019) |
 | Round snapshot | `round.operatorsByTeam` | The crews' consenting phones, frozen at start. All in-round authority comes from it |
-| Spectator | `myRole: null` | A phone in the night but not in the round's snapshot. Sees no pins, claims or ping log |
+| Spectator | `myRole: null` | A phone in the night but not in the round's snapshot (it joined mid-round, or its owner sits out). Sees no pins, claims or ping log |
+| Matchup | `Scorecard.matchups` | Rounds played by the same people on each crew under the same rules. Crews are compared only within one (ADR 0019) |
 | Hiding crew / seeking crews | `hidingTeam`, `seekingTeams`, `Role` `HIDING`/`SEEKING` | One crew hides, every other crew seeks |
 | Side | `Side` `HIDERS`/`SEEKERS` | Pause and resume authority is between sides, not crews |
 | Seek mode | `SeekMode` `TOGETHER`/`RACE` | With two seeking crews: share a catch, or credit only the claiming crew |

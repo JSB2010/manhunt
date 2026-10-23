@@ -268,13 +268,16 @@ describe('crews, night code and phones', () => {
     expect((await h.call(phones[2]!, 'POST', '/v1/invites/redeem', { code: nightCode, teamKey: 'C' })).status).toBe(200);
   });
 
-  it('removing a crew moves its phones to the emptiest remaining crew; a night keeps at least two crews', async () => {
+  it('removing a crew sits its people out, phones too, unless the edit places them; a night keeps at least two crews', async () => {
+    const before = await nv(org);
+    const cPhones = before.session.teams.C.operators.map((o: any) => o.uid);
     const r = await h.call(org, 'PATCH', `/v1/sessions/${night}/setup`, { teams: { C: null } });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     const v = await nv(org);
     expect(Object.keys(v.session.teams)).toEqual(['A', 'B']);
     expect(v.round.seekingTeams).toEqual(['B']);
-    expect(v.session.teams.B.operators.length).toBe(3);
+    expect(v.session.sittingOut.operators.map((o: any) => o.uid).sort()).toEqual([...cPhones].sort());
+    expect(v.session.sittingOut.roster.map((p: any) => p.personId).sort()).toEqual(before.session.teams.C.roster.map((p: any) => p.personId).sort());
     const two = await h.call(org, 'PATCH', `/v1/sessions/${night}/setup`, { teams: { B: null } });
     expect(two.body.error.code).toBe('VALIDATION_FAILED');
   });

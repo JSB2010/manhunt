@@ -89,7 +89,9 @@ describe('Live Activity content contract (server ↔ app)', () => {
     expect(byName['ready check: no Live Activity yet']!.attributes).toBeNull();
 
     const hs = byName['hider, head start running']!;
-    expect(hs.attributes).toEqual({ sessionId: 'sess1', roundId: 'round1', roundIndex: 1, role: 'HIDING', crew: 'A', crewName: 'Crew A' });
+    expect(hs.attributes).toEqual({ sessionId: 'sess1', roundId: 'round1', roundIndex: 1, role: 'HIDING', crew: 'A', crewName: 'Blue crew' });
+    // The Lock Screen names the crew by its colour, never its people (ADR 0019).
+    expect(JSON.stringify(Object.values(byName).map((c) => c.attributes))).not.toMatch(/Crew A|Crew B|Crew C/);
     expect(hs.state).toMatchObject({ phase: 'HEAD_START', headStartEndsAt: sec(T0 + 10 * MIN), chaseStartedAt: null, chaseElapsed: null, nextPingAt: null, lastPing: null });
     // The phone's clock offset shifts every displayed time so the system's own timers read server time.
     expect(byName['seeker, head start running, phone clock 2.5 s ahead']!.state!.headStartEndsAt).toBe(sec(T0 + 10 * MIN + 2_500));

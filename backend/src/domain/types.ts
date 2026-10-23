@@ -54,10 +54,15 @@ export interface PersonRef {
 export interface Team {
   teamId: string;
   key: TeamKey;
+  /** The crew's people, by first name ("Sasha & Marco"); set by the server on every change (ADR 0019). */
   name: string;
   color: string;
-  /** Operator phones (account uids) on this crew. A uid is on at most one crew. */
+  /**
+   * Phones (account uids) on this crew: the phones of the people on its roster. Derived by
+   * `crews.placePhones` after every change; no request sets it directly. A uid is on at most one crew.
+   */
   operatorUids: string[];
+  /** The crew's people (with or without a phone). A person is on at most one crew or the bench. */
   roster: PersonRef[];
 }
 
@@ -71,6 +76,11 @@ export interface SessionDoc {
   rules: Rules;
   /** Two or three crews, keyed A, B[, C]. */
   teams: Partial<Record<TeamKey, Team>>;
+  /**
+   * People sitting out: still in the night, not playing the next round (a break, not arrived yet).
+   * Their phones stay in the night as spectators. Absent on nights from before ADR 0019.
+   */
+  bench?: PersonRef[];
   memberUids: string[];
   participantPersonIds: string[];
   groupId: string | null;

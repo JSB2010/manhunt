@@ -104,7 +104,8 @@ struct SessionDetailView: View {
                 }
                 NavigationLink { NightSummaryView(sessionId: item.id) } label: { Label("Scorecard & Export", systemImage: "trophy.fill") }
             }
-            Section("Crews") {
+            // Crews change during a night (ADR 0019): each round below names the people who played it.
+            Section(item.status == .COMPLETED ? "Crews at the End" : "Crews Now") {
                 ForEach(TeamKey.allCases) { k in
                     if let t = item.teams[k.rawValue] {
                         VStack(alignment: .leading, spacing: 4) {
@@ -112,7 +113,7 @@ struct SessionDetailView: View {
                                 CrewDot(key: k)
                                 Text(t.name).font(.headline)
                             }
-                            if !t.roster.isEmpty {
+                            if !t.roster.isEmpty && !CrewNames.nameListsEveryone(t.name, people: t.roster, key: k) {
                                 Text(t.roster.map(\.displayName).formatted(.list(type: .and)))
                                     .font(.subheadline)
                             }

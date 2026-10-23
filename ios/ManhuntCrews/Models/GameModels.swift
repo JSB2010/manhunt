@@ -11,6 +11,14 @@ enum TeamKey: String, Codable, CaseIterable, Identifiable, Comparable, Sendable 
     case A, B, C
     var id: String { rawValue }
     static func < (a: TeamKey, b: TeamKey) -> Bool { a.rawValue < b.rawValue }
+    /// The crew's colour in words ("Blue crew"): an empty crew's name, and the Lock Screen label (ADR 0019).
+    var colourName: String {
+        switch self {
+        case .A: "Blue crew"
+        case .B: "Orange crew"
+        case .C: "Green crew"
+        }
+    }
 }
 
 /// With two seeking crews: share the catch, or credit the crew that made it.
@@ -90,6 +98,17 @@ struct TeamView: Codable, Sendable {
 
     var hasPhone: Bool { !operators.isEmpty }
     var me: OperatorView? { operators.first(where: \.isMe) }
+    /// More than one person: "Sasha & Marco hide", but "Sasha hides".
+    var isPlural: Bool { roster.count > 1 }
+    /// The phone a person on this crew carries.
+    func phone(of personId: String) -> OperatorView? { operators.first { $0.personId == personId } }
+}
+
+/// People sitting out (in the night, not on a crew) and their phones, which spectate (ADR 0019).
+struct SittingOutView: Codable, Equatable, Sendable {
+    var roster: [PersonRef]
+    var operators: [OperatorView]
+    static let empty = SittingOutView(roster: [], operators: [])
 }
 
 struct ClockView: Codable, Equatable, Sendable {
@@ -311,6 +330,8 @@ struct SessionHeader: Codable, Sendable {
     var completedRoundCount: Int
     var rules: Rules
     var teams: [String: TeamView]
+    /// absent from servers before ADR 0019
+    var sittingOut: SittingOutView?
     /// reusable night code; nil once the night ends
     var joinCode: String?
     var revoked: Bool
@@ -318,7 +339,15 @@ struct SessionHeader: Codable, Sendable {
     func team(_ k: TeamKey) -> TeamView? { teams[k.rawValue] }
     /// Crews of the night in key order.
     var teamKeys: [TeamKey] { TeamKey.allCases.filter { teams[$0.rawValue] != nil } }
-    func name(_ k: TeamKey) -> String { team(k)?.name ?? "Crew \(k.rawValue)" }
+    /// The crew's people ("Sasha & Marco"), named by the server.
+    func name(_ k: TeamKey) -> String { team(k)?.name ?? k.colourName }
+    /// `one` for a crew of one ("hides"), `many` otherwise ("hide"); several crews are always plural.
+    func verb(_ ks: [TeamKey], _ one: String, _ many: String) -> String {
+        ks.count > 1 || ks.contains { team($0)?.isPlural ?? false } ? many : one
+    }
+    var bench: SittingOutView { sittingOut ?? .empty }
+    /// This phone is in the night but its owner sits out.
+    var amSittingOut: Bool { myTeam == nil && bench.operators.contains(where: \.isMe) }
 }
 
 struct NextRoundView: Codable, Equatable, Sendable {
@@ -388,6 +417,8 @@ struct InvitePreview: Codable, Sendable {
     var claimedPersonIds: [String]?
     /// The roster name this account most likely is.
     var suggestedPersonId: String?
+    /// People sitting out; joining as one of them puts them on a crew (ADR 0019).
+    var sittingOut: [PersonRef]?
 
     var teamKeys: [TeamKey] { TeamKey.allCases.filter { teams[$0.rawValue] != nil } }
     /// The crew whose roster lists a person.

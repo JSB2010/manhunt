@@ -156,6 +156,32 @@ describe('per-user view privacy invariant', () => {
     expect(numbers(v.round!.pins)).toEqual([]);
   });
 
+  it('a phone whose owner sits out is a spectator: the night’s people, nothing of the round (ADR 0019)', async () => {
+    const { session: s0, round: r0 } = readyRound();
+    const all = track(T0 + 20 * MIN);
+    const coords = new Set(all.flatMap((p) => [p.latitude, p.longitude]));
+    let r = startRound(r0, s0, HIDER, allPhones(s0), [], T0).round;
+    r = (await tick(r, T0 + 20 * MIN, all)).round;
+    // Jules sits out with their phone; it was never in the round's snapshot.
+    const s = { ...s0, teams: { ...s0.teams, A: { ...s0.teams.A!, roster: s0.teams.A!.roster.filter((p) => p.personId !== 'p-jules') } }, bench: [{ personId: 'p-jules', displayName: 'Jules' }], memberUids: [...s0.memberUids, 'bench-phone'] };
+    const m = members(s);
+    m['bench-phone'] = { ...m[HIDER]!, uid: 'bench-phone', isHost: false, displayName: 'Jules', rosterPersonId: 'p-jules', joinedAt: T0 - 5 * MIN };
+    for (const uid of ['bench-phone', SEEKER]) {
+      const v = renderView({ uid, session: s, round: r, members: m, activeClaim: null, now: T0 + 21 * MIN });
+      expect(v.session.sittingOut).toEqual({
+        roster: [{ personId: 'p-jules', displayName: 'Jules' }],
+        operators: [{ uid: 'bench-phone', personId: 'p-jules', displayName: 'Jules', isMe: uid === 'bench-phone', consentGiven: true }],
+      });
+      if (uid === SEEKER) continue;
+      expect(v.session.myTeam).toBeNull();
+      expect(v.round!.myRole).toBeNull();
+      expect(v.round!.pins).toEqual([]);
+      expect(v.round!.pingLog).toEqual([]);
+      expect(numbers(v).filter((n) => coords.has(n))).toEqual([]);
+      expect(liveActivityAttributes(v)).toBeNull();
+    }
+  });
+
   it('RACE: every hider phone reviews the claim; the other seeking crew sees who claimed but not the claim', async () => {
     const { session: s, round: r0 } = readyRound({}, { three: true, phonesA: [HIDER, HIDER2], seekMode: 'RACE' });
     let r = startRound(r0, s, HIDER, allPhones(s), [], T0).round;

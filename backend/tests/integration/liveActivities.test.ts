@@ -98,8 +98,8 @@ describe('Live Activities', () => {
     // Morgan started it in the foreground and starts its own activity; Drew and Taylor get push-to-start.
     expect(toPhone(starts, morgan)).toEqual([]);
     for (const [u, role, crew, crewName] of [
-      [drew, 'HIDING', 'A', 'Foxes'],
-      [taylor, 'SEEKING', 'B', 'Hounds'],
+      [drew, 'HIDING', 'A', 'Blue crew'],
+      [taylor, 'SEEKING', 'B', 'Orange crew'],
     ] as const) {
       const [p] = toPhone(starts, u);
       expect(p).toMatchObject({

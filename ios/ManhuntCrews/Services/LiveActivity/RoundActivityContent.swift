@@ -16,7 +16,8 @@ enum RoundActivityContent {
             roundIndex: r.index,
             role: role == .HIDING ? .HIDING : .SEEKING,
             crew: team.rawValue,
-            crewName: view.session.team(team)?.name ?? "Crew \(team.rawValue)")
+            // The crew's colour, never its people's names: a Lock Screen is readable by anyone nearby (ADR 0019).
+            crewName: team.colourName)
     }
 
     /// Epoch milliseconds of a decoded server timestamp (the server sends whole milliseconds).

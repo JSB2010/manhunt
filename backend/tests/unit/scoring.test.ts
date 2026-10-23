@@ -135,12 +135,18 @@ describe('three crews and open nights', () => {
       result(swap({ roundIndex: 4, observedChaseSeconds: 60 })),
     ]);
     expect(sc.comparison.reasons).toEqual(['ROSTERS_CHANGED']);
-    // a roster change on the seeking side alone does not matter
+  });
+
+  it('a crew that changed while seeking makes the night provisional too (ADR 0019)', () => {
+    // Crew A hid from B + X; then B hid from A without X. Different seekers: not a fair comparison.
     const seekOnly = buildScorecard(s, [
       result({ roundIndex: 1, observedChaseSeconds: 100, rosterSnapshot: { A: rosters.A, B: [...rosters.B, { personId: 'p-x', displayName: 'X' }] } }),
       result(swap({ roundIndex: 2, observedChaseSeconds: 50 })),
     ]);
-    expect(seekOnly.comparison.status).toBe('COMPARABLE');
+    expect(seekOnly.comparison).toMatchObject({ status: 'PROVISIONAL', reasons: ['ROSTERS_CHANGED'] });
+    // Each round is its own matchup, and neither can name a stronger crew.
+    expect(seekOnly.matchups.map((m) => m.rounds)).toEqual([[1], [2]]);
+    expect(seekOnly.matchups.every((m) => m.comparison.status === 'INSUFFICIENT')).toBe(true);
   });
 
   it('keeps a removed crew in the scorecard by its round names', () => {
@@ -180,5 +186,71 @@ describe('person analytics (crew-attributed)', () => {
     expect(compositionFingerprint([{ personId: 'a', displayName: '' }, { personId: 'b', displayName: '' }])).toBe(
       compositionFingerprint([{ personId: 'b', displayName: '' }, { personId: 'a', displayName: '' }]),
     );
+  });
+});
+
+describe('crews that change during the night (ADR 0019)', () => {
+  // Morgan, Casey & Jules vs Taylor, Riley & Sam; then Jules and Sam swap.
+  const swapped = { A: [rosters.A[0]!, rosters.A[1]!, rosters.B[2]!], B: [rosters.B[0]!, rosters.B[1]!, rosters.A[2]!] };
+  const night = [
+    result({ roundIndex: 1, observedChaseSeconds: 600 }),
+    result(swap({ roundIndex: 2, observedChaseSeconds: 300 })),
+    result({ roundIndex: 3, observedChaseSeconds: 900, rosterSnapshot: swapped, teamNames: { A: 'Morgan, Casey & Sam', B: 'Taylor, Riley & Jules' } }),
+    result(swap({ roundIndex: 4, observedChaseSeconds: 450, rosterSnapshot: swapped, teamNames: { A: 'Morgan, Casey & Sam', B: 'Taylor, Riley & Jules' } })),
+  ];
+
+  it('compares crews only within a matchup: the same people on each crew, the same rules', () => {
+    const sc = buildScorecard(s, night);
+    expect(sc.comparison).toMatchObject({ status: 'PROVISIONAL', reasons: ['ROSTERS_CHANGED'] });
+    expect(sc.matchups.map((m) => m.rounds)).toEqual([[1, 2], [3, 4]]);
+    const [first, second] = sc.matchups;
+    expect(first!.comparison).toMatchObject({ status: 'COMPARABLE', strongerHidingTeam: 'A', marginSeconds: 300 });
+    expect(second!.comparison).toMatchObject({ status: 'COMPARABLE', strongerHidingTeam: 'A', marginSeconds: 450 });
+    expect(second!.crews.map((c) => [c.team, c.name, c.people.map((p) => p.displayName), c.hideRounds, c.hideAverageSeconds, c.catches])).toEqual([
+      ['A', 'Morgan, Casey & Sam', ['Morgan', 'Casey', 'Sam'], 1, 900, 1],
+      ['B', 'Taylor, Riley & Jules', ['Taylor', 'Riley', 'Jules'], 1, 450, 1],
+    ]);
+    expect(second!.crews.map((c) => [c.hiderFootMeters, c.seekerVehicleMeters])).toEqual([[1000, 5000], [1000, 5000]]);
+  });
+
+  it('the same people under swapped colours are the same matchup; a rules change starts a new one', () => {
+    const colours = buildScorecard(s, [
+      result({ roundIndex: 1, observedChaseSeconds: 600 }),
+      // Crew A's people now play as B, and B's as A: still the same two crews.
+      result({ roundIndex: 2, hidingTeam: 'A', seekingTeams: ['B'], observedChaseSeconds: 300, rosterSnapshot: { A: rosters.B, B: rosters.A } }),
+    ]);
+    expect(colours.matchups).toHaveLength(1);
+    expect(colours.matchups[0]!.crews.map((c) => [c.team, c.hideRounds, c.seekRounds])).toEqual([['A', 1, 1], ['B', 1, 1]]);
+    const rules = buildScorecard(s, [result({ roundIndex: 1, observedChaseSeconds: 600 }), result(swap({ roundIndex: 2, observedChaseSeconds: 300, rulesFingerprint: 'shorter' }))]);
+    expect(rules.matchups.map((m) => m.rounds)).toEqual([[1], [2]]);
+  });
+
+  it('tallies each person by the rounds their crew hid and sought (crew-level)', () => {
+    const sc = buildScorecard(s, night);
+    const by = Object.fromEntries(sc.people.map((p) => [p.displayName, [p.roundsHid, p.roundsSought, p.hideAverageSeconds, p.catches]]));
+    expect(by.Morgan).toEqual([2, 2, 750, 2]);
+    expect(by.Jules).toEqual([2, 2, 525, 2]); // hid with A in round 1 and with B in round 4
+    expect(by.Sam).toEqual([2, 2, 600, 2]);
+  });
+
+  it('says what changed before each round: people and rules', () => {
+    const sc = buildScorecard(s, night, {
+      r1: { ...s.rules },
+      r2: { ...s.rules },
+      r3: { ...s.rules, headStartSeconds: 300 },
+      r4: { ...s.rules, headStartSeconds: 300 },
+    });
+    expect(sc.changes.map((c) => c.roundIndex)).toEqual([2, 3, 4]);
+    expect(sc.changes[0]).toEqual({ roundIndex: 2, joined: [], left: [], moved: [], rules: [] });
+    expect(sc.changes[1]).toEqual({
+      roundIndex: 3,
+      joined: [],
+      left: [],
+      moved: [{ name: 'Sam', from: 'B', to: 'A' }, { name: 'Jules', from: 'A', to: 'B' }],
+      rules: [{ field: 'headStartSeconds', from: s.rules.headStartSeconds, to: 300 }],
+    });
+    // Someone arriving, someone leaving.
+    const late = buildScorecard(s, [result({ roundIndex: 1 }), result(swap({ roundIndex: 2, rosterSnapshot: { A: [...rosters.A, { personId: 'p-ezra', displayName: 'Ezra' }], B: rosters.B.slice(0, 2) } }))]);
+    expect(late.changes[0]).toMatchObject({ joined: ['Ezra'], left: ['Sam'], moved: [] });
   });
 });

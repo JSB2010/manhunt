@@ -1,6 +1,6 @@
 # ADR 0014 — Open-ended nights
 
-**Status:** accepted · **Supersedes:** `Rules.totalRounds`, `initialHidingTeam`, `alternateRoles` and the host role override
+**Status:** accepted, the editor and the night comparison updated by ADR 0019 · **Supersedes:** `Rules.totalRounds`, `initialHidingTeam`, `alternateRoles` and the host role override
 
 **Context.** Nights rarely go as planned: more or fewer rounds, teams reshuffled mid-night, rules tightened after a round. The fixed round count and forced A/B alternation got in the way.
 

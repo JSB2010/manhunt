@@ -179,6 +179,67 @@ struct NightComparison: Codable, Sendable {
     var explanation: String
 }
 
+/// Rounds with the same people on each crew and the same rules: the only fair comparison (ADR 0019).
+struct Matchup: Codable, Identifiable, Sendable {
+    struct Crew: Codable, Identifiable, Sendable {
+        /// its colour in the matchup's first round
+        var team: TeamKey
+        var name: String
+        var people: [PersonRef]
+        var hideRounds: Int
+        var hideAverageSeconds: Int?
+        var hideIncludesCensored: Bool
+        var caught: Int
+        var uncaught: Int
+        var seekRounds: Int
+        var catches: Int
+        var hiderFootMeters: Double
+        var seekerVehicleMeters: Double
+        var id: TeamKey { team }
+    }
+    var rounds: [Int]
+    var rulesFingerprint: String
+    var crews: [Crew]
+    var comparison: NightComparison
+    var id: String { rounds.map(String.init).joined(separator: ",") }
+
+    /// "Round 3", "Rounds 1–2", "Rounds 1, 2 & 5".
+    var title: String {
+        guard let first = rounds.first, let last = rounds.last else { return "" }
+        if rounds.count == 1 { return "Round \(first)" }
+        if rounds == Array(first...last) { return "Rounds \(first)–\(last)" }
+        return "Rounds \(rounds.map(String.init).formatted(.list(type: .and)))"
+    }
+}
+
+/// One person's night, crew-attributed: never individual performance.
+struct PersonNightStats: Codable, Identifiable, Sendable {
+    var personId: String
+    var displayName: String
+    var roundsHid: Int
+    var roundsSought: Int
+    var hideAverageSeconds: Int?
+    var hideIncludesCensored: Bool
+    var catches: Int
+    var id: String { personId }
+}
+
+/// What changed since the previous round.
+struct RoundChanges: Codable, Sendable {
+    struct Move: Codable, Sendable { var name: String; var from: TeamKey; var to: TeamKey }
+    struct RuleChange: Codable, Sendable {
+        var field: String
+        var from: RoundSummary.TimelineEvent.Detail
+        var to: RoundSummary.TimelineEvent.Detail
+    }
+    var roundIndex: Int
+    var joined: [String]
+    var left: [String]
+    var moved: [Move]
+    var rules: [RuleChange]
+    var isEmpty: Bool { joined.isEmpty && left.isEmpty && moved.isEmpty && rules.isEmpty }
+}
+
 struct Scorecard: Codable, Sendable {
     struct Trend: Codable, Identifiable, Sendable {
         var roundIndex: Int
@@ -193,6 +254,12 @@ struct Scorecard: Codable, Sendable {
     var rulesConsistent: Bool
     var rounds: [RoundResult]
     var trend: [Trend]
+    /// absent from servers before ADR 0019
+    var matchups: [Matchup]?
+    var people: [PersonNightStats]?
+    var changes: [RoundChanges]?
+
+    func changes(before roundIndex: Int) -> RoundChanges? { changes?.first { $0.roundIndex == roundIndex } }
 }
 
 struct SessionAnalytics: Codable, Sendable {

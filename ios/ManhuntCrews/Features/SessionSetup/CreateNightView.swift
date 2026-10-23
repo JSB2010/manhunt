@@ -6,8 +6,7 @@ struct CreateNightView: View {
 
     @State private var title = "Manhunt night"
     @State private var date = Date()
-    @State private var crews = CrewDraft.defaults(count: 2)
-    @State private var myTeam: TeamKey = .A
+    @State private var board = CrewBoard.defaults(count: 2)
     @State private var firstHider: TeamKey = .A
     @State private var seekMode: SeekMode = .TOGETHER
     @State private var rules = Rules.defaults
@@ -18,7 +17,11 @@ struct CreateNightView: View {
 
     private var groupPeople: [Person] { groups.first(where: { $0.id == groupId })?.people ?? [] }
     private var selfPersonId: String? { model.me?.profile.selfPersonId }
-    private func name(_ k: TeamKey) -> String { crews.first { $0.key == k }?.name ?? "Crew \(k.rawValue)" }
+    /// My phone plays on the crew I'm on (I can't sit out the night I create).
+    private var myTeam: TeamKey {
+        if let selfPersonId, case .crew(let k)? = board.place(of: selfPersonId) { return k }
+        return board.keys.first ?? .A
+    }
 
     var body: some View {
         NavigationStack {
@@ -33,16 +36,13 @@ struct CreateNightView: View {
                         }
                     }
                 }
-                CrewsEditor(crews: $crews, phonePersonIds: Set([selfPersonId].compactMap { $0 }), groupPeople: groupPeople) { followSelf() }
+                PeopleBoard(board: $board, mustPlay: Set([selfPersonId].compactMap { $0 }), groupPeople: groupPeople)
                 Section("Round 1") {
-                    Picker("My phone’s crew", selection: $myTeam) {
-                        ForEach(crews) { Text($0.name).tag($0.key) }
-                    }
-                    .onChange(of: myTeam) { _, _ in placeSelf() }
                     Picker("Hides first", selection: $firstHider) {
-                        ForEach(crews) { Text($0.name).tag($0.key) }
+                        ForEach(board.keys) { Text(board.label($0)).tag($0) }
                     }
-                    if crews.count > 2 {
+                    .accessibilityIdentifier("create.firstHider")
+                    if board.crews.count > 2 {
                         Picker("Seeking crews", selection: $seekMode) {
                             ForEach(SeekMode.allCases) { Text($0.label).tag($0) }
                         }
@@ -56,13 +56,12 @@ struct CreateNightView: View {
                 ToolbarItem(placement: .cancellationAction) { CancelButton { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     ConfirmButton(title: "Create", busy: busy) { create() }
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || crews.contains { $0.name.trimmingCharacters(in: .whitespaces).isEmpty })
+                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
                         .accessibilityIdentifier("create.submit")
                 }
             }
-            .onChange(of: crews.count) { _, _ in
-                if !crews.contains(where: { $0.key == myTeam }) { myTeam = .A; placeSelf() }
-                if !crews.contains(where: { $0.key == firstHider }) { firstHider = .A }
+            .onChange(of: board.crews.count) { _, _ in
+                if !board.keys.contains(firstHider) { firstHider = .A }
             }
             .task {
                 #if DEBUG
@@ -80,18 +79,10 @@ struct CreateNightView: View {
         }
     }
 
-    /// The creator's own name sits on the crew their phone joins.
+    /// The creator starts on the first crew; their phone goes wherever they're moved.
     private func placeSelf() {
-        guard let me = model.me else { return }
-        let entry = RosterEntryBody(personId: me.profile.selfPersonId, displayName: me.profile.displayName)
-        for i in crews.indices { crews[i].roster.removeAll { $0.personId == entry.personId } }
-        if let i = crews.firstIndex(where: { $0.key == myTeam }) { crews[i].roster.insert(entry, at: 0) }
-    }
-
-    /// After a shuffle, the phone goes where its owner was dealt.
-    private func followSelf() {
-        guard let selfPersonId, let crew = crews.first(where: { $0.roster.contains { $0.personId == selfPersonId } }) else { return }
-        myTeam = crew.key
+        guard let me = model.me, board.place(of: me.profile.selfPersonId) == nil, !board.crews.isEmpty else { return }
+        board.crews[0].roster.insert(RosterEntryBody(personId: me.profile.selfPersonId, displayName: me.profile.displayName), at: 0)
     }
 
     private func create() {
@@ -102,9 +93,10 @@ struct CreateNightView: View {
             title: title,
             scheduledDate: f.string(from: date),
             myTeam: myTeam,
-            teams: Dictionary(uniqueKeysWithValues: crews.map { ($0.key.rawValue, TeamInputBody(name: $0.name, roster: $0.roster)) }),
+            teams: Dictionary(uniqueKeysWithValues: board.crews.map { ($0.key.rawValue, TeamInputBody(roster: $0.roster)) }),
+            bench: board.bench.isEmpty ? nil : board.bench,
             firstHidingTeam: firstHider,
-            seekMode: crews.count > 2 ? seekMode : nil,
+            seekMode: board.crews.count > 2 ? seekMode : nil,
             rules: RulesPatch(rules),
             groupId: groupId)
         perform($busy, $error) {

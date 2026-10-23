@@ -20,7 +20,7 @@ struct LobbyView: View {
     @State private var blocking: [String] = []
 
     private var myTeam: TeamKey? { view.session.myTeam }
-    private var me: OperatorView? { myTeam.flatMap { view.session.team($0)?.me } }
+    private var me: OperatorView? { myTeam.flatMap { view.session.team($0)?.me } ?? view.session.bench.operators.first(where: \.isMe) }
     private var myConsent: Bool { me?.consentGiven ?? false }
     /// My crew plays this round (it may sit out only when crews changed after setup).
     private var myRole: Role? { myTeam.flatMap { round.role(of: $0) } }
@@ -43,6 +43,7 @@ struct LobbyView: View {
                             CrewRow(team: team, role: round.role(of: k), ready: round.isReady(k))
                         }
                     }
+                    if !view.session.bench.roster.isEmpty { SittingOutRow(bench: view.session.bench) }
                 }
 
                 if myConsent { PreflightSection() }
@@ -99,7 +100,16 @@ struct LobbyView: View {
 
     @ViewBuilder private var actionBar: some View {
         VStack(spacing: 10) {
-            if !myConsent {
+            if view.session.amSittingOut {
+                // In the night, not playing: no Ready, no tracking. Anyone can put them back on a crew.
+                Text("You’re sitting out this round. Your phone won’t be tracked.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button { sheet = .edit } label: { ActionLabel(title: "Join a Crew", systemImage: "person.3") }
+                    .floatingProminentButton()
+                    .accessibilityIdentifier("lobby.joinCrew")
+            } else if !myConsent {
                 Button { sheet = .consent } label: { ActionLabel(title: "Review Tracking", systemImage: "doc.text.magnifyingglass") }
                     .floatingProminentButton()
                     .accessibilityIdentifier("lobby.consent")
@@ -203,7 +213,7 @@ struct LobbyView: View {
     }
 }
 
-/// "Round 2 — Foxes hide · Night Owls & Ravens seek (race)".
+/// "Round 2 — Sasha & Theo hide · Marco & Priya seek" (crews are named after their people).
 private struct RoundHeader: View {
     let view: SessionViewDoc
     let round: RoundView
@@ -214,11 +224,11 @@ private struct RoundHeader: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 6) {
-                Label { Text("\(view.session.name(round.hidingTeam)) hide") } icon: {
+                Label { Text("\(view.session.name(round.hidingTeam)) \(view.session.verb([round.hidingTeam], "hides", "hide"))") } icon: {
                     Image(systemName: Role.HIDING.symbol).foregroundStyle(Theme.crew(round.hidingTeam))
                 }
                 Label {
-                    Text("\(round.seekingTeams.map { view.session.name($0) }.formatted(.list(type: .and))) seek\(round.seekingTeams.count > 1 ? (round.seekMode == .RACE ? " — race" : " together") : "")")
+                    Text("\(round.seekingTeams.map { view.session.name($0) }.formatted(.list(type: .and))) \(view.session.verb(round.seekingTeams, "seeks", "seek"))\(round.seekingTeams.count > 1 ? (round.seekMode == .RACE ? " — race" : " together") : "")")
                 } icon: {
                     Image(systemName: Role.SEEKING.symbol).foregroundStyle(round.seekingTeams.first.map(Theme.crew) ?? .secondary)
                 }

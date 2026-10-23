@@ -93,7 +93,7 @@ Rules:
 - Every timer is a system timer (`Text(timerInterval:)`), so it keeps running between updates. Stale content says "Open the app for the latest".
 - Colour is the crew, and the Dynamic Island keyline uses it. Warning and danger appear only with the pause symbols.
 - No buttons. Tapping opens the night's game screen.
-- Never a location, a roster name or a free-text reason. The Lock Screen is readable by anyone nearby.
+- Never a location, a person's name or a free-text reason. The crew is its colour ("Blue crew"), not its name, which is its people's names (ADR 0019). The Lock Screen is readable by anyone nearby.
 - Settings › **Show Rounds on Lock Screen** and game Options › **Hide Live Activity** turn it off. An activity removed from the Lock Screen stays removed for that round.
 
 ## Accessibility

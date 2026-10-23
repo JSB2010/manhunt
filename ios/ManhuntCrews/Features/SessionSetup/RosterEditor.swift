@@ -1,15 +1,13 @@
 import SwiftUI
 
-/// Edits a crew roster as stable person references. New names are created as
-/// saved people first (with duplicate detection) so history never relies on
-/// free text alone.
-struct RosterEditor: View {
+/// Adds people to a crew or Sitting Out as stable person references. New names are created as
+/// saved people first (with duplicate detection) so history never relies on free text alone.
+struct AddPeopleRow: View {
     @Environment(AppModel.self) private var model
-    let title: String
-    @Binding var roster: [RosterEntryBody]
-    /// People already on another crew (nobody is on two).
-    var excluded: Set<String> = []
+    /// People already in this crew (shown as selected in the picker).
+    var inPlace: Set<String> = []
     var groupPeople: [Person] = []
+    let onAdd: (RosterEntryBody) -> Void
 
     @State private var newName = ""
     @State private var duplicates: [Person] = []
@@ -19,32 +17,20 @@ struct RosterEditor: View {
     @State private var error: String?
 
     var body: some View {
-        Section {
-            ForEach(roster, id: \.self) { entry in
-                Label {
-                    Text(entry.displayName)
-                } icon: {
-                    Image(systemName: entry.personId == model.me?.profile.selfPersonId ? "person.crop.circle.badge.checkmark" : "person.fill")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .onDelete { roster.remove(atOffsets: $0) }
-            HStack {
-                TextField("Add a name", text: $newName)
-                    .submitLabel(.done)
-                    .onSubmit(add)
-                Button(action: add) { Label("Add", systemImage: "plus.circle.fill").labelStyle(.iconOnly).font(.title3) }
-                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || busy)
-            }
-            Button("Choose Saved People…") { showPicker = true }
-        } header: {
-            Text(title)
+        HStack {
+            TextField("Add a name", text: $newName)
+                .submitLabel(.done)
+                .onSubmit(add)
+            Button(action: add) { Label("Add", systemImage: "plus.circle.fill").labelStyle(.iconOnly).font(.title3) }
+                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty || busy)
+            Button { showPicker = true } label: { Label("Choose Saved People", systemImage: "person.crop.circle.badge.plus").labelStyle(.iconOnly).font(.title3) }
+                .buttonStyle(.borderless)
         }
+        .buttonStyle(.borderless)
         .sheet(isPresented: $showPicker) {
-            PeoplePicker(selected: Set(roster.compactMap(\.personId)), excluded: excluded, groupPeople: groupPeople) { picked in
-                for p in picked where !roster.contains(where: { $0.personId == p.id }) {
-                    roster.append(.init(personId: p.id, displayName: p.displayName))
-                }
+            // Someone already elsewhere in the night moves here.
+            PeoplePicker(selected: inPlace, excluded: [], groupPeople: groupPeople) { picked in
+                for p in picked { onAdd(.init(personId: p.id, displayName: p.displayName)) }
             }
         }
         .confirmationDialog("Is this someone you already saved?", isPresented: Binding(get: { !duplicates.isEmpty }, set: { if !$0 { duplicates = [] } }), titleVisibility: .visible) {
@@ -70,7 +56,7 @@ struct RosterEditor: View {
             if let p = r.person, r.created {
                 append(p)
             } else {
-                duplicates = r.possibleDuplicates.filter { !excluded.contains($0.id) }
+                duplicates = r.possibleDuplicates
                 if duplicates.isEmpty { create(confirm: true) }
             }
         }
@@ -79,8 +65,7 @@ struct RosterEditor: View {
     private func append(_ p: Person) {
         duplicates = []
         newName = ""
-        guard !excluded.contains(p.id) else { error = "\(p.displayName) is already on another crew."; return }
-        if !roster.contains(where: { $0.personId == p.id }) { roster.append(.init(personId: p.id, displayName: p.displayName)) }
+        onAdd(.init(personId: p.id, displayName: p.displayName))
     }
 }
 

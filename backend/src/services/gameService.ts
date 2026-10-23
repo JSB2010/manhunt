@@ -3,13 +3,19 @@ import { Timestamp, type Transaction } from 'firebase-admin/firestore';
 import type { z } from 'zod';
 import { effectiveChaseMs } from '../domain/clock.js';
 import {
+  benchOf,
   crewOfPerson,
   crewOfUid,
   hiderUids,
   matchRosterPerson,
-  movePersonToCrew,
+  movePerson,
   operatorUidsOf,
   ownerPersonId,
+  peopleOf,
+  placeOfPerson,
+  placeOfPhone,
+  placePhones,
+  relabelCrews,
   roleOf,
   roundTeams,
   roundUids,
@@ -55,7 +61,6 @@ import {
   type PersonRef,
   type RoundDoc,
   type SessionDoc,
-  type Team,
   type TeamKey,
 } from '../domain/types.js';
 import { renderView, trackingState, type ViewDoc } from '../domain/views.js';
@@ -148,14 +153,33 @@ function emptiestCrew(session: SessionDoc, exclude: TeamKey | null = null): Team
   return keys.sort((a, b) => session.teams[a]!.operatorUids.length - session.teams[b]!.operatorUids.length || a.localeCompare(b))[0]!;
 }
 
+/** A person is on at most one crew or the bench, once. */
 function assertDisjointRosters(session: SessionDoc) {
-  const seen = new Map<string, TeamKey>();
-  for (const k of teamKeysOf(session)) {
-    for (const p of session.teams[k]!.roster) {
-      if (seen.has(p.personId) && seen.get(p.personId) !== k) fail('VALIDATION_FAILED', `${p.displayName} can't be on two crews`);
-      seen.set(p.personId, k);
-    }
+  const seen = new Set<string>();
+  for (const p of peopleOf(session)) {
+    if (seen.has(p.personId)) fail('VALIDATION_FAILED', `${p.displayName} is listed twice`);
+    seen.add(p.personId);
   }
+}
+
+/** Phones in the night and where they are (a crew, or `BENCH` when their owner sits out). */
+function phonePlaces(session: SessionDoc, members: Record<string, MemberDoc>) {
+  return new Map(Object.values(members).map((m) => [m.uid, placeOfPhone(session, m)] as const));
+}
+
+/** Phones that moved or left between two placements, as audit events. */
+function placementEvents(before: Map<string, string | null>, after: Map<string, string | null>, actor: string, now: number): DomainEvent[] {
+  const events: DomainEvent[] = [];
+  for (const [uid, from] of before) {
+    const to = after.get(uid) ?? null;
+    if (from === to || from === null) continue;
+    events.push(
+      to === null
+        ? { type: 'OPERATOR_REMOVED', at: now, actorUid: actor, roundId: null, details: { uid, from } }
+        : { type: 'OPERATOR_MOVED', at: now, actorUid: actor, roundId: null, details: { uid, from, to } },
+    );
+  }
+  return events;
 }
 
 interface TxCtx<Rd extends RoundDoc | null> {
@@ -198,6 +222,16 @@ export class GameService {
     const team = crewOfUid(session, uid);
     if (!team || !members[uid]?.active) fail('OPERATOR_NOT_AUTHORIZED', 'You are not on a crew in this night');
     return team!;
+  }
+
+  /**
+   * Any phone in the night, including one whose owner sits out (ADR 0019): night-level actions
+   * (crews and rules, the next round, the night code, ending the night). Returns its place.
+   */
+  private requireMember(session: SessionDoc, members: Record<string, MemberDoc>, uid: string) {
+    const place = session.memberUids.includes(uid) ? placeOfPhone(session, members[uid]) : null;
+    if (!place) fail('OPERATOR_NOT_AUTHORIZED', 'You are not in this night');
+    return place!;
   }
 
   private requireOpenNight(session: SessionDoc) {
@@ -350,15 +384,17 @@ export class GameService {
     for (const k of TEAM_KEYS) {
       const t = input.teams[k];
       if (!t) continue;
+      // Crew names and colours from the request are ignored: a crew is named after its people (ADR 0019).
       teams[k] = {
         teamId: this.p.sessions().doc().id,
         key: k,
-        name: t.name,
-        color: t.color ?? TEAM_COLORS[k],
+        name: '',
+        color: TEAM_COLORS[k],
         operatorUids: input.myTeam === k ? [uid] : [],
         roster: await resolvePeopleForRoster(this.d, uid, t.roster),
       };
     }
+    const bench = input.bench?.length ? await resolvePeopleForRoster(this.d, uid, input.bench) : [];
     const code = newCode();
     const session: SessionDoc = {
       id: sid,
@@ -368,8 +404,9 @@ export class GameService {
       status: 'LOBBY',
       rules,
       teams,
+      bench,
       memberUids: [uid],
-      participantPersonIds: [...new Set(Object.values(teams).flatMap((t) => t!.roster.map((p) => p.personId)))],
+      participantPersonIds: [...new Set([...Object.values(teams).flatMap((t) => t!.roster.map((p) => p.personId)), ...bench.map((p) => p.personId)])],
       groupId: input.groupId ?? null,
       currentRoundId: rid,
       roundIds: [rid],
@@ -397,7 +434,15 @@ export class GameService {
       selfPersonId: (user!.selfPersonId as string | undefined) ?? null,
       rosterPersonId: null,
     };
+    // The organizer plays on the crew they picked for their phone: their name goes there.
     member.rosterPersonId = matchRosterPerson(session, member);
+    if (member.rosterPersonId) movePerson(session, member.rosterPersonId, input.myTeam);
+    else if (member.selfPersonId) {
+      session.teams[input.myTeam]!.roster.unshift({ personId: member.selfPersonId, displayName: member.displayName });
+      session.participantPersonIds.push(member.selfPersonId);
+      member.rosterPersonId = member.selfPersonId;
+    }
+    relabelCrews(session);
     const t = createRound({ id: rid, session, index: 1, hidingTeam: input.firstHidingTeam ?? suggestedHidingTeam(session), seekMode: input.seekMode ?? 'TOGETHER', actorUid: uid, now });
     const members = { [uid]: member };
     const inviteRef = this.p.invites().doc();
@@ -516,7 +561,7 @@ export class GameService {
       const session = await txGet<SessionDoc>(tx, this.p.session(sid));
       if (!session || !session.memberUids.includes(uid)) fail('NOT_FOUND', 'Session not found');
       const members = await txMembers(tx, db, sid);
-      this.requireOperator(session!, members, uid);
+      this.requireMember(session!, members, uid);
       this.requireOpenNight(session!);
       if (session!.revokedAt) fail('GAME_CLOSED', 'Session is closed');
       const round = session!.currentRoundId ? await txGet<RoundDoc>(tx, this.p.round(sid, session!.currentRoundId)) : null;
@@ -609,6 +654,8 @@ export class GameService {
       ),
       suggestedTeam: emptiestCrew(session!),
       myTeam,
+      // People sitting out (not arrived yet, or taking a break): joining puts them on a crew.
+      sittingOut: benchOf(session!),
       // Roster names already played by another phone, and the name this account most likely is (ADR 0018).
       claimedPersonIds: [...claimed],
       suggestedPersonId: matchRosterPerson(session!, owner, claimed),
@@ -633,9 +680,8 @@ export class GameService {
       if (!session || session.revokedAt || session.status === 'COMPLETED') fail('GAME_CLOSED', 'That night has ended');
       const members = await txMembers(tx, db, session!.id);
       const round = session!.currentRoundId ? await txGet<RoundDoc>(tx, this.p.round(session!.id, session!.currentRoundId)) : null;
-      const current = crewOfUid(session!, uid);
-      if (current && members[uid]?.active) {
-        // Already on a crew: re-opening the code is a no-op.
+      if (placeOfPhone(session!, members[uid])) {
+        // Already in the night (on a crew or sitting out): re-opening the code is a no-op.
         return { view: renderView({ uid, session: session!, round, members, activeClaim: null, now }), notify: null };
       }
       const s = structuredClone(session!);
@@ -647,18 +693,18 @@ export class GameService {
           .map((m) => ownerPersonId(s, m))
           .filter((x): x is string => !!x),
       );
-      if (input.personId && (!crewOfPerson(s, input.personId) || claimed.has(input.personId))) {
+      if (input.personId && (!placeOfPerson(s, input.personId) || claimed.has(input.personId))) {
         fail('VALIDATION_FAILED', 'That name is not available in this night');
       }
       let rosterPersonId = input.personId ?? matchRosterPerson(s, { displayName, selfPersonId }, claimed);
+      // A person sitting out who joins has arrived: they go on the crew they pick, or the emptiest.
       const teamKey = input.teamKey ?? (rosterPersonId ? crewOfPerson(s, rosterPersonId) : null) ?? emptiestCrew(s);
       const crew = s.teams[teamKey];
       if (!crew) fail('VALIDATION_FAILED', 'That crew is not part of this night');
-      if (crew!.operatorUids.length >= MAX_OPERATORS_PER_TEAM) fail('CONFLICT', `${crew!.name} already has ${MAX_OPERATORS_PER_TEAM} phones`);
-      crew!.operatorUids.push(uid);
-      // The phone's owner plays on its crew (ADR 0018): their roster name moves here, or
-      // their own person record is added when no crew lists them yet.
-      if (rosterPersonId) movePersonToCrew(s, rosterPersonId, teamKey);
+      if (crew!.operatorUids.length >= MAX_OPERATORS_PER_TEAM) fail('CONFLICT', `That crew already carries ${MAX_OPERATORS_PER_TEAM} phones`);
+      // The phone's owner plays on its crew (ADR 0018): their name moves here, or their own
+      // person record is added when the night doesn't list them yet.
+      if (rosterPersonId) movePerson(s, rosterPersonId, teamKey);
       else if (selfPersonId) {
         crew!.roster.push({ personId: selfPersonId, displayName });
         s.participantPersonIds = [...new Set([...s.participantPersonIds, selfPersonId])];
@@ -676,6 +722,9 @@ export class GameService {
         rosterPersonId,
       };
       const nextMembers = { ...members, [uid]: member };
+      if (!rosterPersonId) crew!.operatorUids.push(uid); // no person record to follow: the phone goes where it was sent
+      placePhones(s, nextMembers);
+      relabelCrews(s);
       let r = round;
       if (r && r.state === 'READY') {
         r = refreshReadyRound(r, s, now);
@@ -688,7 +737,7 @@ export class GameService {
       tx.set(this.p.member(s.id, uid), nextMembers[uid]!);
       return {
         view: renderView({ uid, session: s, round: r, members: nextMembers, activeClaim: null, now }),
-        notify: { toUids: operatorUidsOf(s).filter((u) => u !== uid), sid: s.id, teamName: crew!.name },
+        notify: { toUids: Object.values(nextMembers).filter((m) => m.active && m.uid !== uid).map((m) => m.uid), sid: s.id, teamName: s.teams[teamKey]!.name },
       };
     });
     if (result.notify?.toUids.length) {
@@ -705,7 +754,8 @@ export class GameService {
 
   async setConsent(uid: string, sid: string, input: z.infer<typeof ConsentBody>) {
     return this.nightTx(sid, null, async ({ session, round, members, now }) => {
-      const team = this.requireOperator(session, members, uid);
+      const place = this.requireMember(session, members, uid);
+      const team = place === 'BENCH' ? null : place;
       const m = structuredClone(members[uid]!);
       const events: DomainEvent[] = [];
       let r: RoundDoc | undefined;
@@ -726,7 +776,7 @@ export class GameService {
           if (t.round !== round) r = t.round;
           events.push(...t.events);
           notifications = t.notifications;
-        } else if (round?.state === 'READY' && round.ready[team]?.uid === uid) {
+        } else if (team && round?.state === 'READY' && round.ready[team]?.uid === uid) {
           r = engineSetReady(round, team, uid, false, now).round;
         }
       }
@@ -748,12 +798,12 @@ export class GameService {
   }
 
   /**
-   * Between-rounds editor (any operator): title, default rules, crews (add,
-   * rename, remove, rosters) and which crew each phone is on. A READY round is
-   * refreshed from the new setup.
+   * Between-rounds editor (any phone in the night): title, default rules, crews (add, remove) and
+   * where everyone is. People are placed by the crews' rosters and the bench; every phone follows
+   * its owner (ADR 0019). A READY round is refreshed from the new setup.
    */
   async editSetup(uid: string, sid: string, patch: z.infer<typeof SetupPatchBody>) {
-    // Resolve new roster names to person records before the transaction (it may create people).
+    // Resolve new names to person records before the transaction (it may create people).
     const pre = (await this.p.session(sid).get()).data() as SessionDoc | undefined;
     if (!pre || !pre.memberUids.includes(uid)) fail('NOT_FOUND', 'Session not found');
     const resolved: Partial<Record<TeamKey, PersonRef[]>> = {};
@@ -761,65 +811,81 @@ export class GameService {
       const roster = patch.teams?.[k]?.roster;
       if (roster) resolved[k] = await this.resolveRoster(uid, pre!, roster);
     }
+    const bench = patch.bench ? await this.resolveRoster(uid, pre!, patch.bench) : undefined;
     return this.nightTx(sid, null, async ({ session, round, members, now }) => {
-      this.requireOperator(session, members, uid);
+      this.requireMember(session, members, uid);
       this.requireOpenNight(session);
       if (round && round.state !== 'READY' && !isFinishedState(round.state)) fail('GAME_CLOSED', 'Setup cannot change during a round');
       const s = structuredClone(session);
-      const events: DomainEvent[] = [];
       const nextMembers = { ...members };
+      const before = phonePlaces(s, nextMembers);
       if (patch.title) s.title = patch.title;
       if (patch.scheduledDate) s.scheduledDate = patch.scheduledDate;
       if (patch.rules) s.rules = mergeRules(s.rules, patch.rules);
 
+      // Crews and their people. Names and colours in the request are ignored (ADR 0019).
+      const displaced: PersonRef[] = [];
       for (const k of TEAM_KEYS) {
         const tp = patch.teams?.[k];
         if (tp === undefined) continue;
         if (tp === null) {
           if (!s.teams[k]) continue;
-          const removed = s.teams[k]!;
+          displaced.push(...s.teams[k]!.roster);
           delete s.teams[k];
           delete s.keepPhotos[k];
           if (teamKeysOf(s).length < MIN_TEAMS) fail('VALIDATION_FAILED', 'A night needs at least two crews');
-          for (const u of removed.operatorUids) {
-            const to = emptiestCrew(s);
-            // The phone's owner goes with it; the crew's other names leave the crews with it.
-            const owner = nextMembers[u] && ownerPersonId({ ...s, teams: { ...s.teams, [k]: removed } }, nextMembers[u]!);
-            const entry = owner ? removed.roster.find((p) => p.personId === owner) : undefined;
-            if (entry && !crewOfPerson(s, entry.personId)) s.teams[to]!.roster.push(entry);
-            this.movePhone(s, nextMembers, u, to, uid, now, events, k);
-          }
           continue;
         }
-        if (!s.teams[k]) {
-          if (!tp.name) fail('VALIDATION_FAILED', 'A new crew needs a name');
-          s.teams[k] = { teamId: this.p.sessions().doc().id, key: k, name: tp.name!, color: tp.color ?? TEAM_COLORS[k], operatorUids: [], roster: [] } satisfies Team;
-        }
-        const t = s.teams[k]!;
-        if (tp.name) t.name = tp.name;
-        if (tp.color) t.color = tp.color;
-        if (resolved[k]) t.roster = resolved[k]!;
+        s.teams[k] ??= { teamId: this.p.sessions().doc().id, key: k, name: '', color: TEAM_COLORS[k], operatorUids: [], roster: [] };
+        if (resolved[k]) s.teams[k]!.roster = resolved[k]!;
       }
+      const onCrews = new Set(teamKeysOf(s).flatMap((k) => s.teams[k]!.roster.map((p) => p.personId)));
+      if (bench) {
+        if (bench.some((p) => onCrews.has(p.personId))) fail('VALIDATION_FAILED', 'Someone is listed on a crew and sitting out');
+        s.bench = bench;
+      } else {
+        // A client that doesn't know about sitting out (older apps) puts people on crews: that wins.
+        s.bench = benchOf(s).filter((p) => !onCrews.has(p.personId));
+      }
+      // People of a removed crew who weren't placed elsewhere sit out rather than leave the night.
+      for (const p of displaced) if (!placeOfPerson(s, p.personId)) s.bench = [...benchOf(s), p];
 
+      // Phone moves (older apps, and taking a phone out): a phone removed with teamKey null leaves
+      // the night and its owner keeps playing without it; a phone moved to a crew takes its owner along.
       for (const mv of patch.moves ?? []) {
-        if (!crewOfUid(s, mv.uid)) fail('VALIDATION_FAILED', 'That phone is not on a crew');
+        const m = nextMembers[mv.uid];
+        if (!placeOfPhone(s, m)) fail('VALIDATION_FAILED', 'That phone is not in this night');
         if (mv.teamKey === null) {
           if (mv.uid === s.hostUid) fail('FORBIDDEN', "The organizer's phone can't be removed");
-          this.removePhone(s, nextMembers, mv.uid, uid, now, events);
-        } else {
-          if (!s.teams[mv.teamKey]) fail('VALIDATION_FAILED', 'That crew is not part of this night');
-          this.movePhone(s, nextMembers, mv.uid, mv.teamKey, uid, now, events);
+          nextMembers[mv.uid] = { ...m!, active: false };
+          continue;
         }
+        if (!s.teams[mv.teamKey]) fail('VALIDATION_FAILED', 'That crew is not part of this night');
+        const owner = ownerPersonId(s, m!);
+        if (owner) movePerson(s, owner, mv.teamKey);
+        for (const k of teamKeysOf(s)) s.teams[k]!.operatorUids = s.teams[k]!.operatorUids.filter((u) => u !== mv.uid);
+        s.teams[mv.teamKey]!.operatorUids.push(mv.uid);
+      }
+
+      // Every phone goes where its owner is; a phone whose owner left the night leaves with them.
+      for (const c of placePhones(s, nextMembers)) {
+        if (c.to !== null || !nextMembers[c.uid]?.active) continue;
+        if (c.uid === s.hostUid) fail('FORBIDDEN', "The organizer can't be removed from the night. They can sit out instead.");
+        nextMembers[c.uid] = { ...nextMembers[c.uid]!, active: false };
       }
       for (const k of teamKeysOf(s)) {
-        if (s.teams[k]!.operatorUids.length > MAX_OPERATORS_PER_TEAM) fail('VALIDATION_FAILED', `${s.teams[k]!.name} can have at most ${MAX_OPERATORS_PER_TEAM} phones`);
+        if (s.teams[k]!.operatorUids.length > MAX_OPERATORS_PER_TEAM) fail('VALIDATION_FAILED', `A crew can carry at most ${MAX_OPERATORS_PER_TEAM} phones (${s.teams[k]!.roster.length ? 'move someone with a phone to another crew' : 'add a crew'})`);
       }
       assertDisjointRosters(s);
-      s.participantPersonIds = [...new Set([...s.participantPersonIds, ...teamKeysOf(s).flatMap((k) => s.teams[k]!.roster.map((p) => p.personId))])];
+      relabelCrews(s);
+      s.participantPersonIds = [...new Set([...s.participantPersonIds, ...peopleOf(s).map((p) => p.personId)])];
       s.updatedAt = now;
       s.version++;
       const r = round?.state === 'READY' ? refreshReadyRound(round, s, now) : undefined;
-      events.unshift({ type: 'SETUP_EDITED', at: now, actorUid: uid, roundId: round?.id ?? null, details: { fields: Object.keys(patch).join(',') } });
+      const events: DomainEvent[] = [
+        { type: 'SETUP_EDITED', at: now, actorUid: uid, roundId: round?.id ?? null, details: { fields: Object.keys(patch).join(',') } },
+        ...placementEvents(before, phonePlaces(s, nextMembers), uid, now),
+      ];
       return { result: { ok: true }, session: s, members: nextMembers, ...(r ? { round: r } : {}), events };
     });
   }
@@ -833,32 +899,6 @@ export class GameService {
       else out.push(...(await resolvePeopleForRoster(this.d, uid, [e])));
     }
     return out;
-  }
-
-  /**
-   * Move a phone to another crew. Its owner's roster name goes with it (ADR 0018): crews are
-   * credited by roster, so a name left behind would be credited with the wrong crew's rounds.
-   * `removedFrom`: the crew the phone was on when that crew was deleted in the same edit.
-   */
-  private movePhone(s: SessionDoc, members: Record<string, MemberDoc>, phone: string, to: TeamKey, actor: string, now: number, events: DomainEvent[], removedFrom: TeamKey | null = null) {
-    const from = crewOfUid(s, phone) ?? removedFrom;
-    if (from === to) return;
-    if (from && s.teams[from]) s.teams[from]!.operatorUids = s.teams[from]!.operatorUids.filter((u) => u !== phone);
-    s.teams[to]!.operatorUids.push(phone);
-    const m = members[phone];
-    if (m) {
-      const owner = ownerPersonId(s, m);
-      if (owner) movePersonToCrew(s, owner, to);
-      members[phone] = { ...m, teamKey: to, rosterPersonId: owner ?? m.rosterPersonId ?? null };
-    }
-    events.push({ type: 'OPERATOR_MOVED', at: now, actorUid: actor, roundId: null, details: { uid: phone, from, to } });
-  }
-
-  private removePhone(s: SessionDoc, members: Record<string, MemberDoc>, phone: string, actor: string, now: number, events: DomainEvent[]) {
-    const from = crewOfUid(s, phone);
-    if (from) s.teams[from]!.operatorUids = s.teams[from]!.operatorUids.filter((u) => u !== phone);
-    if (members[phone]) members[phone] = { ...members[phone]!, active: false };
-    events.push({ type: 'OPERATOR_REMOVED', at: now, actorUid: actor, roundId: null, details: { uid: phone, from } });
   }
 
   /**
@@ -1297,7 +1337,7 @@ export class GameService {
   // -------------------------------------------------------------------------
 
   /**
-   * Set up the next round (any operator). Any crew may hide next; the default
+   * Set up the next round (any phone in the night). Any crew may hide next; the default
    * is the crew that has hidden least. Calling it while a READY round exists
    * re-targets that round instead of creating another.
    */
@@ -1308,7 +1348,7 @@ export class GameService {
       const session = await txGet<SessionDoc>(tx, this.p.session(sid));
       if (!session || session.revokedAt) fail('NOT_FOUND', 'Session not found');
       const members = await txMembers(tx, db, sid);
-      this.requireOperator(session!, members, uid);
+      this.requireMember(session!, members, uid);
       this.requireOpenNight(session!);
       const current = session!.currentRoundId ? await txGet<RoundDoc>(tx, this.p.round(sid, session!.currentRoundId)) : null;
       if (current && !isFinishedState(current.state)) {
@@ -1346,7 +1386,7 @@ export class GameService {
     return renderView({ uid, session: out.session, round: out.round, members: out.members, activeClaim: null, now: this.d.clock.now() });
   }
 
-  /** End the night (any operator). A READY round that never started is discarded. */
+  /** End the night (any phone in the night). A READY round that never started is discarded. */
   async completeSession(uid: string, sid: string) {
     const db = this.d.db;
     const invites = await this.p.invites().where('sessionId', '==', sid).where('revoked', '==', false).get();
@@ -1355,7 +1395,7 @@ export class GameService {
       const session = await txGet<SessionDoc>(tx, this.p.session(sid));
       if (!session || session.revokedAt) fail('NOT_FOUND', 'Session not found');
       const members = await txMembers(tx, db, sid);
-      this.requireOperator(session!, members, uid);
+      this.requireMember(session!, members, uid);
       if (session!.status === 'COMPLETED') return { s: session!, already: true };
       const current = session!.currentRoundId ? await txGet<RoundDoc>(tx, this.p.round(sid, session!.currentRoundId)) : null;
       if (current && isActiveState(current.state)) fail('STALE_PHASE', 'Finish or abort the current round first');
@@ -1376,11 +1416,12 @@ export class GameService {
       tx.set(this.p.session(sid), s);
       writeEvents(tx, db, sid, [{ type: 'SESSION_COMPLETED', at: now, actorUid: uid, roundId: null, details: { rounds: s.roundBriefs.length } }]);
       writeViews(tx, db, s, shown, members, null, now);
-      return { s, already: false };
+      // Every phone in the night, including those sitting out.
+      return { s, already: false, phones: Object.values(members).filter((m) => m.active).map((m) => m.uid) };
     });
     if (!out.already) {
       this.d.notifier
-        .send([{ toUids: operatorUidsOf(out.s).filter((u) => u !== uid), kind: 'SESSION_COMPLETED', title: 'Night over', body: `${out.s.title}: scorecard is ready.`, sessionId: sid, roundId: null }])
+        .send([{ toUids: (out.phones ?? []).filter((u) => u !== uid), kind: 'SESSION_COMPLETED', title: 'Night over', body: `${out.s.title}: scorecard is ready.`, sessionId: sid, roundId: null }])
         .catch(() => undefined);
     }
     return { ok: true };
