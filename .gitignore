@@ -47,3 +47,4 @@ hosting/contact-email.local
 
 # Release details kept out of the public repo (team, tester, App Store Connect IDs)
 docs/*.local.md
+/brag-output
