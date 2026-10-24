@@ -1,6 +1,6 @@
 # ADR 0011 — Native iOS 26 design: Liquid Glass functional layer, tab navigation, color = crew
 
-**Status:** accepted · **Spec:** §10 (SwiftUI, outdoors-readable, dark/light, large clocks, high-contrast overlays, obvious phase labels, strong warnings, large touch targets), §10 accessibility (Dynamic Type, VoiceOver, colorblind-safe pins, reduced motion), §6.1 (stable crew colors on the recap map)
+**Status:** accepted, recap and history layout updated by [0020](0020-stats-story-first.md) · **Spec:** §10 (SwiftUI, outdoors-readable, dark/light, large clocks, high-contrast overlays, obvious phase labels, strong warnings, large touch targets), §10 accessibility (Dynamic Type, VoiceOver, colorblind-safe pins, reduced motion), §6.1 (stable crew colors on the recap map)
 
 **Context.** v0.1 was functional but drifted from Apple's conventions:
 - Five top-level destinations were buried in a list on Home.

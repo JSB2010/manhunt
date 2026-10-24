@@ -1,6 +1,6 @@
 # ADR 0019 — People make the crew: phones belong to people, crews are named by their people
 
-**Status:** accepted · **Updates:** ADR 0013 (crews, who may edit), ADR 0014 (between-round editor, night comparison), ADR 0017 (Live Activity crew label), ADR 0018 (moves) · **Spec:** §2 (people and crews), §6.2 (night scorecard)
+**Status:** accepted, night scorecard extended by [0020](0020-stats-story-first.md) · **Updates:** ADR 0013 (crews, who may edit), ADR 0014 (between-round editor, night comparison), ADR 0017 (Live Activity crew label), ADR 0018 (moves) · **Spec:** §2 (people and crews), §6.2 (night scorecard)
 
 **Context.** A real night (five rounds, seven phones, crews reshuffled four times, people arriving and leaving) showed how the crew model breaks once a night is fluid:
 * Every crew was two lists: names (`Team.roster`) and phones (`Team.operatorUids`). The editor showed them in separate sections. A phone could be moved with a picker, and since ADR 0018 its owner's name went with it. A name could only be deleted and added again, and the saved-people picker refused anyone still listed on another crew. Moving a name never moved its phone.

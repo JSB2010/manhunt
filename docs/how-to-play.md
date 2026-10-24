@@ -72,6 +72,7 @@ The hiding crew sets off. The big clock counts the head start down on every phon
 When the head start ends, the seekers are off, and the first ping lands on their map.
 
 - **Pins** are diamonds numbered by ping, in the hiding crew's colour. The newest is the largest. **Directions** opens Apple Maps to a pin.
+- **Your trail** is this round's only, from the circle where your phone started the round. Earlier rounds are on the night's map, and a gap in tracking stays a gap.
 - The next ping goes out every interval. The HUD shows **Next ping in …**.
 - **Waiting pings.** If none of the hiders' phones has a good fix on the server at ping time (a dead zone, a tunnel), the ping *waits*. The hiders get "Seekers are waiting on your ping". As soon as a fix gets through, the seekers get the hiders' **current** position, marked late. An old position is never revealed after the fact, and the schedule doesn't shift.
 - **With two seeking crews**, choose before the round:
@@ -106,9 +107,16 @@ The round shows as a **Live Activity** on the Lock Screen and in the Dynamic Isl
 
 ## 7. After the round
 
-- **Round recap:** the chase time (or "survived" if the time limit ran out), each crew's route and distances, and the list of pings with how fresh each fix was.
+- **Round recap**, top to bottom:
+  - **What happened:** "Caught after 12:34" (or "Never caught" if the time limit ran out), who hid and who sought, and a badge if the round set one of the night's highlights, such as **Longest hide so far**. Otherwise it says where the round ranks tonight ("2nd-longest of 4 rounds so far").
+  - **The Catch:** the catch photo. Tap it to see it full screen.
+  - **The Chase:** the map. Circles mark where each crew started, the camera where the catch photo was taken, and diamonds the numbered pings. Solid lines are on foot, dashed lines by car. Tap **Replay** to open it full screen, then drag the slider or tap ▶ to watch the round play out.
+  - **By the Numbers:** the chase time, the hiders' distance on foot, each seeking crew's distance by car, the pings, and how long the round took start to finish.
+  - **Tonight:** every round so far as a bar as long as its chase time, and **Night So Far**.
+  - **Round Details:** exact times, each ping and how fresh its fix was, GPS coverage per crew, every catch claim and the timeline.
   - Routes appear only after the round, only to the phones that played it, and only if every phone agreed.
-  - Distances are per crew: the hiders on foot for the whole round and for the chase, and each seeking crew for the chase.
+  - Distances are per crew, from the crew's phone with the best GPS: the hiders on foot for the whole round and for the chase, and each seeking crew for the chase.
+- **Share** (the share button on a recap or a night) makes a picture to send or save: the round with its map, the catch photo with the time on it, or the night's highlights. It's made on your phone from what you can already see.
 - **Next round:** any phone taps **Next: Round N**. The app suggests the crew that has hidden least, and **Someone Else Hides…** picks another.
 - **Between rounds:** any phone in the night, including one sitting out, can open **Crews & Rules…** to add or remove a crew, change the rules, and move people. Drag people between crews and **Sitting Out**, or tap **•••** next to someone:
   - **Move to** another crew. Their phone goes with them, so the rounds they play count for their new crew.
@@ -122,13 +130,16 @@ The round shows as a **Live Activity** on the Lock Screen and in the Dynamic Isl
 
 ## Scores
 
-There's no winner of a single round. The **Night Summary & Scorecard** compares how long each crew survived while hiding:
+There's no winner of a single round. A night's page (from **History**, **Night So Far**, or when the night ends) shows:
 
-- Crews change during a night, so crews are compared within a **matchup**: the rounds played by the same people on each crew, under the same rules. A night with one set of crews is one matchup.
-- A matchup names the crew that **lasted longest while hiding** only if the comparison is fair: every crew hid equally often, and no round was aborted or ran out of time. Otherwise it shows a **Provisional Comparison** and says why.
-- **People** lists everyone with their crews' results: how often they hid and sought, how long their crew lasted while they hid, and the catches it made while they sought.
-- **Rounds** lists who hid in each round, and what changed before it: who joined, left or moved, and which rules changed.
-- **Export CSV / Export JSON** saves the results. Exports never include GPS.
+- **The result:** the crew that **lasted longest while hiding**, but only if the comparison is fair: every crew hid equally often under the same rules, with the same people, and no round was aborted or ran out of time. Otherwise it says **No overall result** and why.
+- **Highlights:** the night's single-round records: the longest hide, the fastest catch, and the most and least ground covered on foot and by car. Each names the crew and the round; tap one to open that round. They're records of one round, not who won the night. A hide that ran out the time limit shows as "≥", and distances from patchy GPS are marked "est.".
+- **Rounds:** who hid in each round, a bar as long as its chase time, and what changed before it: who joined, left or moved, and which rules changed.
+- **Night Map:** every round on one map. A numbered circle marks where each round's hiders started, and a marker where it ended: the camera for a catch, an hourglass for the time limit. Rounds are never joined by a line, so a drive to a new spot between rounds doesn't show up as a route. Tap a number to focus that round; **Show Seekers** adds the driving.
+- **Crews:** crews change during a night, so they're compared within a **line-up** (a matchup): the rounds played by the same people on each crew, under the same rules. A night with one set of crews is one line-up.
+- **People:** everyone, sortable by rounds, hiding time, catches or distance on foot. Tap a name for their rounds, and their longest and shortest. All of it is their crew's result in the rounds they played.
+- **Export Data:** the results as CSV or JSON. Exports never include GPS.
+- **•••** (from History): **Delete My Data…**, and for the organizer **Delete Night for Everyone…**.
 
 People's stats on the **People** tab are always their *crew's* results in the rounds they played, never an individual time.
 
@@ -142,7 +153,7 @@ People's stats on the **People** tab are always their *crew's* results in the ro
 
 - **Raw GPS** is deleted automatically after 30 days. Simplified routes and stats stay until the night is deleted.
 - **Catch photos** are deleted after 7 days if not confirmed, and after 30 days if confirmed, unless every crew chooses to keep them.
-- **Delete My Data** (History › the night) removes this phone's tracks, the pings that came from it and the photos it took. Your crew's route is rebuilt from its other phones, and crew scores stay.
+- **Delete My Data** (History › the night › **•••**) removes this phone's tracks, the pings that came from it and the photos it took. Your crew's route is rebuilt from its other phones, and crew scores stay.
 - **Delete Night** (the organizer) removes the whole night for everyone.
 - **Delete My Account** (Account & Settings) removes your profile, friends and your data from every night.
 

@@ -11,7 +11,7 @@
  *     pending    a catch claim waiting for the hiding operator
  *     paused     safety pause requested by Taylor
  *     recap      round 1 caught and confirmed (both routes recorded)
- *     night      a finished two-round night
+ *     night      a finished three-round night, each round starting somewhere new
  *   seek (default): Morgan's crew seeks round 1. hide: Morgan's crew hides.
  *   two: Casey joins Morgan's crew as a second phone. three: Casey plays a third crew
  *   (two seeking crews, RACE). Default: two crews, one phone each.
@@ -89,8 +89,11 @@ if (casey) {
 if (state === 'lobby') { console.log(`lobby ready: session ${sid}`); process.exit(0); }
 await call(morgan, 'POST', `/v1/sessions/${sid}/consent`, consent);
 
-/** Plays one round from READY. Uploads both phones' GPS when `both` (the app isn't tracking). */
-async function playRound(both: boolean, until: (rid: string, chaseAt: number) => Promise<boolean>) {
+/**
+ * Plays one round from READY. Uploads both phones' GPS when `both` (the app isn't tracking).
+ * `place` moves the round's start: crews often drive somewhere new between rounds.
+ */
+async function playRound(both: boolean, until: (rid: string, chaseAt: number) => Promise<boolean>, place = 0) {
   await call(morgan, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health });
   await call(taylor, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health });
   if (crewMode === 'three') await call(casey!, 'POST', `/v1/sessions/${sid}/ready`, { ready: true, preflight: health });
@@ -101,8 +104,9 @@ async function playRound(both: boolean, until: (rid: string, chaseAt: number) =>
   const chaseAt = startAt + headStartSeconds * 1000;
   const taylorHides = v.round.hidingTeam === 'B';
   // Hiders walk a gentle curve through a park; seekers drive a grid after the head start.
-  const walk = (s: number) => [39.7505 + s * 0.0000105, -104.9822 + Math.sin(s / 90) * 0.0012 + s * 0.000004];
-  const drive = (s: number) => [39.7420 + Math.max(0, s - headStartSeconds) * 0.00006, -104.9905 + Math.max(0, s - headStartSeconds - 60) * 0.00005];
+  const [dLat, dLon] = [place * 0.009, place * -0.007];
+  const walk = (s: number) => [39.7505 + dLat + s * 0.0000105 * (1 + place * 0.6), -104.9822 + dLon + Math.sin(s / 90) * 0.0012 + s * 0.000004];
+  const drive = (s: number) => [39.7420 + dLat + Math.max(0, s - headStartSeconds) * 0.00006, -104.9905 + dLon + Math.max(0, s - headStartSeconds - 60) * 0.00005 * (1 + place)];
   for (;;) {
     const s = (Date.now() - startAt) / 1000;
     const mk = ([lat, lon]: number[]) => ({ batchId: randomUUID(), sentAt: new Date().toISOString(), samples: [{ pointId: randomUUID(), recordedAt: new Date(Date.now() - 700).toISOString(), latitude: lat, longitude: lon, horizontalAccuracyMeters: 6 }], health });
@@ -130,11 +134,12 @@ const afterPings = (n: number) => async (_rid: string, chaseAt: number) => Date.
 if (state === 'headstart') {
   await playRound(false, async () => true);
 } else if (state === 'night') {
-  for (let i = 0; i < 2; i++) {
-    const { rid, taylorHides } = await playRound(true, afterPings(i === 0 ? 2 : 1));
+  const pings = [2, 1, 3];
+  for (let i = 0; i < pings.length; i++) {
+    const { rid, taylorHides } = await playRound(true, afterPings(pings[i]!), i);
     await claimAndDecide(rid, taylorHides, true);
     await sleep(1500);
-    if (i === 0) await call(morgan, 'POST', `/v1/sessions/${sid}/next-round`, {});
+    if (i < pings.length - 1) await call(morgan, 'POST', `/v1/sessions/${sid}/next-round`, {});
   }
   await call(morgan, 'POST', `/v1/sessions/${sid}/complete`, {});
 } else if (state === 'chase') {

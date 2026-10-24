@@ -254,3 +254,59 @@ describe('crews that change during the night (ADR 0019)', () => {
     expect(late.changes[0]).toMatchObject({ joined: ['Ezra'], left: ['Sam'], moved: [] });
   });
 });
+
+describe('night highlights: single-round facts (ADR 0020)', () => {
+  const hider = (meters: number, routeQuality: 'GOOD' | 'ESTIMATED' | 'INSUFFICIENT' = 'GOOD') => ({ ...crew('HIDING', meters), routeQuality });
+  const seeker = (meters: number, routeQuality: 'GOOD' | 'ESTIMATED' | 'INSUFFICIENT' = 'GOOD') => ({ ...crew('SEEKING', meters), routeQuality });
+  const night = [
+    result({ roundIndex: 1, observedChaseSeconds: 900, crews: { A: hider(1200), B: seeker(6000) } }),
+    result(swap({ roundIndex: 2, observedChaseSeconds: 300, crews: { B: hider(150, 'ESTIMATED'), A: seeker(2500) } })),
+    result({ roundIndex: 3, observedChaseSeconds: 2700, outcome: 'TIMED_OUT', isRightCensored: true, crews: { A: hider(3400), B: seeker(9000) } }),
+    result(swap({ roundIndex: 4, observedChaseSeconds: 4000, outcome: 'ABORTED', crews: { B: hider(9999), A: seeker(99999) } })),
+    result(swap({ roundIndex: 5, observedChaseSeconds: 600, crews: { B: hider(40, 'INSUFFICIENT'), A: seeker(100, 'INSUFFICIENT') } })),
+  ];
+  const by = (sc: ReturnType<typeof buildScorecard>) => Object.fromEntries(sc.highlights.map((h) => [h.kind, [h.roundIndex, h.teams, h.value, h.censored, h.estimated]]));
+
+  it('names the round of each record and the crews that played it; aborted rounds and unusable GPS never count', () => {
+    const sc = buildScorecard(s, night);
+    expect(by(sc)).toEqual({
+      LONGEST_HIDE: [3, ['A'], 2700, true, false], // ran to the cap: at least 45:00
+      FASTEST_CATCH: [2, ['A'], 300, false, false], // credited to the seekers
+      MOST_ON_FOOT: [3, ['A'], 3400, false, false],
+      LEAST_ON_FOOT: [2, ['B'], 150, false, true], // partial GPS, flagged
+      MOST_DRIVING: [3, ['B'], 9000, false, false],
+      LEAST_DRIVING: [2, ['A'], 2500, false, false],
+    });
+    expect(sc.highlights.find((h) => h.kind === 'FASTEST_CATCH')!.names).toEqual(['Crew A']);
+  });
+
+  it('needs two rounds to compare; a tie goes to the earlier round and has no "least"', () => {
+    expect(buildScorecard(s, [result({ roundIndex: 1, observedChaseSeconds: 900 })]).highlights).toEqual([]);
+    const tie = buildScorecard(s, [result({ roundIndex: 1, observedChaseSeconds: 600 }), result(swap({ roundIndex: 2, observedChaseSeconds: 600 }))]);
+    expect(by(tie)).toEqual({ LONGEST_HIDE: [1, ['A'], 600, false, false], MOST_ON_FOOT: [1, ['A'], 1000, false, false], MOST_DRIVING: [1, ['B'], 5000, false, false] });
+  });
+
+  it('a Race catch is credited to the crew that made it; a lone catch is no "fastest"', () => {
+    const race = buildScorecard(s3, [
+      result({ roundIndex: 1, hidingTeam: 'A', seekingTeams: ['B', 'C'], seekMode: 'RACE', catchCreditTeams: ['C'], observedChaseSeconds: 400 }),
+      result({ roundIndex: 2, hidingTeam: 'B', seekingTeams: ['A', 'C'], seekMode: 'RACE', catchCreditTeams: ['A'], observedChaseSeconds: 800 }),
+    ]);
+    expect(race.highlights.find((h) => h.kind === 'FASTEST_CATCH')).toMatchObject({ roundIndex: 1, teams: ['C'], names: ['Crew C'] });
+    const lone = buildScorecard(s, [result({ roundIndex: 1, observedChaseSeconds: 400 }), result(swap({ roundIndex: 2, observedChaseSeconds: 2700, outcome: 'TIMED_OUT', isRightCensored: true }))]);
+    expect(lone.highlights.map((h) => h.kind)).not.toContain('FASTEST_CATCH');
+  });
+
+  it('gives each person their crews\' rounds and distances, crew-level, without coordinates', () => {
+    const sc = buildScorecard(s, night);
+    const morgan = sc.people.find((p) => p.displayName === 'Morgan')!; // on crew A all night
+    expect(morgan.rounds.map((r) => [r.roundIndex, r.role, r.seconds, r.censored, r.credited, r.meters, r.estimated])).toEqual([
+      [1, 'HIDING', 900, false, false, 1200, false],
+      [2, 'SEEKING', 300, false, true, 2500, false],
+      [3, 'HIDING', 2700, true, false, 3400, false],
+      [5, 'SEEKING', 600, false, true, null, false], // too little GPS: no figure
+    ]);
+    expect([morgan.footMeters, morgan.driveMeters]).toEqual([4600, 2500]);
+    // Highlights and person rounds carry no positions of any kind.
+    expect(JSON.stringify([sc.highlights, sc.people])).not.toMatch(/"(lat|lon|latitude|longitude|coordinates?)":/);
+  });
+});

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { rosterFingerprint } from './crews.js';
-import { TEAM_KEYS, type PersonRef, type RoundResult, type Rules, type SessionDoc, type TeamKey } from './types.js';
+import { TEAM_KEYS, type CrewRouteStats, type PersonRef, type Role, type RoundOutcome, type RoundResult, type Rules, type SessionDoc, type TeamKey } from './types.js';
 
 /**
  * Night scorecard and cross-night analytics (spec §6).
@@ -16,6 +16,9 @@ import { TEAM_KEYS, type PersonRef, type RoundResult, type Rules, type SessionDo
  *   rounds with the same people on each crew and the same rules; `changes` says
  *   what changed before each round.
  * - Person-level stats are always crew-attributed.
+ * - `highlights` are single-round facts (the longest hide, the fastest catch, the most and
+ *   least ground covered), each credited to the crews of that round (ADR 0020). They never
+ *   rank crews over a night and never name a round winner.
  */
 
 export interface TeamScore {
@@ -83,6 +86,23 @@ export interface Matchup {
   comparison: NightComparison;
 }
 
+/** One round a person played, as their crew played it (crew-level, never the person's own). */
+export interface PersonRound {
+  roundIndex: number;
+  team: TeamKey;
+  role: Role;
+  outcome: RoundOutcome;
+  /** the round's chase time: how long their crew lasted hiding, or took to make the catch */
+  seconds: number;
+  censored: boolean;
+  /** seeking: the catch was credited to their crew */
+  credited: boolean;
+  /** their crew's distance (on foot while hiding, by car while seeking) from its best-covered phone; null without usable GPS */
+  meters: number | null;
+  /** the distance comes from partial GPS coverage (likely an underestimate) */
+  estimated: boolean;
+}
+
 /** Crew-attributed tallies for one person over the night (never individual performance). */
 export interface PersonNightStats {
   personId: string;
@@ -94,6 +114,30 @@ export interface PersonNightStats {
   hideIncludesCensored: boolean;
   /** catches credited to their crew in rounds they sought */
   catches: number;
+  /** their crews' distance on foot over the rounds they hid (rounds with usable GPS) */
+  footMeters: number;
+  /** their crews' distance by car over the rounds they sought (rounds with usable GPS) */
+  driveMeters: number;
+  /** every round they played, in order */
+  rounds: PersonRound[];
+}
+
+export type HighlightKind = 'LONGEST_HIDE' | 'FASTEST_CATCH' | 'MOST_ON_FOOT' | 'LEAST_ON_FOOT' | 'MOST_DRIVING' | 'LEAST_DRIVING';
+
+/** A single-round fact of the night, credited to the crews that played it that way (ADR 0020). */
+export interface NightHighlight {
+  kind: HighlightKind;
+  roundIndex: number;
+  /** hide time and on foot: the hiding crew; a catch: the credited crews; driving: one seeking crew */
+  teams: TeamKey[];
+  /** those crews' names that round */
+  names: string[];
+  /** seconds (hide, catch) or metres (on foot, driving) */
+  value: number;
+  /** a hide that ran to the time cap: it lasted at least `value` */
+  censored: boolean;
+  /** a distance from partial GPS coverage (likely an underestimate) */
+  estimated: boolean;
 }
 
 /** What changed since the previous played round. */
@@ -119,6 +163,8 @@ export interface Scorecard {
   people: PersonNightStats[];
   /** one entry per round after the first */
   changes: RoundChanges[];
+  /** single-round facts of the night; each needs at least two rounds to compare */
+  highlights: NightHighlight[];
 }
 
 const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
@@ -283,26 +329,95 @@ export function buildMatchups(results: RoundResult[]): Matchup[] {
   });
 }
 
+/**
+ * A crew's distance for one round, if its GPS is usable: on foot (head start + chase) while
+ * hiding, by car (chase) while seeking. Too little GPS gives no figure rather than a misleading one.
+ */
+function crewMeters(c: CrewRouteStats | undefined, role: Role): { meters: number; estimated: boolean } | null {
+  const meters = role === 'HIDING' ? c?.distanceTotalMeters : c?.distanceChaseMeters;
+  if (!c || meters === null || meters === undefined || c.routeQuality === 'INSUFFICIENT') return null;
+  return { meters: Math.round(meters), estimated: c.routeQuality === 'ESTIMATED' };
+}
+
 export function personNightStats(results: RoundResult[]): PersonNightStats[] {
   const out = new Map<string, PersonNightStats & { hideTimes: number[] }>();
   for (const r of results.filter((x) => x.outcome !== 'ABORTED')) {
     for (const k of [r.hidingTeam, ...r.seekingTeams]) {
+      const role: Role = k === r.hidingTeam ? 'HIDING' : 'SEEKING';
+      const distance = crewMeters(r.crews[k], role);
+      const credited = role === 'SEEKING' && r.outcome === 'CAUGHT' && r.catchCreditTeams.includes(k);
       for (const p of r.rosterSnapshot[k] ?? []) {
-        const st = out.get(p.personId) ?? { personId: p.personId, displayName: p.displayName, roundsHid: 0, roundsSought: 0, hideAverageSeconds: null, hideIncludesCensored: false, catches: 0, hideTimes: [] };
+        const st = out.get(p.personId) ?? {
+          personId: p.personId, displayName: p.displayName, roundsHid: 0, roundsSought: 0, hideAverageSeconds: null, hideIncludesCensored: false, catches: 0,
+          footMeters: 0, driveMeters: 0, rounds: [], hideTimes: [],
+        };
         st.displayName = p.displayName;
-        if (k === r.hidingTeam) {
+        if (role === 'HIDING') {
           st.roundsHid++;
           st.hideTimes.push(r.observedChaseSeconds);
           st.hideIncludesCensored ||= r.isRightCensored;
+          st.footMeters += distance?.meters ?? 0;
         } else {
           st.roundsSought++;
-          if (r.outcome === 'CAUGHT' && r.catchCreditTeams.includes(k)) st.catches++;
+          if (credited) st.catches++;
+          st.driveMeters += distance?.meters ?? 0;
         }
+        st.rounds.push({
+          roundIndex: r.roundIndex, team: k, role, outcome: r.outcome, seconds: r.observedChaseSeconds, censored: r.isRightCensored, credited,
+          meters: distance?.meters ?? null, estimated: distance?.estimated ?? false,
+        });
         out.set(p.personId, st);
       }
     }
   }
   return [...out.values()].map(({ hideTimes, ...st }) => ({ ...st, hideAverageSeconds: avg(hideTimes) }));
+}
+
+/**
+ * Single-round facts of the night (ADR 0020): the longest hide, the fastest catch, and the most
+ * and least ground covered on foot and by car. Aborted rounds never count; a hide that ran to the
+ * cap counts as at least its cap; distances without usable GPS are left out. Each needs at least
+ * two rounds to compare, and a "least" needs a value below the "most". Ties go to the earlier round.
+ */
+export function nightHighlights(results: RoundResult[]): NightHighlight[] {
+  const valid = [...results].filter((r) => r.outcome !== 'ABORTED').sort((a, b) => a.roundIndex - b.roundIndex);
+  const name = (r: RoundResult, k: TeamKey) => r.teamNames[k] ?? `Crew ${k}`;
+  type Entry = { r: RoundResult; teams: TeamKey[]; value: number; censored: boolean; estimated: boolean };
+  const pick = (xs: Entry[], better: (a: number, b: number) => boolean) => xs.reduce<Entry | null>((best, x) => (!best || better(x.value, best.value) ? x : best), null);
+  const out: NightHighlight[] = [];
+  const add = (kind: HighlightKind, e: Entry | null) => {
+    if (e) out.push({ kind, roundIndex: e.r.roundIndex, teams: e.teams, names: e.teams.map((k) => name(e.r, k)), value: e.value, censored: e.censored, estimated: e.estimated });
+  };
+  /** The most of a measure, and the least when it is lower. */
+  const range = (xs: Entry[], most: HighlightKind, least: HighlightKind | null) => {
+    if (xs.length < 2) return;
+    const hi = pick(xs, (a, b) => a > b);
+    add(most, hi);
+    const lo = pick(xs, (a, b) => a < b);
+    if (least && lo && hi && lo.value < hi.value) add(least, lo);
+  };
+
+  const hides = valid.map((r) => ({ r, teams: [r.hidingTeam], value: r.observedChaseSeconds, censored: r.isRightCensored, estimated: false }));
+  range(hides, 'LONGEST_HIDE', null);
+  const catches = valid.filter((r) => r.outcome === 'CAUGHT').map((r) => ({ r, teams: [...r.catchCreditTeams], value: r.observedChaseSeconds, censored: false, estimated: false }));
+  const fastest = catches.length >= 2 ? pick(catches, (a, b) => a < b) : null;
+  // A catch as slow as the longest hide is no record.
+  const longest = out.find((h) => h.kind === 'LONGEST_HIDE');
+  if (fastest && (!longest || fastest.value < longest.value)) add('FASTEST_CATCH', fastest);
+
+  const onFoot = valid.flatMap((r) => {
+    const d = crewMeters(r.crews[r.hidingTeam], 'HIDING');
+    return d ? [{ r, teams: [r.hidingTeam], value: d.meters, censored: false, estimated: d.estimated }] : [];
+  });
+  range(onFoot, 'MOST_ON_FOOT', 'LEAST_ON_FOOT');
+  const driving = valid.flatMap((r) =>
+    r.seekingTeams.flatMap((k) => {
+      const d = crewMeters(r.crews[k], 'SEEKING');
+      return d ? [{ r, teams: [k], value: d.meters, censored: false, estimated: d.estimated }] : [];
+    }),
+  );
+  range(driving, 'MOST_DRIVING', 'LEAST_DRIVING');
+  return out;
 }
 
 /** Before each round after the first: who joined, left or moved crews, and which rules changed. */
@@ -354,6 +469,7 @@ export function buildScorecard(session: Pick<SessionDoc, 'teams'>, results: Roun
     matchups: buildMatchups(sorted),
     people: personNightStats(sorted),
     changes: roundChanges(sorted, rulesByRound),
+    highlights: nightHighlights(sorted),
   };
 }
 

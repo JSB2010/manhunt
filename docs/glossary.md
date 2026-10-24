@@ -15,6 +15,9 @@ Product terms with their names in code. Where the spec and the code differ, the 
 | Round snapshot | `round.operatorsByTeam` | The crews' consenting phones, frozen at start. All in-round authority comes from it |
 | Spectator | `myRole: null` | A phone in the night but not in the round's snapshot (it joined mid-round, or its owner sits out). Sees no pins, claims or ping log |
 | Matchup | `Scorecard.matchups` | Rounds played by the same people on each crew under the same rules. Crews are compared only within one (ADR 0019) |
+| Highlight | `Scorecard.highlights` | A single-round record of the night (longest hide, fastest catch, most and least ground on foot and by car), credited to that round's crews. Never a round winner (ADR 0020) |
+| Line-up | `Scorecard.matchups` | What the app calls a matchup |
+| Night map | `NightMapView` | Every round of a night on one map, each with its own start and end markers, never joined by a line (ADR 0020) |
 | Hiding crew / seeking crews | `hidingTeam`, `seekingTeams`, `Role` `HIDING`/`SEEKING` | One crew hides, every other crew seeks |
 | Side | `Side` `HIDERS`/`SEEKERS` | Pause and resume authority is between sides, not crews |
 | Seek mode | `SeekMode` `TOGETHER`/`RACE` | With two seeking crews: share a catch, or credit only the claiming crew |

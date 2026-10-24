@@ -14,6 +14,12 @@ enum Theme {
         case .C: Color(.crewC)
         }
     }
+    /// A symbol or number drawn on a crew-colour fill. White, except on the dark-mode green,
+    /// where white is under 3:1 (design-system.md) and black is used instead.
+    static func onCrew(_ key: TeamKey) -> Color {
+        guard key == .C else { return .white }
+        return Color(UIColor { $0.userInterfaceStyle == .dark ? .black : .white })
+    }
     static let ok = Color.accentColor
     static let warning = Color(.warning)
     static let danger = Color(.danger)

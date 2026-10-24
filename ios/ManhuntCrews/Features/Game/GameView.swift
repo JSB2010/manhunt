@@ -101,9 +101,21 @@ struct GameView: View {
     private var map: some View {
         Map(position: $camera, scope: mapScope) {
             UserAnnotation()
-            if model.location.ownTrail.count > 1 {
-                MapPolyline(coordinates: model.location.ownTrail)
-                    .stroke(myColor, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+            // This round only: earlier rounds are on the night map, and a gap is never bridged.
+            let trail = model.location.ownTrail
+            if trail.roundId == round.id {
+                ForEach(Array(trail.segments.enumerated()), id: \.offset) { _, segment in
+                    if segment.count > 1 {
+                        MapPolyline(coordinates: segment)
+                            .stroke(myColor, style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
+                    }
+                }
+                if let start = trail.start {
+                    Annotation("Where you started this round", coordinate: start, anchor: .center) {
+                        RouteMarker(kind: .start(role ?? .SEEKING), crew: round.myTeam, small: true, label: "Where you started this round")
+                    }
+                    .annotationTitles(.hidden)
+                }
             }
             ForEach(round.pins) { pin in
                 let latest = pin.index == round.pins.last?.index

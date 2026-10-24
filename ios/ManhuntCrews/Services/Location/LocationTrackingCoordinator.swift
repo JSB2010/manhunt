@@ -24,7 +24,8 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
     private(set) var preciseLocation: Bool = true
     private(set) var lastFix: CLLocation?
     private(set) var lastDiagnostic: String?
-    private(set) var ownTrail: [CLLocationCoordinate2D] = []
+    /// This phone's trail for the round being tracked (never the previous round's).
+    private(set) var ownTrail = OwnTrail()
     private(set) var queuedSamples: Int = 0
     private(set) var networkReachable: Bool = true
     private(set) var lastUploadAt: Date?
@@ -169,10 +170,9 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
             return
         }
         let ctx = TelemetryQueue.Context(sessionId: sessionId, roundId: roundId, role: role, roundStartAt: roundStartAt)
-        if await queue.context != ctx {
-            if await queue.context?.roundId != roundId { ownTrail = [] }
-            await queue.setContext(ctx)
-        }
+        // Ready already set this round's queue context, so the trail checks its own round.
+        ownTrail = ownTrail.continuing(roundId)
+        if await queue.context != ctx { await queue.setContext(ctx) }
         if self.role != role || updatesTask == nil { startUpdates(role: role) }
         mode = .tracking
         persistContext(sessionId: sessionId, roundId: roundId, role: role, roundStartAt: roundStartAt)
@@ -180,8 +180,8 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
         // Restore this phone's own trail once per round (after a relaunch), not on every view update.
         if ownTrail.isEmpty, trailFetchedRoundId != roundId, let api {
             trailFetchedRoundId = roundId
-            if let track = try? await api.myTrack(sessionId, roundId) {
-                ownTrail = track.points.map { .init(latitude: $0.latitude, longitude: $0.longitude) }
+            if let track = try? await api.myTrack(sessionId, roundId), ownTrail.roundId == roundId {
+                ownTrail.merge(track.points.map { .init(coordinate: .init(latitude: $0.latitude, longitude: $0.longitude), at: $0.recordedAt) })
             }
         }
     }
@@ -215,7 +215,7 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
     func purgeLocalData() async {
         await stop(flush: false)
         await queue.clear()
-        ownTrail = []
+        ownTrail = OwnTrail()
         queuedSamples = 0
     }
 
@@ -297,10 +297,7 @@ final class LocationTrackingCoordinator: NSObject, CLLocationManagerDelegate {
             altitudeMeters: loc.verticalAccuracy >= 0 ? loc.altitude : nil)
         await queue.enqueue(sample)
         queuedSamples = await queue.count
-        if loc.horizontalAccuracy <= 65 {
-            ownTrail.append(loc.coordinate)
-            if ownTrail.count > 4000 { ownTrail.removeFirst(ownTrail.count - 4000) }
-        }
+        if loc.horizontalAccuracy <= 65 { ownTrail.append(loc.coordinate, at: loc.timestamp) }
         // Location callbacks keep arriving in the background, so deadline-driven uploads work in a pocket.
         if role == .HIDING, shouldUploadForPing() { Task { await uploadOnce() } }
     }

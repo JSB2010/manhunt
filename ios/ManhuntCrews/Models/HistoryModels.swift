@@ -214,6 +214,22 @@ struct Matchup: Codable, Identifiable, Sendable {
 
 /// One person's night, crew-attributed: never individual performance.
 struct PersonNightStats: Codable, Identifiable, Sendable {
+    /// One round they played, as their crew played it.
+    struct Round: Codable, Identifiable, Sendable {
+        var roundIndex: Int
+        var team: TeamKey
+        var role: Role
+        var outcome: String
+        /// how long their crew lasted hiding, or took to make the catch
+        var seconds: Int
+        var censored: Bool
+        /// seeking: the catch was credited to their crew
+        var credited: Bool
+        /// their crew's distance (on foot hiding, by car seeking); nil without usable GPS
+        var meters: Double?
+        var estimated: Bool
+        var id: Int { roundIndex }
+    }
     var personId: String
     var displayName: String
     var roundsHid: Int
@@ -221,7 +237,31 @@ struct PersonNightStats: Codable, Identifiable, Sendable {
     var hideAverageSeconds: Int?
     var hideIncludesCensored: Bool
     var catches: Int
+    /// absent from servers before ADR 0020
+    var footMeters: Double?
+    var driveMeters: Double?
+    var rounds: [Round]?
     var id: String { personId }
+    var roundsPlayed: Int { roundsHid + roundsSought }
+}
+
+/// A single-round fact of the night (ADR 0020): never a round winner or a crew ranking.
+struct NightHighlight: Codable, Identifiable, Sendable {
+    enum Kind: String, Codable, Sendable {
+        case LONGEST_HIDE, FASTEST_CATCH, MOST_ON_FOOT, LEAST_ON_FOOT, MOST_DRIVING, LEAST_DRIVING
+    }
+    var kind: Kind
+    var roundIndex: Int
+    var teams: [TeamKey]
+    var names: [String]
+    /// seconds (hide, catch) or metres
+    var value: Double
+    /// a hide that ran to the cap: at least `value`
+    var censored: Bool
+    /// distance from partial GPS
+    var estimated: Bool
+    var id: String { kind.rawValue }
+    var isDistance: Bool { ![.LONGEST_HIDE, .FASTEST_CATCH].contains(kind) }
 }
 
 /// What changed since the previous round.
@@ -258,8 +298,12 @@ struct Scorecard: Codable, Sendable {
     var matchups: [Matchup]?
     var people: [PersonNightStats]?
     var changes: [RoundChanges]?
+    /// absent from servers before ADR 0020
+    var highlights: [NightHighlight]?
 
     func changes(before roundIndex: Int) -> RoundChanges? { changes?.first { $0.roundIndex == roundIndex } }
+    /// The night's highlights set in one round.
+    func highlights(in roundIndex: Int) -> [NightHighlight] { (highlights ?? []).filter { $0.roundIndex == roundIndex } }
 }
 
 struct SessionAnalytics: Codable, Sendable {

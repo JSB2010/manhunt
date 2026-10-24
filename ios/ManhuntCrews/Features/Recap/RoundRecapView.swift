@@ -1,10 +1,13 @@
 import SwiftUI
 import MapKit
 
-/// Post-round recap (spec §6.1, screen 12): official time, per-crew walking vs.
-/// driving distances, every crew's route (only after completion), pings, photo,
-/// timeline, disputes and the next-round flow. No round winner — catch credit
-/// (Together/Race) is attribution only.
+/// Post-round recap (spec §6.1, screen 12), story first (ADR 0020):
+/// 1. what happened: the outcome, who hid and who sought, and any highlight of the night it set;
+/// 2. the catch photo and the map, which replays the round;
+/// 3. the numbers that matter, one per tile;
+/// 4. between rounds: tonight's rounds so far, and what's next.
+/// Pings, GPS quality, pauses, claims and the timeline are one tap away in Round Details.
+/// No round winner: catch credit (Together/Race) is attribution only.
 struct RoundRecapView: View {
     @Environment(AppModel.self) private var model
     let sessionId: String
@@ -16,64 +19,40 @@ struct RoundRecapView: View {
     @State private var routes: RouteRecap?
     @State private var routesError: String?
     @State private var photo: UIImage?
+    /// The night's scorecard, for highlights and tonight's other rounds (optional).
+    @State private var night: SessionAnalytics?
     @State private var busy = false
     @State private var error: String?
     @State private var showWhoHides = false
     @State private var showEdit = false
     @State private var confirmEndNight = false
     @State private var showMap = false
+    @State private var showPhoto = false
+    @State private var showShare = false
 
     private var units: String { model.me?.profile.preferences.units ?? "MILES" }
+    private var isLive: Bool { live != nil }
 
     var body: some View {
         List {
             if let s = summary, let r = s.result {
-                Section { header(s, r) }
+                Section { hero(s, r) }
+                disputes(s)
+                if let photo, r.outcome == "CAUGHT" { catchSection(s, r, photo) }
+                mapSection(s)
+                numbers(r)
                 Section {
-                    // Static preview inside the scrolling list (so swipes scroll the page);
-                    // the full-screen map is interactive.
-                    Button { showMap = true } label: {
-                        RecapMap(summary: s, routes: routes, interactive: false)
-                            .frame(height: 300)
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.mediaCorner, style: .continuous))
-                            .overlay(alignment: .bottomTrailing) {
-                                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                    .font(.body.weight(.semibold))
-                                    .frame(width: 44, height: 44)
-                                    .glassSurface(in: Circle())
-                                    .padding(10)
+                    NavigationLink { RoundDetailsView(summary: s, units: units) } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Round Details")
+                                Text("Pings, GPS, pauses, claims and the timeline").font(.footnote).foregroundStyle(.secondary)
                             }
+                        } icon: { Image(systemName: "list.bullet.rectangle") }
                     }
-                    .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .accessibilityLabel("Route map")
-                    .accessibilityHint("Opens an interactive map of every crew’s route")
-                    .fullScreenCover(isPresented: $showMap) {
-                        NavigationStack {
-                            RecapMap(summary: s, routes: routes, interactive: true)
-                                .ignoresSafeArea(edges: .bottom)
-                                .navigationTitle("Routes")
-                                .navigationBarTitleDisplayMode(.inline)
-                                .toolbar { ToolbarItem(placement: .cancellationAction) { CloseButton { showMap = false } } }
-                        }
-                    }
-                } footer: {
-                    if let routesError { Text(routesError) }
+                    .accessibilityIdentifier("recap.details")
                 }
-                stats(s, r)
-                if let photo {
-                    Section("Catch Photo") {
-                        Image(uiImage: photo)
-                            .resizable()
-                            .scaledToFit()
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .accessibilityLabel("Confirmed catch photo")
-                    }
-                }
-                pings(s)
-                claims(s)
-                timeline(s)
+                if isLive { tonight(r) }
             } else {
                 Section {
                     HStack { Spacer(); ProgressView("Computing recap…"); Spacer() }
@@ -82,10 +61,16 @@ struct RoundRecapView: View {
             }
             if let live { nextRoundSection(live) }
         }
-        .navigationTitle("Round \(summary?.index ?? live?.round?.index ?? 0) Recap")
+        .navigationTitle("Round \(summary?.index ?? live?.round?.index ?? 0)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if live != nil { ToolbarItem(placement: .cancellationAction) { CloseButton { model.closeSession() } } }
+            if isLive { ToolbarItem(placement: .cancellationAction) { CloseButton { model.closeSession() } } }
+            if summary?.result != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { showShare = true } label: { Label("Share Round", systemImage: "square.and.arrow.up") }
+                        .accessibilityIdentifier("recap.share")
+                }
+            }
         }
         .bottomActionBar {
             if let live, live.session.status != .COMPLETED, let next = live.nextRound {
@@ -111,6 +96,21 @@ struct RoundRecapView: View {
             Button("End Night", role: .destructive) { perform($busy, $error) { try await model.api.completeSession(sessionId) } }
         } message: { Text("Played rounds stay in history.") }
         .sheet(isPresented: $showEdit) { if let live { EditNightSheet(view: live) } }
+        .sheet(isPresented: $showShare) { shareSheet }
+        .fullScreenCover(isPresented: $showMap) {
+            if let s = summary {
+                NavigationStack {
+                    RouteReplayView(summary: s, routes: routes)
+                        .ignoresSafeArea(edges: .bottom)
+                        .navigationTitle("Round \(s.index)")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { CloseButton { showMap = false } } }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showPhoto) {
+            if let photo { PhotoViewer(image: photo, title: "Round \(summary?.index ?? 0) Catch") { showPhoto = false } }
+        }
         .errorAlert($error)
     }
 
@@ -136,167 +136,228 @@ struct RoundRecapView: View {
         if let claim = s.claims.first(where: { $0.status == "CONFIRMED" }), let path = claim.photoPath, let data = try? await model.api.photo(path: path) {
             photo = UIImage(data: data)
         }
+        // Context only: the recap stands on its own if the scorecard can't load.
+        night = (try? await model.api.analytics(sessionId)) ?? night
     }
 
-    // MARK: Sections
+    private var highlights: [NightHighlight] { summary.flatMap { s in night?.scorecard.highlights(in: s.index) } ?? [] }
 
-    private func header(_ s: RoundSummary, _ r: RoundResult) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 16) { roles(s, r) }
-                VStack(alignment: .leading, spacing: 4) { roles(s, r) }
+    // MARK: 1. What happened
+
+    private func hero(_ s: RoundSummary, _ r: RoundResult) -> some View {
+        let hideMarks = highlights.contains { $0.kind == .LONGEST_HIDE || $0.kind == .FASTEST_CATCH }
+        let rank = hideMarks ? nil : StatsText.hideRank(of: r.roundIndex, in: night?.scorecard.rounds ?? [], live: isLive)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(RecapText.headline(r))
+                .font(.largeTitle.bold())
+                .fontDesign(.rounded)
+                .monospacedDigit()
+                .accessibilityIdentifier("recap.outcome")
+            if let sub = RecapText.subline(r) {
+                Text(sub).font(.subheadline).foregroundStyle(.secondary)
             }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
-
-            switch r.outcome {
-            case "CAUGHT":
-                Text("Caught after \(Fmt.clock(Double(r.observedChaseSeconds)))")
-                    .font(.largeTitle.bold())
-                    .fontDesign(.rounded)
-                    .monospacedDigit()
-                    .accessibilityIdentifier("recap.outcome")
-                if r.seekMode == .RACE, let k = r.catchCreditTeams.first {
-                    Label("\(r.name(k)) made the catch", systemImage: "flag.checkered")
-                        .font(.headline)
-                        .foregroundStyle(Theme.crew(k))
+            VStack(alignment: .leading, spacing: 6) {
+                Label { Text("\(r.name(r.hidingTeam)) hid") } icon: {
+                    Image(systemName: Role.HIDING.symbol).foregroundStyle(Theme.crew(r.hidingTeam))
                 }
-                if r.resolvedByDispute {
-                    Text("Settled together after the round.").font(.footnote).foregroundStyle(.secondary)
+                Label { Text(RecapText.seekersLine(r)) } icon: {
+                    Image(systemName: Role.SEEKING.symbol).foregroundStyle((r.catchCreditTeams.first ?? r.seekingTeams.first).map(Theme.crew) ?? .secondary)
                 }
-            case "TIMED_OUT":
-                Text("Not caught — survived ≥ \(Fmt.clock(Double(r.observedChaseSeconds)))")
-                    .font(.title.bold())
-                    .fontDesign(.rounded)
-                    .accessibilityIdentifier("recap.outcome")
-            default:
-                Text("Round Aborted")
-                    .font(.title.bold())
-                    .accessibilityIdentifier("recap.outcome")
-                if let reason = r.abortedReason { Text(reason).font(.callout) }
+            }
+            .font(.headline)
+            if r.seekingTeams.count > 1 {
+                Text(r.seekMode == .RACE ? "Seekers raced: the crew that made the catch gets the credit." : "Seekers hunted together: the catch counts for both crews.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if !highlights.isEmpty || rank != nil {
+                FlowLayout(spacing: 6) {
+                    ForEach(highlights) { HighlightBadge(text: StatsText.badge($0.kind, live: isLive)) }
+                    if let rank { HighlightBadge(text: rank, symbol: "chart.bar.fill", tint: .secondary) }
+                }
+            }
+            if r.resolvedByDispute {
+                Text("Settled together after the round.").font(.footnote).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 6)
     }
 
-    @ViewBuilder private func roles(_ s: RoundSummary, _ r: RoundResult) -> some View {
-        Label { Text("\(r.name(r.hidingTeam)) hid") } icon: { Image(systemName: Role.HIDING.symbol).foregroundStyle(Theme.crew(r.hidingTeam)) }
-        Label { Text("\(r.seekersName) sought\(r.seekingTeams.count > 1 ? (r.seekMode == .RACE ? " (race)" : " (together)") : "")") } icon: {
-            Image(systemName: Role.SEEKING.symbol).foregroundStyle(r.seekingTeams.first.map(Theme.crew) ?? .secondary)
-        }
-    }
-
-    private func crewColor(_ s: RoundSummary, role: Role) -> Color {
-        role == .HIDING ? Theme.crew(s.hidingTeam) : (s.seekingTeams.first.map(Theme.crew) ?? .secondary)
-    }
-
-    /// Distances per crew, from each crew's best-covered phone. On foot and by car are never combined.
-    @ViewBuilder private func stats(_ s: RoundSummary, _ r: RoundResult) -> some View {
-        Section("Distances") {
-            if let h = r.crew(r.hidingTeam) {
-                LabeledContent("\(r.name(r.hidingTeam)) on foot", value: Fmt.distance(h.distanceTotalMeters, units: units))
-                LabeledContent("…during the chase", value: Fmt.distance(h.distanceChaseMeters, units: units))
-            }
-            ForEach(r.seekingTeams, id: \.self) { k in
-                LabeledContent("\(r.name(k)) by car", value: Fmt.distance(r.crew(k)?.distanceChaseMeters, units: units))
-            }
-        }
-        Section("Round") {
-            LabeledContent("Head start", value: Fmt.clock(Double(r.headStartSeconds)))
-            LabeledContent("Pauses", value: Fmt.clock(Double(r.totalPauseSeconds)))
-            LabeledContent("Round duration", value: Fmt.clock(Double(r.roundElapsedSeconds)))
-            LabeledContent("Pings released", value: "\(r.pingsReleased) of \(r.pingSlots)\(r.pingsMissing > 0 ? " (\(r.pingsMissing) missed)" : "")\(r.pingsDelayed > 0 ? " · \(r.pingsDelayed) late" : "")")
-            ForEach([r.hidingTeam] + r.seekingTeams, id: \.self) { k in
-                if let c = r.crew(k) {
-                    LabeledContent("\(r.name(k)) GPS", value: "\(Fmt.percent(c.gpsCoverageFraction)) · \(quality(c.routeQuality))")
-                }
-            }
-        }
-        .monospacedDigit()
-    }
-
-    private func quality(_ q: String) -> String {
-        switch q {
-        case "GOOD": "good GPS"
-        case "ESTIMATED": "estimated from the GPS available"
-        case "DELETED": "deleted"
-        default: "not enough GPS"
-        }
-    }
-
-    @ViewBuilder private func pings(_ s: RoundSummary) -> some View {
-        Section("Pings") {
-            ForEach(s.pings) { p in
-                HStack(spacing: 12) {
-                    Image(systemName: p.status == "RELEASED" ? "diamond.fill" : "location.slash.fill")
-                        .foregroundStyle(p.status == "RELEASED" ? AnyShapeStyle(crewColor(s, role: .HIDING)) : AnyShapeStyle(Theme.warning))
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Ping \(p.index) · \(Fmt.time(p.scheduledAt))")
-                        Text(p.status == "RELEASED" ? "Sample \(p.ageSeconds ?? 0)s old · ±\(Int(p.accuracyMeters ?? 0)) m\(p.delayed ? " · late" : "")" : "No GPS got through — not revealed")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .accessibilityElement(children: .combine)
-            }
-            if s.pings.isEmpty { Text("No pings were due.").foregroundStyle(.secondary) }
-        }
-    }
-
-    @ViewBuilder private func claims(_ s: RoundSummary) -> some View {
-        // Disputes are settled by the hiding crew and the claiming crew.
+    @ViewBuilder private func disputes(_ s: RoundSummary) -> some View {
+        // Disputes are settled by the hiding crew and the claiming crew; they need an answer, so they come first.
         let disputable = s.claims.filter { c in (c.status == "REJECTED" || c.status == "EXPIRED") && (s.myTeam == s.hidingTeam || s.myTeam == c.team) }
-        if !s.claims.isEmpty {
+        if !disputable.isEmpty {
             Section {
-                ForEach(s.claims) { c in
-                    LabeledContent {
-                        if let t = c.chaseSecondsAtClaim { Text(Fmt.clock(Double(t))).monospacedDigit() }
-                    } label: {
-                        Text("\(c.team.map { "\(s.teamNames[$0.rawValue] ?? $0.rawValue) · " } ?? "")\(Fmt.time(c.submittedAt)) · \(c.status.capitalized)")
-                        if let reason = c.rejectionReason { Text(reason) }
-                    }
-                }
                 ForEach(disputable) { c in
-                    HStack {
-                        Button("Accept \(Fmt.time(c.submittedAt)) Claim") { dispute(c, accept: true) }
-                        Spacer()
-                        Button("Keep Rejected") { dispute(c, accept: false) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(c.team.map { s.teamNames[$0.rawValue] ?? $0.colourName } ?? "A crew") claimed a catch\(c.chaseSecondsAtClaim.map { " at \(Fmt.clock(Double($0)))" } ?? "") · \(c.status == "EXPIRED" ? "no answer in time" : "rejected")")
+                            .font(.subheadline.weight(.semibold))
+                        if let reason = c.rejectionReason { Text(reason).font(.footnote).foregroundStyle(.secondary) }
+                        HStack {
+                            Button("Accept as the Catch") { dispute(c, accept: true) }
+                            Spacer()
+                            Button("Keep Rejected") { dispute(c, accept: false) }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .padding(.vertical, 4)
                 }
             } header: {
-                Text("Catch Claims")
+                Text("Settle a Claim")
             } footer: {
-                if !disputable.isEmpty {
-                    Text("The hiders and the claiming crew can both accept a claim as the catch.")
-                }
+                Text("The hiders and the claiming crew can both accept a claim as the catch.")
             }
         }
     }
 
-    private func timeline(_ s: RoundSummary) -> some View {
-        // The round itself: recaps from before 2026-10-23 also listed the lobby before it.
-        let events = s.timeline.filter { !RoundSummary.TimelineEvent.lobbyTypes.contains($0.type) && ($0.at ?? .distantFuture) >= (s.roundStartAt ?? .distantPast) }
+    // MARK: 2. The catch and the map
+
+    private func catchSection(_ s: RoundSummary, _ r: RoundResult, _ photo: UIImage) -> some View {
+        let claim = s.claims.first { $0.status == "CONFIRMED" }
+        let by = (claim?.team).map(r.name) ?? r.catchCreditTeams.map(r.name).formatted(.list(type: .and))
+        let caption = "\(by)\(claim?.chaseSecondsAtClaim.map { " · \(Fmt.clock(Double($0))) into the chase" } ?? "")"
         return Section {
-            DisclosureGroup("Timeline (\(events.count) events)") {
-                ForEach(events) { e in
-                    LabeledContent(e.label { k in s.teamNames[k.rawValue] ?? "Crew \(k.rawValue)" }, value: Fmt.time(e.at))
-                        .font(.subheadline)
-                        .monospacedDigit()
-                }
+            Button { showPhoto = true } label: {
+                // The frame sets the size; the photo fills it (a scaled-to-fill image would widen the row).
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 320)
+                    .overlay { Image(uiImage: photo).resizable().scaledToFill() }
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.mediaCorner, style: .continuous))
+                    .overlay(alignment: .bottomLeading) {
+                        Label(caption, systemImage: "camera.fill")
+                            .font(.footnote.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .glassSurface()
+                            .padding(10)
+                    }
             }
+            .buttonStyle(.plain)
+            .bareListRow()
+            .accessibilityLabel("Catch photo: \(caption)")
+            .accessibilityHint("Opens the photo full screen")
+        } header: {
+            Text("The Catch")
         }
     }
 
-    // MARK: Next round
+    private func mapSection(_ s: RoundSummary) -> some View {
+        Section {
+            // A static preview inside the scrolling list (so swipes scroll the page); full screen is interactive.
+            Button { showMap = true } label: {
+                RecapMap(summary: s, routes: routes, interactive: false)
+                    .frame(height: 280)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.mediaCorner, style: .continuous))
+                    .overlay(alignment: .topLeading) { RouteLegend(showSeekers: routes != nil).padding(10) }
+                    .overlay(alignment: .bottomTrailing) {
+                        Label("Replay", systemImage: "play.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                            .glassSurface()
+                            .padding(10)
+                    }
+            }
+            .buttonStyle(.plain)
+            .bareListRow()
+            .accessibilityLabel("Route map")
+            .accessibilityHint("Opens the map full screen, where you can replay the round")
+        } header: {
+            Text("The Chase")
+        } footer: {
+            Text(routesError ?? "Each crew’s route from its phone with the best GPS. Circles mark where crews started; the camera marks the catch.")
+        }
+    }
+
+    // MARK: 3. The numbers
+
+    private func numbers(_ r: RoundResult) -> some View {
+        let badge = { (kinds: [NightHighlight.Kind], team: TeamKey) in
+            highlights.first { kinds.contains($0.kind) && $0.teams.contains(team) }.map { StatsText.badge($0.kind, live: isLive) }
+        }
+        let hiders = r.crew(r.hidingTeam)
+        return Section("By the Numbers") {
+            StatGrid {
+                if r.outcome != "ABORTED" {
+                    StatTile(label: r.outcome == "CAUGHT" ? "Chase" : "Survived",
+                             value: (r.isRightCensored ? "≥ " : "") + Fmt.clock(Double(r.observedChaseSeconds)),
+                             detail: "After a \(Fmt.clock(Double(r.headStartSeconds))) head start",
+                             symbol: "stopwatch.fill", tint: Theme.crew(r.hidingTeam))
+                }
+                StatTile(label: "On foot", value: distanceText(hiders), detail: footDetail(r, hiders),
+                         symbol: "figure.walk", tint: Theme.crew(r.hidingTeam), badge: badge([.MOST_ON_FOOT, .LEAST_ON_FOOT], r.hidingTeam))
+                ForEach(r.seekingTeams) { k in
+                    StatTile(label: "By car", value: distanceText(r.crew(k)), detail: "\(r.name(k))\(qualityNote(r.crew(k)))",
+                             symbol: "car.fill", tint: Theme.crew(k), badge: badge([.MOST_DRIVING, .LEAST_DRIVING], k))
+                }
+                StatTile(label: "Pings", value: "\(r.pingsReleased) of \(r.pingSlots)", detail: pingDetail(r),
+                         symbol: "diamond.fill", tint: Theme.crew(r.hidingTeam))
+                if r.totalPauseSeconds > 0 {
+                    StatTile(label: "Paused", value: Fmt.clock(Double(r.totalPauseSeconds)), detail: "Not counted in the chase", symbol: "pause.circle.fill")
+                }
+                StatTile(label: "Start to finish", value: Fmt.clock(Double(r.roundElapsedSeconds)), detail: "Head start, chase and pauses", symbol: "clock")
+            }
+            .bareListRow()
+        }
+    }
+
+    private func distanceText(_ c: CrewRouteStats?) -> String {
+        RecapText.distance(c).map { Fmt.distance($0, units: units) } ?? "—"
+    }
+
+    private func qualityNote(_ c: CrewRouteStats?) -> String {
+        switch c?.routeQuality {
+        case "ESTIMATED": " · estimated, patchy GPS"
+        case "INSUFFICIENT": " · not enough GPS"
+        case nil: " · no GPS"
+        default: ""
+        }
+    }
+
+    private func footDetail(_ r: RoundResult, _ c: CrewRouteStats?) -> String {
+        let chase = RecapText.distance(c, chaseOnly: true).map { " · \(Fmt.distance($0, units: units)) in the chase" } ?? ""
+        return "\(r.name(r.hidingTeam))\(chase)\(qualityNote(c))"
+    }
+
+    private func pingDetail(_ r: RoundResult) -> String {
+        var parts: [String] = []
+        if r.pingsMissing > 0 { parts.append("\(r.pingsMissing) missed") }
+        if r.pingsDelayed > 0 { parts.append("\(r.pingsDelayed) late") }
+        if r.pingSlots == 0 { return "None were due" }
+        return parts.isEmpty ? "All on time" : parts.joined(separator: " · ")
+    }
+
+    // MARK: 4. Tonight and what's next
+
+    private func tonight(_ r: RoundResult) -> some View {
+        Section {
+            if let rounds = night?.scorecard.rounds, rounds.count > 1 {
+                let longest = rounds.filter { $0.outcome != "ABORTED" }.map(\.observedChaseSeconds).max() ?? 0
+                ForEach(rounds, id: \.roundId) { other in
+                    if other.roundIndex == r.roundIndex {
+                        RoundBarRow(round: other, longest: longest, highlighted: true)
+                    } else {
+                        NavigationLink { RoundRecapView(sessionId: sessionId, roundId: other.roundId) } label: {
+                            RoundBarRow(round: other, longest: longest)
+                        }
+                    }
+                }
+            }
+            NavigationLink { NightSummaryView(sessionId: sessionId) } label: {
+                Label("Night So Far", systemImage: "trophy")
+            }
+        } header: {
+            Text("Tonight")
+        }
+    }
 
     @ViewBuilder private func nextRoundSection(_ live: SessionViewDoc) -> some View {
         if live.session.status == .COMPLETED {
             Section {
                 NavigationLink { NightSummaryView(sessionId: sessionId) } label: {
-                    Label("Night Summary & Scorecard", systemImage: "trophy.fill")
+                    Label("The Night’s Results", systemImage: "trophy.fill")
                 }
             } header: {
                 Text("Night Over")
@@ -309,12 +370,26 @@ struct RoundRecapView: View {
                 .font(.headline)
                 Button("Someone Else Hides…") { showWhoHides = true }
                 Button("Crews & Rules…") { showEdit = true }
-                NavigationLink { NightSummaryView(sessionId: sessionId) } label: {
-                    Label("Night So Far", systemImage: "list.number")
-                }
                 Button("End the Night", role: .destructive) { confirmEndNight = true }
             } header: {
-                Text("Round \(next.index)")
+                Text("Up Next: Round \(next.index)")
+            }
+        }
+    }
+
+    // MARK: Sharing
+
+    @ViewBuilder private var shareSheet: some View {
+        if let s = summary, let r = s.result {
+            let date = (s.endedAt ?? s.roundStartAt)?.formatted(date: .abbreviated, time: .omitted) ?? ""
+            let marks = highlights
+            let routes = self.routes
+            let photo = r.outcome == "CAUGHT" ? self.photo : nil
+            let options = [ShareCardSheet.Option(id: "round", title: "Round")] + (photo == nil ? [] : [.init(id: "photo", title: "Catch Photo")])
+            ShareCardSheet(title: "Share Round \(r.roundIndex)", options: options) { option in
+                if option.id == "photo", let photo { return ShareCardRenderer.image(CatchShareCard(photo: photo, result: r, date: date)) }
+                let map = await RouteSnapshot.render(summary: s, routes: routes, size: CGSize(width: 316, height: 170))
+                return ShareCardRenderer.image(RoundShareCard(result: r, map: map, highlights: marks, units: units, date: date))
             }
         }
     }
@@ -332,78 +407,24 @@ struct RoundRecapView: View {
     }
 }
 
-/// Every crew's completed route (static polylines with markers). Solid = on foot,
-/// dashed = car, so the legend never relies on colour alone.
-struct RecapMap: View {
-    let summary: RoundSummary
-    let routes: RouteRecap?
-    var interactive = true
-
-    private var hidingTeam: TeamKey? { summary.hidingTeam }
+/// A photo full screen, on black, with Close.
+struct PhotoViewer: View {
+    let image: UIImage
+    let title: String
+    let close: () -> Void
 
     var body: some View {
-        Map(interactionModes: interactive ? .all : []) {
-            if let routes {
-                ForEach(Array(routes.teams.values), id: \.team) { team in
-                    let color = Theme.crew(team.team)
-                    ForEach(Array(team.segments.enumerated()), id: \.offset) { _, seg in
-                        if seg.points.count > 1 {
-                            MapPolyline(coordinates: seg.points.map(\.coordinate))
-                                .stroke(color, style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round, dash: team.role == .SEEKING ? [8, 6] : []))
-                        }
-                    }
-                    if let first = team.segments.first?.points.first {
-                        Annotation("\(summary.teamNames[team.team.rawValue] ?? "") start", coordinate: first.coordinate) {
-                            Image(systemName: "flag.fill")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.white)
-                                .padding(6)
-                                .background(color, in: Circle())
-                                .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                        }
-                    }
-                }
-                if let cp = routes.markers.claimPoint {
-                    Annotation("Catch", coordinate: cp.coordinate) {
-                        Image(systemName: "camera.fill")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(7)
-                            .background(Color.accentColor, in: Circle())
-                            .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                    }
-                }
-            }
-            ForEach(summary.pings.filter { $0.coordinate != nil }) { p in
-                Annotation("Ping \(p.index)", coordinate: p.coordinate!) {
-                    Image(systemName: "diamond.fill")
-                        .foregroundStyle(hidingTeam.map(Theme.crew) ?? .secondary)
-                        .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
-                }
-            }
-        }
-        .mapStyle(.standard(emphasis: .muted, pointsOfInterest: .excludingAll))
-        .overlay(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: 4) {
-                legend(dash: [], text: "Hiders on foot")
-                legend(dash: [5, 4], text: "Seekers by car")
-            }
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .padding(10)
-            .accessibilityElement(children: .combine)
-        }
-    }
-
-    private func legend(dash: [CGFloat], text: String) -> some View {
-        HStack(spacing: 6) {
-            Path { p in p.move(to: CGPoint(x: 0, y: 5)); p.addLine(to: CGPoint(x: 22, y: 5)) }
-                .stroke(.primary, style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: dash))
-                .frame(width: 22, height: 10)
-                .accessibilityHidden(true)
-            Text(text)
+        NavigationStack {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black.ignoresSafeArea())
+                .accessibilityLabel("Catch photo")
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { CloseButton(action: close) } }
         }
     }
 }

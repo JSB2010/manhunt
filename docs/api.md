@@ -117,7 +117,7 @@ Paths are relative to the base URL. The OpenAPI file has the request bodies and 
 |---|---|
 | `GET …/rounds/{rid}/summary` | Round recap: only after the round ends, only to its phones |
 | `GET …/rounds/{rid}/routes` | Per-crew routes, under the same conditions plus route-sharing consent |
-| `GET /v1/sessions/{id}/analytics` | Night scorecard with censoring and comparability flags |
+| `GET /v1/sessions/{id}/analytics` | Night scorecard with censoring and comparability flags, line-ups (`matchups`), crew-level `people` (with each person's `rounds` and distances), what changed before each round, and `highlights` (single-round records, ADR 0020) |
 | `GET /v1/analytics/people/{personId}` | Crew-attributed stats for a person, across nights I played |
 | `GET /v1/export/sessions/{file}` | CSV or JSON export. No GPS |
 

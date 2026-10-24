@@ -23,7 +23,8 @@ Custom glass appears only where controls float over the **map, camera or photos*
 |---|---|
 | Game | Phase HUD, map banners, ping/health chips, location button, control group (options · Photo Catch · Home), paused card |
 | Photo catch | Retake / Submit and status, over the photo |
-| Recap | Expand button over the static map preview |
+| Recap | Replay button over the static map preview, the caption over the catch photo; full screen: the replay scrubber |
+| Night map | Round picker and caption panel over the map |
 | Lobby, consent, join, hider confirm, profile setup, round recap | Bottom action bar via `safeAreaBar` with the hard scroll-edge effect (no custom background) |
 | Everything else | None: system tab bar, toolbars, sheets, search |
 
@@ -74,6 +75,35 @@ Content-layer buttons use the standard `.borderedProminent` / `.bordered` styles
 - **Chips**: last ping ("Ping #2 · 41s ago", or why it's unavailable) and a single worst-first health summary that opens **Phone Status** (a medium sheet with the full detail) instead of a strip of six pills.
 - **Controls**: circular glass Options (menu) and Home, with the one prominent action between them: Photo Catch for seekers, or a sharing status for hiders.
 - **Pins**: diamond shape plus index number and a white outline for contrast; the latest is larger and labeled. Shape and number mean color is never the only signal.
+- **Trail**: this phone's route this round only, in its crew colour, split where tracking had a gap, with a small start marker (ADR 0020).
+
+## Stats: round recap, the night, people ([ADR 0020](adr/0020-stats-story-first.md))
+
+**Story first, numbers second, plumbing last.** Every stats screen has three tiers:
+
+1. **Headline:** one sentence and one big number ("Caught after 12:34", "Sasha & Marco lasted longest hiding"), in large rounded type.
+2. **Highlights:** a few tiles or badges, each with what it means underneath ("After a 10:00 head start", "★ Longest hide so far").
+3. **Details:** one tap away (Round Details, a person's page, Crews, Export Data). Technical values (GPS coverage, ping fix age, timeline) live only there.
+
+Between rounds people are standing around for a few minutes, so the recap leads with the outcome and the catch photo, then the map, then the numbers, then tonight's rounds and what's next. After the night the page leads with the verdict and the highlights.
+
+| Component (`Features/Recap/`) | Use |
+|---|---|
+| `StatTile` in a `StatGrid` | One number per tile: label with a symbol in the crew's colour, value, one line of context, an optional highlight badge. Two columns, one at accessibility sizes. Cell background (`secondarySystemGroupedBackground`) on the grouped list |
+| `HighlightBadge` | A highlight a round or a number set (star), or where it ranks (chart symbol). Text always says it; the symbol is decorative |
+| `HighlightCard` | One of the night's highlights: what, value, crews (dot + names), round. Tappable to the round |
+| `RoundBarRow` | A round with a bar as long as its chase time (relative to the night's longest) in the hiding crew's colour; replaces the separate trend chart. Outcome is a symbol and text (camera, hourglass, ✕), never colour alone |
+| `RouteMarker` | Map markers: circles for starts (role symbol, or the round number on the night map), rounded squares for ends (flag, camera for the catch, hourglass for the time limit, ✕ for an abort). Shape tells start from end |
+| `PingDiamond` | A released ping on a finished round's map, numbered |
+| `RouteLegend` | Solid = on foot, dashed = by car (colour is the crew, so the line style carries the mode) |
+| `ShareCardSheet` + cards (`Features/Share/`) | Preview and share a round, catch-photo or night card: 4:5, 1080 × 1350, drawn dark |
+
+Rules:
+- **Every number says what it means.** A value never stands alone: "1.24 mi" sits under "On foot" with "Sasha & Marco · 0.8 mi in the chase" beneath.
+- **A highlight is a single-round fact,** credited to that round's crews. Badges say "so far" between rounds and "of the night" after. The night's verdict is the only thing that names a stronger crew, and when it can't it says "No overall result" calmly, with the reasons, not a warning.
+- **People are crew-level.** Labels say "their crew", "with their crews"; footers say "Crew results, not individual performance".
+- **Labels on crew colours** use `Theme.onCrew(_:)`: white, except black on the dark-mode green (white is under 3:1 there).
+- **Maps never join rounds.** The game map draws this round's trail only, split at gaps, with a start marker; the night map draws each round on its own.
 
 ## Live Activity (Lock Screen, Dynamic Island, Smart Stack, CarPlay)
 

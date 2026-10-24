@@ -85,6 +85,11 @@ describe('seeker (also host) cannot see the hider during the round', () => {
       const r = await h.call(host, 'GET', url);
       expect(containsHiderCoords(r.body)).toBe(false);
     }
+    // Highlights and each person's rounds (ADR 0020) come from finished rounds only: the active round is in neither.
+    const an = await h.call(host, 'GET', `/v1/sessions/${sid}/analytics`);
+    expect(an.status).toBe(200);
+    expect(an.body.scorecard.highlights).toEqual([]);
+    expect(an.body.scorecard.people.flatMap((p: { rounds: unknown[] }) => p.rounds)).toEqual([]);
   });
 
   it('Live Activity tokens: outsiders cannot register or remove them; bodies are strict; tokens are never served back', async () => {

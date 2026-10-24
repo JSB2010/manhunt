@@ -35,6 +35,7 @@
 | Live Activity push tokens | Server-only `liveActivities` docs (12 h TTL), keyed by the caller's uid; registration only for a round in progress the phone plays; removed on revoke, delete-my-data and account deletion | `integration/liveActivities.test.ts`, `security/firestore-rules.test.ts`, `security/authorization.test.ts` |
 | EXIF GPS in photos | Client re-renders JPEG; server strips APP1–APP15 + COM segments | integration test checks GPS/serial strings removed |
 | CSV injection in exports | Leading `= + - @` neutralized | code |
+| Stats or share cards leaking a round in progress | Highlights and each person's rounds are computed from finished rounds only, with no coordinates; the night map loads each round's routes endpoint (finished, round phone, consent); share cards are drawn on the phone only when someone taps Share, from post-round data it already shows, and nothing is uploaded (ADR 0020). Once shared, a card with a map shows that round's routes as a picture, like a screenshot | `unit/scoring.test.ts` (no coordinates), `security/authorization.test.ts` (active round absent from highlights and people's rounds) |
 
 ## Abuse limits
 Per-uid token buckets per function instance (`backend/src/api/http.ts`):

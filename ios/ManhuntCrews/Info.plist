@@ -33,6 +33,8 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Take a catch photo for the hiding crew to confirm; location metadata is removed.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save a round or night card you chose to share to your photo library.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Development builds connect to the Manhunt Crews server running on your local network.</string>
 	<key>NSSupportsLiveActivities</key>

@@ -142,22 +142,34 @@ struct PersonDetailView: View {
                 } footer: { Text("Whoever saved this person must approve.") }
             }
             if let a = stats?.analytics {
+                // Headline numbers as tiles (ADR 0020); every one is the crew's, labelled so.
                 Section {
-                    LabeledContent("Nights played", value: "\(a.sessionsPlayed)")
-                    LabeledContent("Rounds their crew hid", value: "\(a.roundsCrewHid)")
-                    LabeledContent("Crew survival (avg)", value: a.crewHideSurvival.averageSeconds.map { (a.crewHideSurvival.includesCensored ? "≥" : "") + Fmt.clock(Double($0)) } ?? "—")
-                    LabeledContent("Rounds their crew sought", value: "\(a.roundsCrewSought)")
-                    LabeledContent("Crew time to find (avg)", value: a.crewSeekCapture.averageSeconds.map { Fmt.clock(Double($0)) } ?? "—")
-                    LabeledContent("Paired nights", value: "\(a.pairedNights.stronger) stronger · \(a.pairedNights.weaker) weaker · \(a.pairedNights.provisional + a.pairedNights.insufficient) provisional")
-                    if let op = a.operatorRounds { LabeledContent("Rounds as phone operator", value: "\(op)") }
-                } header: { Text("Crew Stats (Team Level)") } footer: { Text(a.sampleNote) }
+                    StatGrid {
+                        StatTile(label: "Nights", value: "\(a.sessionsPlayed)", detail: "\(a.roundsCrewHid + a.roundsCrewSought) rounds played", symbol: "moon.stars.fill")
+                        StatTile(label: "Hiding", value: a.crewHideSurvival.averageSeconds.map { (a.crewHideSurvival.includesCensored ? "≥ " : "") + Fmt.clock(Double($0)) } ?? "—",
+                                 detail: "Crew’s average over \(a.roundsCrewHid) \(a.roundsCrewHid == 1 ? "round" : "rounds")\(a.crewHideSurvival.censored > 0 ? ", \(a.crewHideSurvival.censored) never caught" : "")",
+                                 symbol: Role.HIDING.symbol)
+                        StatTile(label: "Seeking", value: a.crewSeekCapture.averageSeconds.map { Fmt.clock(Double($0)) } ?? "—",
+                                 detail: "Crew’s average time to a catch, over \(a.roundsCrewSought) \(a.roundsCrewSought == 1 ? "round" : "rounds")",
+                                 symbol: Role.SEEKING.symbol)
+                        let compared = a.pairedNights.stronger + a.pairedNights.weaker + a.pairedNights.tied
+                        let unfair = a.pairedNights.provisional + a.pairedNights.insufficient
+                        StatTile(label: "Lasted longest", value: compared == 0 ? "—" : "\(a.pairedNights.stronger) of \(compared)",
+                                 detail: "Fairly compared nights their crew lasted longest hiding\(unfair > 0 ? "; \(unfair) couldn’t be compared" : "")",
+                                 symbol: "medal.fill")
+                    }
+                    .bareListRow()
+                    if let op = a.operatorRounds { LabeledContent("Rounds carrying a phone", value: "\(op)") }
+                } header: { Text("With Their Crews") } footer: { Text(a.sampleNote) }
                 if !a.compositions.isEmpty {
-                    Section("Crew Compositions") {
+                    Section("Crews They Played In") {
                         ForEach(a.compositions) { c in
                             VStack(alignment: .leading) {
-                                Text(c.members.map(\.displayName).joined(separator: ", ")).font(.callout)
-                                Text("\(c.rounds) rounds · hid \(c.hideRounds)× · avg \(c.hideAverageSeconds.map { Fmt.clock(Double($0)) } ?? "—")").font(.caption).foregroundStyle(.secondary)
+                                Text(c.members.map(\.displayName).formatted(.list(type: .and))).font(.callout)
+                                Text("\(c.rounds) \(c.rounds == 1 ? "round" : "rounds") · hid \(c.hideRounds)×\(c.hideAverageSeconds.map { " · lasted \(c.censoredHideRounds > 0 ? "≥ " : "")\(Fmt.clock(Double($0))) on average" } ?? "")")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
+                            .accessibilityElement(children: .combine)
                         }
                     }
                 }

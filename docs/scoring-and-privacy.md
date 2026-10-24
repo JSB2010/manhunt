@@ -20,9 +20,11 @@ A stronger hiding crew is named only when the comparison is **COMPARABLE**: ever
 
 Crews change during a night, so the scorecard also has (ADR 0019):
 * `matchups`: rounds grouped by the same crews (each crew a set of people, whatever its colour) under the same rules fingerprint. Each matchup has its own comparison with the tests above. The per-crew totals of a matchup include distances from each round's best-covered phone.
-* `people`: per person, rounds their crew hid and sought, their crew's average hiding time over the rounds they hid, and the catches credited to their crew while they sought. These are crew-level results, labelled as such.
+* `people`: per person, rounds their crew hid and sought, their crew's average hiding time over the rounds they hid, and the catches credited to their crew while they sought. Also (ADR 0020) `rounds`, each round they played as their crew played it (role, outcome, chase time, whether the catch was credited to their crew, the crew's distance), and `footMeters` / `driveMeters`, their crews' distances over the rounds they hid and sought (rounds with usable GPS only). These are crew-level results, labelled as such: a crew's distance is its best-covered phone's, so there is no per-person distance.
 * `changes`: before each round, who joined, left (or sat out) or moved crews, and which rules changed.
 * The per-colour `teams` totals and the night-level `comparison` stay for older apps and exports.
+
+Highlights (`scorecard.highlights`, `nightHighlights`, ADR 0020) are single-round facts: the longest hide, the fastest catch, and the most and least ground covered on foot (the hiding crew, head start + chase) and by car (one seeking crew, chase). Each names its round and the crews that played it, the credited crews for a catch. Aborted rounds never count; a timed-out hide counts as at least its cap and is flagged `censored`; distances with `INSUFFICIENT` GPS are left out and `ESTIMATED` ones are flagged. Each needs two rounds to compare, a "least" needs a value below the "most", and ties go to the earlier round. A highlight is a record of one round, never a round winner or a ranking of crews over the night: the comparison above is the only thing that names a stronger crew.
 
 Timed-out rounds are recorded as `observed ≥ cap, outcome TIMED_OUT, isRightCensored`, never as a catch at the cap.
 

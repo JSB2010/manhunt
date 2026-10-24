@@ -56,7 +56,7 @@ The domain decides and the services persist. A transition is a pure function `(r
 | Area | Files | Responsibility |
 |---|---|---|
 | App | `App/AppModel.swift`, `RootView.swift`, `AppEnvironment.swift` | Root state: auth, the open night's live view, listener and reconcile, tracking against the server phase. Tabs: Play, History, Friends, People. Build config from xcconfig |
-| Features | `Features/<area>/` | Screens: Auth, Home, SessionSetup, Lobby, Game, Capture, Recap, History, FriendsGroups, Settings. `Lobby/SessionContainerView` routes the open night by **server** phase |
+| Features | `Features/<area>/` | Screens: Auth, Home, SessionSetup, Lobby, Game, Capture, Recap (round recap, round details, the night, night map, stats components), Share (share cards), History, FriendsGroups, Settings. `Lobby/SessionContainerView` routes the open night by **server** phase |
 | API | `Services/API/APIClient.swift`, `Endpoints.swift` | Typed REST client: retries with jitter, honours `Retry-After`, gzip for large bodies, conditional GET |
 | Auth | `Services/Auth/AuthService.swift`, `TokenBroker.swift` | Firebase Auth (email/password; Apple when enabled); single-flight token refresh judged on server time |
 | Location | `Services/Location/LocationTrackingCoordinator.swift`, `SampleFilter.swift` | Background GPS with `CLLocationUpdate.liveUpdates` + `CLBackgroundActivitySession` / `CLServiceSession` (ADR 0006), the cadence filter, adaptive uploads |
