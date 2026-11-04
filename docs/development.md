@@ -22,7 +22,7 @@ git clone <repo> manhunt && cd manhunt
 cd backend && npm ci && cd ..
 ```
 
-For iOS, open `ios/ManhuntCrews.xcodeproj`. Swift packages (Firebase 12.x) resolve on first open. Nothing else is needed for the simulator.
+For iOS, open `ios/ManhuntCrews.xcodeproj`. Swift packages (Firebase 13.x) resolve on first open. Nothing else is needed for the simulator.
 
 ## Run the local stack
 
