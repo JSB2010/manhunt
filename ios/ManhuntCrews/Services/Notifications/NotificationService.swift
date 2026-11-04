@@ -94,12 +94,14 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, Mes
 
     /// Pushes carry the night's id (never coordinates). A phone that missed the round's start —
     /// in a pocket since the last round — starts tracking as soon as it's tapped.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    /// Stays on the main actor: Swift calls the system's completion handler where this returns, and
+    /// UIKit aborts if that's off the main thread with the app in the background or closed.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         guard let sid = response.notification.request.content.userInfo["sessionId"] as? String, !sid.isEmpty else { return }
-        await MainActor.run { self.onOpenSession?(sid) }
+        onOpenSession?(sid)
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         // Local deadline nudges are for a phone in a pocket; the open app already shows the timers.
         if notification.request.identifier.hasPrefix("mh.") { return [] }
         return [.banner, .sound]

@@ -6,7 +6,7 @@ import UIKit
 enum DeepLink: Equatable {
     case join(code: String)
     case friend(token: String)
-    /// A round's Live Activity was tapped: open that night's game screen.
+    /// A round's Live Activity or a notification was tapped: open that night's game screen.
     case round(sessionId: String)
 
     init?(url: URL) {
@@ -84,10 +84,7 @@ final class AppModel {
         location.attach(api: client)
         location.onReconnect = { [weak self] in Task { await self?.reconcile(force: true) } }
         notifications.attach(api: client)
-        notifications.onOpenSession = { [weak self] sid in
-            guard let self, self.auth.uid != nil, self.activeSessionId != sid else { return }
-            self.openSession(sid)
-        }
+        notifications.onOpenSession = { [weak self] sid in self?.open(.round(sessionId: sid)) }
         if firebaseError == nil { auth.start() }
         // Tokens expire while the app is suspended; refresh once on return, before the screen's requests pile in.
         foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
@@ -299,11 +296,16 @@ final class AppModel {
 
     func handle(url: URL) {
         guard let link = DeepLink(url: url) else { return }
+        open(link)
+    }
+
+    private func open(_ link: DeepLink) {
         if case let .round(sid) = link, auth.uid != nil {
-            // From a Live Activity: straight to that night's game screen.
+            // From a Live Activity or a notification: straight to that night's game screen.
             if activeSessionId != sid { openSession(sid) }
             return
         }
+        // Signed out, or the tap launched the app and Auth hasn't reported yet: Home opens it once signed in.
         pendingDeepLink = link
     }
 
