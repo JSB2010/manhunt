@@ -58,6 +58,11 @@ Effective limits scale with instance count, which is acceptable for a friends-on
 ## Device security
 Firebase Auth tokens live in the Keychain (SDK default). The offline GPS queue and unsent photos are AES-GCM encrypted with a `ThisDeviceOnly` Keychain key and written with `completeUntilFirstUserAuthentication` protection (required so background location writes work while locked). Everything is purged on logout and account deletion. Firestore cache is memory-only.
 
+## Transport
+The app's API calls, Auth and Messaging use `URLSession` and the operating system's trust store. The Firestore listener doesn't: its gRPC channel verifies servers against a root certificate bundle compiled into the SDK, so neither an OS update nor a server change can repair that bundle, only a new app build. The channel carries the phone's Firebase ID token and its own sanitized view. A forged certificate would expose both to someone on the network path, and the token works against the API until it expires, but neither reveals anything `views.ts` withholds from that phone.
+
+The minimum is `firebase-ios-sdk` 12.19.3, set in `project.pbxproj` so the resolver can't pick an older version. Earlier versions trust `emSign ECC Root CA - G3` and `AAA Certificate Services`, the roots above the eMudhra intermediate keys compromised in October 2026. [test-matrix.md](test-matrix.md) records the check. `emSign Root CA - G1` stays in the bundle: it isn't above those keys, but the Chrome Root Program is still reviewing eMudhra's remaining roots, so its removal would mean another SDK update.
+
 ## Incident response
 `POST /v1/sessions/{id}/revoke` (organizer): invalidates invites, deletes all views, deactivates memberships (rules then deny), ends every Live Activity and removes its registrations, and marks the session revoked. The audit event is kept, without coordinates. Account deletion and per-night "delete my data" remove raw points, route polylines, released pins of the deleting hider, track archives and photos.
 
@@ -65,3 +70,4 @@ Firebase Auth tokens live in the Keychain (SDK default). The offline GPS queue a
 * Operators control their own GPS; a hider can fake location on their own phone. The app guarantees *scheduling and access control*, not truthful GPS.
 * A hider force-quitting the app stops tracking. The other crews see that crew's phones as stopped or without signal. If no hider phone has a fix, a ping waits (ADR 0015) and, if the next deadline arrives first, is closed as `NO_FRESH_FIX`.
 * Rate limiting is per instance, not global.
+* The app has no minimum-version gate. An installed build keeps its SDK's root bundle until the player installs a newer one, so a trust-store fix reaches a phone only when that build is replaced or the old one is expired in App Store Connect.
